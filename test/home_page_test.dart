@@ -1,407 +1,176 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:fqapp/models/media_item.dart';
+import 'package:fqapp/models/curated_book.dart';
+import 'package:fqapp/pages/curated_book_page.dart';
 import 'package:fqapp/pages/home_page.dart';
-import 'package:fqapp/pages/home_provider.dart';
-import 'package:fqapp/services/api_client.dart';
-import 'package:fqapp/widgets/home/home_design.dart';
-import 'package:fqapp/widgets/home/home_tab_bar.dart';
+import 'package:fqapp/pages/search_page.dart';
 
+/// 新首页（编辑部书单）的测试。
+///
+/// 旧首页测试针对的是上游网文推荐流（tab 栏 / 网格 / 分页加载），
+/// 那套 UI 已被整页替换，这里按新结构重写：分类推荐、今日荐读、
+/// 点书进详情、详情里「在书城搜索」仍走得通。
 void main() {
-  testWidgets(
-    'novel and audio tabs show the matching feed after insertion',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(320, 850));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
-      MediaItem item(String label) => MediaItem(
-        id: label,
-        title: '$label 作品',
-        cover: '',
-        author: '',
-        badge: '',
-        ep: '',
-        kind: HomeNotifier.tabKinds[label]!,
-      );
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            homeProvider.overrideWith(
-              () => HomeNotifier(
-                homepageLoader:
-                    ({
-                      int tabType = 2,
-                      int offset = 0,
-                      String? sessionId,
-                    }) async => HomepagePage(
-                      items: [
-                        item(
-                          HomeNotifier.tabTypes.entries
-                              .firstWhere((entry) => entry.value == tabType)
-                              .key,
-                        ),
-                      ],
-                      nextOffset: null,
-                      sessionId: null,
-                    ),
-                searchLoader: (query, {int page = 1}) async => [
-                  SearchTab(title: query, items: [item(query)], hasMore: false),
-                ],
-              ),
-            ),
-          ],
-          child: const MaterialApp(home: HomePage()),
-        ),
-      );
-      await tester.pumpAndSettle();
-      // 【青茄重构】首页分类删除 短剧/漫剧/漫画 后仅剩 推荐/小说/听书，
-      // 这里验证 小说/听书 两个分类 tab 展示各自类型的内容。
-      for (final label in ['小说', '听书']) {
-        final index = homeCategories.indexWhere((c) => c.label == label);
-        final tab = find.byKey(ValueKey('home_category_$index'));
-        await tester.ensureVisible(tab);
-        await tester.pumpAndSettle();
-        await tester.tap(tab);
-        await tester.pumpAndSettle();
-        expect(find.text('$label 作品'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      }
-    },
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  CuratedCategory category(String key, String label) => CuratedCategory(
+    key: key,
+    label: label,
+    desc: '$label 的说明',
+    gradient: const [Color(0xFF2FA98C), Color(0xFF1F7F69)],
   );
 
-  for (final scale in [1.0, 1.8]) {
-    testWidgets('search hint fits a narrow phone at text scale $scale', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(const Size(320, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            homeProvider.overrideWith(
-              () => HomeNotifier(
-                homepageLoader:
-                    ({
-                      int tabType = 2,
-                      int offset = 0,
-                      String? sessionId,
-                    }) async => HomepagePage(
-                      items: [],
-                      nextOffset: null,
-                      sessionId: null,
-                    ),
-                searchLoader: (query, {int page = 1}) async => [],
-              ),
-            ),
-          ],
-          child: MaterialApp(
-            builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(textScaler: TextScaler.linear(scale)),
-              child: child!,
-            ),
-            home: const HomePage(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final hint = find.text('搜索你想看的故事');
-      expect(hint, findsOneWidget);
-      expect(
-        tester.getRect(hint).right,
-        lessThanOrEqualTo(
-          tester.getRect(find.byIcon(LucideIcons.refresh_ccw)).left,
-        ),
-      );
-      expect(tester.takeException(), isNull);
+  CuratedBook book(
+    String id,
+    String title,
+    String categoryKey, {
+    String age = '12+',
+  }) => CuratedBook(
+    id: id,
+    title: title,
+    author: '作者$id',
+    category: categoryKey,
+    blurb: '$title 的一句话荐语。',
+    tags: const ['经典'],
+    age: age,
+  );
+
+  final catalog = CuratedCatalog(
+    categories: [
+      category('classic', '古典名著'),
+      category('science', '科普百科'),
+    ],
+    books: [
+      book('a', '西游记', 'classic'),
+      book('b', '水浒传', 'classic', age: '15+'),
+      book('c', '时间简史', 'science', age: '15+'),
+    ],
+  );
+
+  Widget app(Widget child) => MaterialApp(home: child);
+
+  testWidgets('首页展示今日荐读、分类条与分类书单', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('青茄 · 青少年书房'), findsOneWidget);
+    expect(find.byKey(const Key('home-today-pick')), findsOneWidget);
+    expect(find.byKey(const Key('home-category-bar')), findsOneWidget);
+    // 两个分类标题都在（分类区按顺序渲染）
+    expect(find.text('古典名著'), findsWidgets);
+    expect(find.text('科普百科'), findsWidgets);
+    expect(find.byKey(const Key('home-search-button')), findsOneWidget);
+  });
+
+  testWidgets('点分类只显示该分类的书', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-category-science')));
+    await tester.pumpAndSettle();
+
+    // 分类说明 + 该分类书目；其它分类的书不再出现
+    expect(find.text('科普百科 的说明'), findsOneWidget);
+    expect(find.text('时间简史'), findsWidgets);
+    expect(find.text('西游记'), findsNothing);
+  });
+
+  testWidgets('点书进详情，详情可跳书城搜索', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CuratedBookPage), findsOneWidget);
+    expect(find.byKey(const Key('curated-search-button')), findsOneWidget);
+    // 详情页说明「不内置正文，走搜索」
+    expect(find.textContaining('不内置正文'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('curated-search-button')));
+    // 搜索页自带加载态动画，pumpAndSettle 会等不到静止
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SearchPage), findsOneWidget);
+  });
+
+  testWidgets('搜索按钮打开搜索页', (tester) async {
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-search-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SearchPage), findsOneWidget);
+  });
+
+  testWidgets('窄屏 + 大字不溢出', (tester) async {
+    tester.view.physicalSize = const Size(720, 1280);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(1.8)),
+        child: app(HomePage(catalog: catalog)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  group('书单数据', () {
+    test('今日荐读同一天稳定、跨天轮换', () {
+      final day = DateTime(2026, 10, 19);
+      final first = catalog.pickOfDay(now: day);
+      final again = catalog.pickOfDay(now: day.add(const Duration(hours: 6)));
+      expect(first!.id, again!.id);
+      expect(catalog.pickOfDay(now: day.add(const Duration(days: 1))), isNotNull);
+      expect(catalog.books, hasLength(3));
     });
-  }
 
-  testWidgets('a long homepage error can be scrolled to retry successfully', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(320, 600));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
-    final message = List.filled(60, '服务暂时不可用，请稍后重试。').join();
-    var failing = true;
-    var homepageRequests = 0;
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          homeProvider.overrideWith(
-            () => HomeNotifier(
-              homepageLoader:
-                  ({int tabType = 2, int offset = 0, String? sessionId}) async {
-                    // Count the novel stream only: the combined feed also asks
-                    // the manju stream (24) for its manju group, which is not
-                    // what this retry assertion is about.
-                    if (tabType == 2) homepageRequests++;
-                    if (failing) throw ApiException(message);
-                    return const HomepagePage(
-                      items: [],
-                      nextOffset: null,
-                      sessionId: null,
-                    );
-                  },
-              searchLoader: (query, {int page = 1}) async {
-                if (failing) throw ApiException(message);
-                return [];
-              },
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: const TextScaler.linear(1.8)),
-            child: child!,
-          ),
-          home: const HomePage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text(message), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    final scrollable = find.descendant(
-      of: find.byType(SingleChildScrollView),
-      matching: find.byType(Scrollable),
-    );
-    expect(
-      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
-      greaterThan(0),
-    );
-    expect(find.text('重试').hitTestable(), findsNothing);
-    await tester.scrollUntilVisible(
-      find.text('重试'),
-      400,
-      scrollable: scrollable,
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('重试').hitTestable(), findsOneWidget);
+    test('按分类取书与按 key 找分类', () {
+      expect(catalog.booksOf('classic').map((b) => b.id), ['a', 'b']);
+      expect(catalog.categoryOf('science')!.label, '科普百科');
+      expect(catalog.categoryOf('missing'), isNull);
+    });
 
-    failing = false;
-    await tester.tap(find.text('重试'));
-    await tester.pumpAndSettle();
-    expect(homepageRequests, 2);
-    expect(find.text('暂无内容'), findsOneWidget);
-    expect(find.text(message), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
+    test('搜索关键词缺省用书名', () {
+      expect(book('x', '论语', 'classic').keyword, '论语');
+      const withKeyword = CuratedBook(
+        id: 'y',
+        title: '史记',
+        author: '司马迁',
+        category: 'classic',
+        blurb: '',
+        tags: [],
+        age: '15+',
+        searchKeyword: '史记 司马迁',
+      );
+      expect(withKeyword.keyword, '史记 司马迁');
+    });
 
-  testWidgets('two initial empty pages continue loading until items appear', (
-    tester,
-  ) async {
-    final offsets = <int>[];
-    final secondPage = Completer<HomepagePage>();
-    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          homeProvider.overrideWith(
-            () => HomeNotifier(
-              homepageLoader:
-                  ({int tabType = 2, int offset = 0, String? sessionId}) async {
-                    // Manju has its own stream (24) in the combined feed; keep
-                    // it out of this test's cursor tracking.
-                    if (tabType != 2) {
-                      return const HomepagePage(
-                        items: [],
-                        nextOffset: null,
-                        sessionId: null,
-                      );
-                    }
-                    offsets.add(offset);
-                    if (offset == 1) return secondPage.future;
-                    return HomepagePage(
-                      items: [
-                        if (offset == 2)
-                          MediaItem(
-                            id: 'later-book',
-                            title: '后续小说',
-                            cover: '',
-                            author: '',
-                            badge: '',
-                            ep: '',
-                            kind: 'book',
-                          ),
-                      ],
-                      nextOffset: offset == 0 ? 1 : null,
-                      sessionId: 'session',
-                    );
-                  },
-              searchLoader: (query, {int page = 1}) async => [],
-            ),
-          ),
-        ],
-        child: const MaterialApp(home: HomePage()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(offsets, [0, 1]);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-
-    secondPage.complete(
-      HomepagePage(items: [], nextOffset: 2, sessionId: 'session'),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(offsets, [0, 1]);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pumpAndSettle();
-    expect(offsets, [0, 1, 2]);
-    expect(find.text('后续小说'), findsOneWidget);
-    expect(find.text('暂无内容'), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('short fast pages continue loading without a scroll event', (
-    tester,
-  ) async {
-    final offsets = <int>[];
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          homeProvider.overrideWith(
-            () => HomeNotifier(
-              homepageLoader:
-                  ({int tabType = 2, int offset = 0, String? sessionId}) async {
-                    // The combined feed also reads the manju stream (24) for its
-                    // manju group; keep it empty so this test tracks the novel
-                    // stream's cursor only.
-                    if (tabType != 2) {
-                      return const HomepagePage(
-                        items: [],
-                        nextOffset: null,
-                        sessionId: null,
-                      );
-                    }
-                    offsets.add(offset);
-                    return HomepagePage(
-                      items: [
-                        MediaItem(
-                          id: '$offset',
-                          title: '小说 $offset',
-                          cover: '',
-                          author: '',
-                          badge: '',
-                          ep: '',
-                          kind: 'book',
-                        ),
-                      ],
-                      nextOffset: offset < 3 ? offset + 1 : null,
-                      sessionId: 'session',
-                    );
-                  },
-              searchLoader: (query, {int page = 1}) async => const [],
-            ),
-          ),
-        ],
-        child: const MaterialApp(home: HomePage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-    for (var tick = 0; tick < 5; tick++) {
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pumpAndSettle();
-    }
-    expect(offsets, [0, 1, 2, 3]);
-    // The hero and featured card push the grid below the fold, so scroll the
-    // feed until the lazily-built card enters the viewport. The tab strip is
-    // a horizontal Scrollable too, so match the vertical feed by axis.
-    final feedScrollable = find.byWidgetPredicate(
-      (widget) =>
-          widget is Scrollable && widget.axisDirection == AxisDirection.down,
-    );
-    await tester.scrollUntilVisible(
-      find.text('小说 3'),
-      300,
-      scrollable: feedScrollable,
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('小说 3'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the home tab bar follows theme changes from HomePage', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(400, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
-    final mode = ValueNotifier(ThemeMode.light);
-    addTearDown(mode.dispose);
-    await tester.pumpWidget(
-      ValueListenableBuilder<ThemeMode>(
-        valueListenable: mode,
-        builder: (context, themeMode, _) => ProviderScope(
-          overrides: [
-            homeProvider.overrideWith(
-              () => HomeNotifier(
-                homepageLoader:
-                    ({
-                      int tabType = 2,
-                      int offset = 0,
-                      String? sessionId,
-                    }) async => HomepagePage(
-                      items: [
-                        MediaItem(
-                          id: '1',
-                          title: '小说 1',
-                          cover: '',
-                          author: '',
-                          badge: '',
-                          ep: '',
-                          kind: 'book',
-                        ),
-                      ],
-                      nextOffset: null,
-                      sessionId: null,
-                    ),
-                searchLoader: (query, {int page = 1}) async => const [],
-              ),
-            ),
-          ],
-          child: MaterialApp(
-            theme: ThemeData(brightness: Brightness.light),
-            darkTheme: ThemeData(brightness: Brightness.dark),
-            themeMode: themeMode,
-            home: const HomePage(),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    Color canvasOf() {
-      final box = tester
-          .widgetList<DecoratedBox>(
-            find.ancestor(
-              of: find.byKey(const ValueKey('home_category_0')),
-              matching: find.byType(DecoratedBox),
-            ),
-          )
-          .first;
-      return (box.decoration as BoxDecoration).color!;
-    }
-
-    expect(canvasOf(), const HomePalette(false).canvas);
-    mode.value = ThemeMode.dark;
-    await tester.pumpAndSettle();
-    expect(canvasOf(), const HomePalette(true).canvas);
-    expect(tester.takeException(), isNull);
+    test('15+ 判定', () {
+      expect(book('m', '水浒传', 'classic', age: '15+').isMature, isTrue);
+      expect(book('n', '西游记', 'classic').isMature, isFalse);
+    });
   });
 }

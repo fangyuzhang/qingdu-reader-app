@@ -14,6 +14,7 @@ import 'pages/audio_page.dart';
 import 'pages/cached_books_page.dart';
 import 'pages/library_page.dart';
 import 'pages/mine_page.dart';
+import 'pages/notes_page.dart';
 import 'services/app_log.dart';
 import 'services/app_theme.dart';
 import 'services/audio_preferences.dart';
@@ -425,6 +426,13 @@ class _RootShellState extends State<RootShell> {
             selectedIcon: Icon(LucideIcons.library_big),
             label: '书架',
           ),
+          // 【青茄重构·新增】笔记升为主导航：批注/书摘是核心能力，
+          // 要能从任意位置一步到达（点条目回原文）。
+          NavigationDestination(
+            icon: Icon(LucideIcons.pen_line),
+            selectedIcon: Icon(LucideIcons.pen_line),
+            label: '笔记',
+          ),
           NavigationDestination(
             icon: Icon(LucideIcons.circle_user_round),
             selectedIcon: Icon(LucideIcons.circle_user_round),
@@ -450,6 +458,7 @@ class _RootShellState extends State<RootShell> {
             // 产品定位删除短剧后主导航为 首页/书架/我的 三 tab。
             // 空书架上的「去书城找书」切回首页 tab。
             LibraryPage(onBrowse: () => setState(() => _index = 0)),
+            const NotesPage(),
             const MinePage(),
           ],
         ),

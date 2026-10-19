@@ -135,7 +135,9 @@ class ReaderPreferences {
     this.instantSwipeTurn = false,
     this.tapLeftTurnsNext = false,
     this.tapZones = defaultReaderTapZones,
-    this.showParagraphBubbles = true,
+    // 【青茄重构】段评来自上游 UGC，内容不可控：青少年版默认关闭，
+    // 需要时仍可在「排版」面板自行打开。
+    this.showParagraphBubbles = false,
   }) : readingInfoMode = showReadingInfo == false
            ? ReaderInfoMode.hidden
            : readingInfoMode;
@@ -313,7 +315,7 @@ class ReaderPreferences {
       tapLeftTurnsNext: _boolean(preferences, _tapLeftTurnsNextKey) ?? false,
       tapZones: _tapZones(preferences),
       showParagraphBubbles:
-          _boolean(preferences, _showParagraphBubblesKey) ?? true,
+          _boolean(preferences, _showParagraphBubblesKey) ?? false,
     ).normalized();
   }
 

@@ -23,7 +23,10 @@ void main() {
 
   setUp(() {
     calls.clear();
-    SharedPreferences.setMockInitialValues({});
+    // 【青茄重构】段评默认关闭（UGC 不可控），本文件的段评用例需显式开启。
+    SharedPreferences.setMockInitialValues({
+      'reader_show_paragraph_bubbles': true,
+    });
     TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
       AppLifecycleState.resumed,
     );

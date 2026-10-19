@@ -1,0 +1,427 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "key": "classic",
+      "label": "古典名著",
+      "desc": "中国人的精神底色，从故事里读懂人情与分寸",
+      "gradient": ["0xFF2FA98C", "0xFF1F7F69"]
+    },
+    {
+      "key": "world",
+      "label": "世界文学",
+      "desc": "跨越语言的共鸣，看见别人的生活也看见自己",
+      "gradient": ["0xFF4A7BC8", "0xFF2C5189"]
+    },
+    {
+      "key": "history",
+      "label": "历史人文",
+      "desc": "把今天放回长时段里，很多困惑会变得清楚",
+      "gradient": ["0xFFB07A3F", "0xFF7E521F"]
+    },
+    {
+      "key": "science",
+      "label": "科普百科",
+      "desc": "解释世界的运行方式，好奇心值得被认真对待",
+      "gradient": ["0xFF3D9AA8", "0xFF256C77"]
+    },
+    {
+      "key": "scifi",
+      "label": "科幻想象",
+      "desc": "在想象力里推演未来，也推演我们自己",
+      "gradient": ["0xFF6B5BC4", "0xFF44368C"]
+    },
+    {
+      "key": "growth",
+      "label": "成长青春",
+      "desc": "关于长大这件事，书里有人先走过一遍",
+      "gradient": ["0xFFE08A4B", "0xFFB3602A"]
+    },
+    {
+      "key": "poetry",
+      "label": "诗歌散文",
+      "desc": "把话说得更好听一点，也把心放得更稳一点",
+      "gradient": ["0xFFC85F82", "0xFF963A58"]
+    }
+  ],
+  "books": [
+    {
+      "id": "xiyouji",
+      "title": "西游记",
+      "author": "吴承恩",
+      "category": "classic",
+      "blurb": "十万八千里，其实是一次自我驯服。",
+      "tags": ["神魔", "成长", "幽默"],
+      "age": "12+"
+    },
+    {
+      "id": "sanguo",
+      "title": "三国演义",
+      "author": "罗贯中",
+      "category": "classic",
+      "blurb": "谋略与人心的教科书，读的是历史，想的是选择。",
+      "tags": ["历史", "谋略"],
+      "age": "12+"
+    },
+    {
+      "id": "shuihu",
+      "title": "水浒传",
+      "author": "施耐庵",
+      "category": "classic",
+      "blurb": "一百零八个人，一百零八种被逼上梁山的理由。",
+      "tags": ["群像", "反抗"],
+      "age": "15+"
+    },
+    {
+      "id": "hongloumeng",
+      "title": "红楼梦",
+      "author": "曹雪芹",
+      "category": "classic",
+      "blurb": "一个家族的兴衰，也是一群少年人的成长。",
+      "tags": ["世情", "诗词"],
+      "age": "15+"
+    },
+    {
+      "id": "lunyu",
+      "title": "论语",
+      "author": "孔子及其弟子",
+      "category": "classic",
+      "blurb": "两千多年前的对话，今天拿去用仍然合手。",
+      "tags": ["思想", "格言"],
+      "age": "12+"
+    },
+    {
+      "id": "shiji",
+      "title": "史记（选读）",
+      "author": "司马迁",
+      "category": "classic",
+      "blurb": "史家之绝唱，人物写得比小说还好看。",
+      "tags": ["史书", "人物"],
+      "age": "15+"
+    },
+    {
+      "id": "xiaowangzi",
+      "title": "小王子",
+      "author": "圣埃克苏佩里",
+      "category": "world",
+      "blurb": "所有大人最初都是小孩，只是很少有人记得。",
+      "tags": ["童话", "哲思"],
+      "age": "12+"
+    },
+    {
+      "id": "laorenyuhai",
+      "title": "老人与海",
+      "author": "海明威",
+      "category": "world",
+      "blurb": "人可以被毁灭，但不能被打败。",
+      "tags": ["意志", "短篇"],
+      "age": "12+"
+    },
+    {
+      "id": "aomanyupianjian",
+      "title": "傲慢与偏见",
+      "author": "简·奥斯汀",
+      "category": "world",
+      "blurb": "先入为主的判断，往往要付很久的学费。",
+      "tags": ["情感", "讽刺"],
+      "age": "15+"
+    },
+    {
+      "id": "wuduguer",
+      "title": "雾都孤儿",
+      "author": "狄更斯",
+      "category": "world",
+      "blurb": "一个孩子在最坏的环境里，守住了最好的部分。",
+      "tags": ["社会", "成长"],
+      "age": "15+"
+    },
+    {
+      "id": "jianai",
+      "title": "简·爱",
+      "author": "夏洛蒂·勃朗特",
+      "category": "world",
+      "blurb": "我们的精神是平等的，这句话值得说一百年。",
+      "tags": ["独立", "尊严"],
+      "age": "15+"
+    },
+    {
+      "id": "tongnian",
+      "title": "童年",
+      "author": "高尔基",
+      "category": "world",
+      "blurb": "苦难里长出的那点温柔，格外有力量。",
+      "tags": ["自传", "成长"],
+      "age": "12+"
+    },
+    {
+      "id": "wanli15",
+      "title": "万历十五年",
+      "author": "黄仁宇",
+      "category": "history",
+      "blurb": "看似平淡的一年，藏着王朝转向的全部线索。",
+      "tags": ["明史", "大历史"],
+      "age": "15+"
+    },
+    {
+      "id": "zhongguotongshi",
+      "title": "中国通史",
+      "author": "吕思勉",
+      "category": "history",
+      "blurb": "一部能当工具书反复翻的通史。",
+      "tags": ["通史", "工具"],
+      "age": "15+"
+    },
+    {
+      "id": "renleijianshi",
+      "title": "人类简史",
+      "author": "尤瓦尔·赫拉利",
+      "category": "history",
+      "blurb": "我们为什么相信共同的故事？答案比想象中惊人。",
+      "tags": ["人类学", "思辨"],
+      "age": "15+"
+    },
+    {
+      "id": "sudongpozhuan",
+      "title": "苏东坡传",
+      "author": "林语堂",
+      "category": "history",
+      "blurb": "一个人可以被贬谪很多次，但很难被击败。",
+      "tags": ["传记", "宋史"],
+      "age": "12+"
+    },
+    {
+      "id": "qiangpao",
+      "title": "枪炮、病菌与钢铁",
+      "author": "贾雷德·戴蒙德",
+      "category": "history",
+      "blurb": "为什么是某些文明征服了另一些？答案藏在地理里。",
+      "tags": ["文明", "地理"],
+      "age": "15+"
+    },
+    {
+      "id": "zhongguolidai",
+      "title": "中国历代政治得失",
+      "author": "钱穆",
+      "category": "history",
+      "blurb": "讲制度不讲故事，却让人越读越清醒。",
+      "tags": ["制度", "讲稿"],
+      "age": "15+"
+    },
+    {
+      "id": "shijianjianshi",
+      "title": "时间简史",
+      "author": "史蒂芬·霍金",
+      "category": "science",
+      "blurb": "宇宙有开端吗？这本书敢把问题问到底。",
+      "tags": ["物理", "宇宙"],
+      "age": "15+"
+    },
+    {
+      "id": "wanwujianshi",
+      "title": "万物简史",
+      "author": "比尔·布莱森",
+      "category": "science",
+      "blurb": "从大爆炸讲到你自己，科学原来可以这么好笑。",
+      "tags": ["通识", "趣味"],
+      "age": "12+"
+    },
+    {
+      "id": "zisidejiyin",
+      "title": "自私的基因",
+      "author": "理查德·道金斯",
+      "category": "science",
+      "blurb": "换一个视角看生命，很多行为突然说得通了。",
+      "tags": ["生物", "演化"],
+      "age": "15+"
+    },
+    {
+      "id": "congyidaowuqiongda",
+      "title": "从一到无穷大",
+      "author": "乔治·伽莫夫",
+      "category": "science",
+      "blurb": "把数学、物理、生物串成一条线讲给你听。",
+      "tags": ["数学", "启蒙"],
+      "age": "12+"
+    },
+    {
+      "id": "jijingdechuntian",
+      "title": "寂静的春天",
+      "author": "蕾切尔·卡逊",
+      "category": "science",
+      "blurb": "一本书改变了世界对环境的态度。",
+      "tags": ["生态", "环保"],
+      "age": "12+"
+    },
+    {
+      "id": "shuxuezhimei",
+      "title": "数学之美",
+      "author": "吴军",
+      "category": "science",
+      "blurb": "搜索引擎背后的数学，比公式本身有趣得多。",
+      "tags": ["数学", "应用"],
+      "age": "15+"
+    },
+    {
+      "id": "santi",
+      "title": "三体",
+      "author": "刘慈欣",
+      "category": "scifi",
+      "blurb": "在宇宙尺度上重新理解「文明」这两个字。",
+      "tags": ["硬科幻", "宇宙"],
+      "age": "15+"
+    },
+    {
+      "id": "qiuzhuangshandian",
+      "title": "球状闪电",
+      "author": "刘慈欣",
+      "category": "scifi",
+      "blurb": "一个少年亲眼看见的异象，追了一辈子。",
+      "tags": ["科幻", "悬疑"],
+      "age": "15+"
+    },
+    {
+      "id": "haidiliangwanli",
+      "title": "海底两万里",
+      "author": "儒勒·凡尔纳",
+      "category": "scifi",
+      "blurb": "一百多年前的想象，今天看仍然超前。",
+      "tags": ["冒险", "经典科幻"],
+      "age": "12+"
+    },
+    {
+      "id": "yinheximanyou",
+      "title": "银河系漫游指南",
+      "author": "道格拉斯·亚当斯",
+      "category": "scifi",
+      "blurb": "宇宙的终极答案很简单，难的是想清楚问题。",
+      "tags": ["幽默", "荒诞"],
+      "age": "12+"
+    },
+    {
+      "id": "huoxingjiuyuan",
+      "title": "火星救援",
+      "author": "安迪·威尔",
+      "category": "scifi",
+      "blurb": "把一个人扔在火星上，然后看他怎么算出一条活路。",
+      "tags": ["生存", "硬核"],
+      "age": "15+"
+    },
+    {
+      "id": "andeyouxi",
+      "title": "安德的游戏",
+      "author": "奥森·斯科特·卡德",
+      "category": "scifi",
+      "blurb": "被当作天才培养的孩子，也在追问自己在做什么。",
+      "tags": ["少年", "战争"],
+      "age": "15+"
+    },
+    {
+      "id": "chengnanjiushi",
+      "title": "城南旧事",
+      "author": "林海音",
+      "category": "growth",
+      "blurb": "童年结束得很安静，像一场没有告别的搬家。",
+      "tags": ["童年", "怀旧"],
+      "age": "12+"
+    },
+    {
+      "id": "caofangzi",
+      "title": "草房子",
+      "author": "曹文轩",
+      "category": "growth",
+      "blurb": "油麻地的六年，写尽了少年人的体面与倔强。",
+      "tags": ["校园", "乡土"],
+      "age": "12+"
+    },
+    {
+      "id": "pingfandeshijie",
+      "title": "平凡的世界",
+      "author": "路遥",
+      "category": "growth",
+      "blurb": "普通人也可以有不普通的一生，前提是不认输。",
+      "tags": ["奋斗", "现实"],
+      "age": "15+"
+    },
+    {
+      "id": "chuangbianxiaodoudou",
+      "title": "窗边的小豆豆",
+      "author": "黑柳彻子",
+      "category": "growth",
+      "blurb": "被真正看见的孩子，才敢长成自己的样子。",
+      "tags": ["教育", "童年"],
+      "age": "12+"
+    },
+    {
+      "id": "zhigengniao",
+      "title": "杀死一只知更鸟",
+      "author": "哈珀·李",
+      "category": "growth",
+      "blurb": "真正的勇气，是明知会输仍然去做对的事。",
+      "tags": ["正义", "成长"],
+      "age": "15+"
+    },
+    {
+      "id": "huozhe",
+      "title": "活着",
+      "author": "余华",
+      "category": "growth",
+      "blurb": "一个人和他的一生，读完会沉默很久。",
+      "tags": ["命运", "现实"],
+      "age": "15+"
+    },
+    {
+      "id": "tangshisanbaishou",
+      "title": "唐诗三百首",
+      "author": "蘅塘退士 编",
+      "category": "poetry",
+      "blurb": "最短的篇幅里，藏着最辽阔的情绪。",
+      "tags": ["古诗", "必读"],
+      "age": "12+"
+    },
+    {
+      "id": "zhaohuaxishi",
+      "title": "朝花夕拾",
+      "author": "鲁迅",
+      "category": "poetry",
+      "blurb": "回忆写得很软，批判落得很准。",
+      "tags": ["散文", "回忆"],
+      "age": "12+"
+    },
+    {
+      "id": "zhuqianqing",
+      "title": "朱自清散文选",
+      "author": "朱自清",
+      "category": "poetry",
+      "blurb": "写父亲、写春天、写时间，白得干净又准。",
+      "tags": ["散文", "白话文"],
+      "age": "12+"
+    },
+    {
+      "id": "feiniaoji",
+      "title": "飞鸟集",
+      "author": "泰戈尔",
+      "category": "poetry",
+      "blurb": "一行一句，适合放在口袋里反复读。",
+      "tags": ["诗", "哲理"],
+      "age": "12+"
+    },
+    {
+      "id": "wangzengqi",
+      "title": "汪曾祺散文选",
+      "author": "汪曾祺",
+      "category": "poetry",
+      "blurb": "写吃、写人、写草木，人间烟火也可以很高级。",
+      "tags": ["散文", "生活"],
+      "age": "12+"
+    },
+    {
+      "id": "aiqing",
+      "title": "艾青诗选",
+      "author": "艾青",
+      "category": "poetry",
+      "blurb": "为什么我的眼里常含泪水？因为我对这土地爱得深沉。",
+      "tags": ["现代诗", "家国"],
+      "age": "12+"
+    }
+  ]
+}

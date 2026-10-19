@@ -86,6 +86,7 @@ flutter:
 
   assets:
     - assets/config/config.json
+    - assets/config/curated_books.json
     - assets/config/filter.json
     - assets/config/device_pool.example.json
     - assets/filters/

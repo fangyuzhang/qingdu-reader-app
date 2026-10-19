@@ -5,8 +5,10 @@ import '../../services/app_theme.dart';
 
 /// The home surface keeps its warm paper / tomato identity in both themes.
 class HomePalette {
-  static const accent = Color(0xFFEF5038);
-  static const accentStrong = Color(0xFFC73D29);
+  // 【青茄重构】青少年版视觉：青茄绿为主，珊瑚橙做点缀（highlight）。
+  static const accent = Color(0xFF2FA98C);
+  static const accentStrong = Color(0xFF1F8A72);
+  static const highlight = Color(0xFFE2603F);
   final bool dark;
 
   /// #15/#9：墨水屏时所有纸面 / 文字 / 线条退化为纯黑白。accent 静态常量
@@ -22,18 +24,18 @@ class HomePalette {
 
   Color get canvas => eink
       ? Colors.white
-      : (dark ? const Color(0xFF151517) : const Color(0xFFFCFAF7));
+      : (dark ? const Color(0xFF0F1413) : const Color(0xFFFAFBF6));
   Color get surface =>
-      eink ? Colors.white : (dark ? const Color(0xFF242427) : Colors.white);
+      eink ? Colors.white : (dark ? const Color(0xFF171E1C) : Colors.white);
   Color get ink =>
-      eink ? Colors.black : (dark ? const Color(0xFFF5F1EB) : const Color(0xFF262522));
+      eink ? Colors.black : (dark ? const Color(0xFFF1F5F2) : const Color(0xFF212824));
   Color get muted =>
-      eink ? Colors.black : (dark ? const Color(0xFFA7A39E) : const Color(0xFF706C66));
+      eink ? Colors.black : (dark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73));
   Color get accentText => eink ? Colors.black : (dark ? accent : accentStrong);
   Color get soft =>
-      eink ? Colors.white : (dark ? const Color(0xFF202023) : const Color(0xFFF1EEE9));
+      eink ? Colors.white : (dark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC));
   Color get line =>
-      eink ? Colors.black : (dark ? const Color(0xFF333336) : const Color(0xFFE8E4DE));
+      eink ? Colors.black : (dark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1));
 }
 
 /// Pointer, keyboard and accessibility activation share the same action.

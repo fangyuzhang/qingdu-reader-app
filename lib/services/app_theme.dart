@@ -5,7 +5,9 @@ const themeModeKey = 'theme_mode';
 
 /// Brand seed color for the whole app (also used by the player slider and
 /// the detail page's accent text).
-const appSeedColor = Color(0xFFEF5038);
+// 【青茄重构】青少年版主色：青茄绿（青）+ 珊瑚橙（茄）作为点缀色，
+// 见 home_design.dart 的 HomePalette.highlight。
+const appSeedColor = Color(0xFF2FA98C);
 
 /// Global theme-mode notifier; the settings page writes it, MaterialApp
 /// rebuilds with the new mode.
@@ -50,9 +52,12 @@ ThemeMode themeModeFromName(String? name) {
 
 /// Unified design system and theme factory for fqapp.
 class AppTheme {
-  static const Color accent = Color(0xFFEF5038);
-  static const Color accentStrong = Color(0xFFC73D29);
-  static const Color accentDark = Color(0xFFF05E47);
+  static const Color accent = Color(0xFF2FA98C);
+  static const Color accentStrong = Color(0xFF1F8A72);
+  static const Color accentDark = Color(0xFF4FC3A4);
+
+  /// 点缀色（重点标记、15+ 标签、收藏态）。
+  static const Color highlight = Color(0xFFE2603F);
 
   /// Pure black-on-white theme for e-ink (#15/#9). No tonal / seed palette,
   /// no grey scale except black-on-white, no ripple, no page transition.
@@ -190,44 +195,44 @@ class AppTheme {
     if (einkMode) return _createEinkTheme();
     final isDark = brightness == Brightness.dark;
     final primary = isDark ? accentDark : accent;
-    final canvas = isDark ? const Color(0xFF151517) : const Color(0xFFFCFAF7);
-    final surface = isDark ? const Color(0xFF242427) : Colors.white;
+    final canvas = isDark ? const Color(0xFF0F1413) : const Color(0xFFFAFBF6);
+    final surface = isDark ? const Color(0xFF171E1C) : Colors.white;
     final surfaceContainerLow =
-        isDark ? const Color(0xFF1C1C1F) : const Color(0xFFF7F5F0);
+        isDark ? const Color(0xFF141B19) : const Color(0xFFF4F7F1);
     final surfaceContainer =
-        isDark ? const Color(0xFF242428) : const Color(0xFFF2EFE9);
+        isDark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC);
     final surfaceContainerHigh =
-        isDark ? const Color(0xFF2C2C32) : const Color(0xFFEBE7DF);
-    final ink = isDark ? const Color(0xFFF5F1EB) : const Color(0xFF262522);
-    final muted = isDark ? const Color(0xFFA7A39E) : const Color(0xFF706C66);
-    final line = isDark ? const Color(0xFF333336) : const Color(0xFFE8E4DE);
+        isDark ? const Color(0xFF232D2A) : const Color(0xFFE6EDE4);
+    final ink = isDark ? const Color(0xFFF1F5F2) : const Color(0xFF212824);
+    final muted = isDark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73);
+    final line = isDark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1);
 
     final scheme = ColorScheme(
       brightness: brightness,
       primary: primary,
       onPrimary: Colors.white,
       primaryContainer:
-          isDark ? const Color(0xFF381C17) : const Color(0xFFFFECE8),
+          isDark ? const Color(0xFF123B30) : const Color(0xFFD9F2E8),
       onPrimaryContainer:
-          isDark ? const Color(0xFFFFDAD4) : const Color(0xFF410002),
-      secondary: isDark ? const Color(0xFFE5806B) : const Color(0xFFD3513B),
+          isDark ? const Color(0xFFB8EEDC) : const Color(0xFF00382B),
+      secondary: isDark ? const Color(0xFFFF8A6B) : const Color(0xFFE2603F),
       onSecondary: Colors.white,
       secondaryContainer:
-          isDark ? const Color(0xFF33201C) : const Color(0xFFFFECE5),
+          isDark ? const Color(0xFF3B1E14) : const Color(0xFFFFE6DE),
       onSecondaryContainer:
-          isDark ? const Color(0xFFFFDAD2) : const Color(0xFF3C0E07),
+          isDark ? const Color(0xFFFFD9CC) : const Color(0xFF3F1509),
       tertiary: isDark ? const Color(0xFF7DB3EC) : const Color(0xFF4A90D9),
       onTertiary: Colors.white,
       surface: surface,
       onSurface: ink,
-      surfaceContainerLowest: isDark ? const Color(0xFF0F0F11) : Colors.white,
+      surfaceContainerLowest: isDark ? const Color(0xFF0B100F) : Colors.white,
       surfaceContainerLow: surfaceContainerLow,
       surfaceContainer: surfaceContainer,
       surfaceContainerHigh: surfaceContainerHigh,
       surfaceContainerHighest:
-          isDark ? const Color(0xFF34343A) : const Color(0xFFE4DFD6),
+          isDark ? const Color(0xFF2E3A36) : const Color(0xFFDDE6DA),
       onSurfaceVariant: muted,
-      outline: isDark ? const Color(0xFF7A7670) : const Color(0xFF9E9A92),
+      outline: isDark ? const Color(0xFF6F7D77) : const Color(0xFF97A39C),
       outlineVariant: line,
       error: isDark ? const Color(0xFFFFB4AB) : const Color(0xFFBA1A1A),
       onError: isDark ? const Color(0xFF690005) : Colors.white,

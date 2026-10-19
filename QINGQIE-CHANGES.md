@@ -154,3 +154,59 @@ flutter test             # 1954 passed / 10 skipped
 2. **长图接系统分享**：当前只落盘到应用目录，接入分享需新增 share 插件。
 3. **书源 / 本地书接入**：本分支沿用上游在线能力，TXT/EPUB 本地导入在另一条线
    （`qingqie-reader` 项目）里实现。
+
+---
+
+# 六、v3：UI 重构为「青少年书房」
+
+## 6.1 视觉系统
+
+| 项 | 旧（番茄橙） | 新（青茄绿） |
+|---|---|---|
+| 主色 | `#EF5038` 番茄红 | `#2FA98C` 青茄绿（strong `#1F8A72`/dark `#4FC3A4`） |
+| 点缀 | 无 | `#E2603F` 珊瑚橙（15+ 标记、重点） |
+| 浅色底 | `#FCFAF7` 暖白 | `#FAFBF6` 带绿调的奶油白 |
+| 深色底 | `#151517` | `#0F1413` 墨绿黑 |
+| 中性色 | 暖灰 | 绿灰（line `#E3E9E1` / muted `#6C7A73`） |
+
+改法：只改 `app_theme.dart` 的 token 与 `HomePalette` 常量（90+ 处引用随之统一），
+不逐个页面硬改，避免样式漂移。所有改动集中在两个文件，暗色/墨水屏分支照旧。
+
+## 6.2 首页：编辑部书单（不再推网文）
+
+- 新增 `assets/config/curated_books.json`：**42 本**精选，7 个类型各 6 本
+  （古典名著 / 世界文学 / 历史人文 / 科普百科 / 科幻想象 / 成长青春 / 诗歌散文），
+  每本带一句话荐语、题材标签、12+/15+ 适龄标记
+- 新增 `lib/models/curated_book.dart`（模型 + 加载缓存 + 每日轮换）
+- `lib/pages/home_page.dart` **整页重写**：问候头 + 今日荐读大卡 + 分类 chips +
+  分类横滑书单 / 分类竖排列表 + 书单说明
+- 新增 `lib/pages/curated_book_page.dart`：书目详情（渐变头图 + 荐语 + 「怎么读这本书」+ 同类推荐）
+- 新增 `lib/widgets/curated/curated_book_cover.dart`：**文字封面**（分类渐变 + 书名排版），
+  不依赖网络封面图，离线也稳定
+- **搜索能力完整保留**：详情页底部「在书城搜索《书名》」直接带关键词进搜索页；
+  首页右上角也有搜索入口。旧的上游网文流（homeProvider feed）不再被首页调用
+
+「今日荐读」按 `天数 % 书目数` 稳定轮换：同一天固定同一本，跨天自动换。
+
+## 6.3 底部导航：新增「笔记」
+
+`首页 / 书架 / **笔记** / 我的` 四栏。笔记是批注能力的主入口：
+点任意一条 → 回到原文对应位置（`ReaderPage.startTextOffset`）。
+
+## 6.4 移除不适合青少年的内容与功能
+
+| 项 | 处理 |
+|---|---|
+| 短剧 / 漫剧 / 漫画 | v2 已删入口；本次再删「我的 → 剧集缓存」入口 |
+| 上游网文推荐流 | 首页不再调用 `homeProvider`，无用户主动搜索就不会推网文 |
+| 榜单（RankPage） | 首页入口移除（榜单数据来自上游网文首页响应） |
+| 段评 / 书评 UGC | **阅读器段评默认关闭**（`ReaderPreferences.showParagraphBubbles` 默认 false），用户需要时可在排版面板打开 |
+
+## 6.5 测试
+
+- `flutter analyze`：**No issues found**
+- `flutter test`：**1961 passed / 10 skipped**
+- 新增 `test/home_page_test.dart`（9 项）：今日荐读/分类过滤/进详情/跳搜索/窄屏大字号不溢出/书单数据不变量
+- 删除过时用例：`home_scroll_cost_test.dart`（测已移除的网格实现）、
+  `comprehensive_ui_loading_test.dart` 的 U04（测已移除的首页分页）
+- 受影响的段评用例改为显式开启 `reader_show_paragraph_bubbles`（反映新的真实默认值）

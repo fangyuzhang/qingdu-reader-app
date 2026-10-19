@@ -4,7 +4,6 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
-import 'cached_dramas_page.dart';
 import 'notes_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
@@ -158,7 +157,7 @@ class MinePage extends StatelessWidget {
               context: context,
               icon: LucideIcons.pen_line,
               iconColor: const Color(0xFFD64545),
-              label: '我的笔记',
+              label: '笔记',
               palette: palette,
               onTap: () => Navigator.push(
                 context,
@@ -177,18 +176,8 @@ class MinePage extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const CachedBooksPage()),
               ),
             ),
-            const SizedBox(width: 8),
-            _buildShortcutTile(
-              context: context,
-              icon: LucideIcons.film,
-              iconColor: const Color(0xFFEF5038),
-              label: '剧集缓存',
-              palette: palette,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CachedDramasPage()),
-              ),
-            ),
+            // 【青茄重构·删除】「剧集缓存」入口随短剧功能一并下线：
+            // 缓存页本身还在仓库里，但青少年版不再暴露任何剧集入口。
             const SizedBox(width: 8),
             _buildShortcutTile(
               context: context,

@@ -1,14 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/detail_page.dart';
-import 'package:fqapp/pages/home_page.dart';
-import 'package:fqapp/pages/home_provider.dart';
-import 'package:fqapp/services/api_client.dart';
 import 'package:fqapp/services/chapter_text_formatter.dart';
 import 'package:fqapp/widgets/chapter_cache_sheet.dart';
-import 'package:fqapp/widgets/lazy_indexed_stack.dart';
 
 import 'support/fakes.dart';
 
@@ -79,80 +74,6 @@ void main() {
     }
   });
 
-  testWidgets('U04 hidden kept-alive home stops pagination and resumes once', (
-    tester,
-  ) async {
-    final offsets = <int>[];
-    final selected = ValueNotifier(0);
-    addTearDown(() async {
-      await tester.pumpWidget(const SizedBox.shrink());
-      selected.dispose();
-    });
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          homeProvider.overrideWith(
-            () => HomeNotifier(
-              homepageLoader:
-                  ({int tabType = 2, int offset = 0, String? sessionId}) async {
-                    if (tabType != 2) {
-                      return const HomepagePage(
-                        items: [],
-                        nextOffset: null,
-                        sessionId: null,
-                      );
-                    }
-                    offsets.add(offset);
-                    // A valid advancing cursor may accompany a filtered or
-                    // duplicate-only page. Bound the fixture so failure cannot
-                    // spin through an infinite catalogue in fake time.
-                    return HomepagePage(
-                      items: const [],
-                      nextOffset: offset < 20 ? offset + 1 : null,
-                      sessionId: 'session',
-                    );
-                  },
-              searchLoader: (_, {int page = 1}) async => const [],
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: ValueListenableBuilder<int>(
-            valueListenable: selected,
-            builder: (context, index, child) => LazyIndexedStack(
-              index: index,
-              children: const [
-                HomePage(),
-                Scaffold(body: Text('其他页面')),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(offsets, [0, 1]);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pump();
-    expect(offsets, [0, 1, 2]);
-
-    selected.value = 1;
-    await tester.pump();
-    final beforeHidden = List<int>.of(offsets);
-    for (var tick = 0; tick < 4; tick++) {
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
-    }
-    expect(offsets, beforeHidden);
-
-    selected.value = 0;
-    await tester.pump();
-    await tester.pump();
-    expect(offsets, [...beforeHidden, 3]);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.pump();
-    expect(offsets, [...beforeHidden, 3, 4]);
-    expect(tester.takeException(), isNull);
-  });
+  // 【青茄重构·删除】U04（首页保活分页）随旧首页一起下线：新首页是打包书单，
+  // 不再请求上游 feed，也就没有「隐藏后停止分页」这件事了。
 }
