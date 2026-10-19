@@ -9,6 +9,7 @@ import '../services/library_store.dart';
 import '../services/poster_cache.dart';
 import '../services/media_history_store.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/reading_stats_store.dart';
 import 'notes_page.dart';
 import 'detail_page.dart';
 
@@ -36,6 +37,10 @@ class _StatsPageState extends State<StatsPage> {
 
   /// 【青茄重构·新增】全书架批注数（笔记页入口的计数）。
   int _annotationCount = 0;
+
+  /// 【青茄重构·新增】累计阅读字数与连续打卡天数。
+  int _totalChars = 0;
+  int _streakDays = 0;
   // Derived aggregates, computed once per load so build() (which may be
   // called several times per frame for different cards) doesn't rebuild them.
   Map<String, double> _dayMinutes = const {};
@@ -92,6 +97,20 @@ class _StatsPageState extends State<StatsPage> {
       ..addListener(_scheduleStoreReload);
     _readTimeChanges = LibraryStore.instance.readTimeListenable
       ..addListener(_scheduleStoreReload);
+    // 【青茄重构·新增】字数/打卡来自独立存储，单独监听。
+    ReadingStatsStore.instance.changes.addListener(_reloadReadingTotals);
+    unawaited(ReadingStatsStore.instance.init().then((_) {
+      if (mounted) _reloadReadingTotals();
+    }));
+  }
+
+  void _reloadReadingTotals() {
+    if (!mounted) return;
+    final store = ReadingStatsStore.instance;
+    setState(() {
+      _totalChars = store.totalChars;
+      _streakDays = store.currentStreakDays;
+    });
   }
 
   @override
@@ -115,6 +134,7 @@ class _StatsPageState extends State<StatsPage> {
     _reloadTimer?.cancel();
     _historyChanges.removeListener(_scheduleStoreReload);
     _readTimeChanges.removeListener(_scheduleStoreReload);
+    ReadingStatsStore.instance.changes.removeListener(_reloadReadingTotals);
     super.dispose();
   }
 
@@ -290,6 +310,8 @@ class _StatsPageState extends State<StatsPage> {
             month: _monthMinutes(),
             total: _totalMinutes,
             activeDays: _activeDays,
+            totalChars: _totalChars,
+            streakDays: _streakDays,
           ),
           const SizedBox(height: 12),
           _Card(
@@ -617,11 +639,17 @@ class _OverviewCard extends StatelessWidget {
   final double total;
   final int activeDays;
 
+  /// 【青茄重构·新增】累计阅读字数与连续打卡天数。
+  final int totalChars;
+  final int streakDays;
+
   const _OverviewCard({
     required this.today,
     required this.month,
     required this.total,
     required this.activeDays,
+    this.totalChars = 0,
+    this.streakDays = 0,
   });
 
   @override
@@ -631,6 +659,9 @@ class _OverviewCard extends StatelessWidget {
       ('本月', month > 0 ? _formatDuring(month) : '--'),
       ('总计', _formatDuring(total)),
       ('活跃天数', '$activeDays 天'),
+      // 【青茄重构·新增】字数与打卡：产品要求的两个核心指标。
+      ('累计字数', totalChars > 0 ? formatCharacterCount(totalChars) : '--'),
+      ('连续打卡', streakDays > 0 ? '$streakDays 天' : '--'),
     ];
     final scheme = Theme.of(context).colorScheme;
     final scaler = MediaQuery.textScalerOf(context);

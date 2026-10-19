@@ -21,6 +21,7 @@ import '../services/reader_history.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_tap_zones.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
 import '../services/system_tts.dart';
 import '../widgets/chapter_cache_sheet.dart';
@@ -387,6 +388,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 本次阅读会话选择「今天不再提醒」后置位。
   bool _eyeCareMuted = false;
+
+  // ===== 【青茄重构·新增】阅读字数统计 =====
+  /// 本次会话已计入字数的章节，来回翻页不重复累加。
+  final Set<String> _countedChapters = <String>{};
 
   /// The live text selection — a whole paragraph right after a long press,
   /// then reshaped character-by-character by dragging a handle. Cleared on an
@@ -1214,6 +1219,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _sessionActive = false;
     unawaited(_persistProgress());
     _eyeCareTimer?.cancel();
+    unawaited(ReadingStatsStore.instance.flush());
     _annotationStore.changes.removeListener(_annotationListener);
     _scrollController.dispose();
     super.dispose();
@@ -1319,6 +1325,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_loadIdeas(chapter, generation));
       unawaited(_loadUnderlines());
       unawaited(_loadAnnotations());
+      // 【青茄重构·新增】按章记一次阅读字数（同一章本次会话只计一次）。
+      if (_countedChapters.add(chapter.itemId)) {
+        ReadingStatsStore.instance.addCharacters(
+          content.withoutLeadingTitle(chapter.title).legacyText.length,
+        );
+      }
       if (!loaded.fetched && content.needsRefresh()) {
         unawaited(_refreshCachedChapter(chapter));
       }
@@ -1676,7 +1688,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       if (mounted && !widget.localOnly) {
         try {
           await _ensureCatalog();
-          if (superseded()) return _latestChapterText(chapter);
+          if (superseded()) return await _latestChapterText(chapter);
           if (mounted) {
             await _diskCache.write(
               bookId: widget.bookId,

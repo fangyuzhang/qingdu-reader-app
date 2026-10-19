@@ -6,6 +6,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import '../models/media_item.dart';
 import '../services/api_client.dart';
 import '../services/imported_book_store.dart';
+import '../services/note_card_exporter.dart';
 import '../services/reader_annotation_store.dart';
 import '../widgets/home/home_design.dart';
 import 'reader_page.dart';
@@ -31,6 +32,9 @@ class _NotesPageState extends State<NotesPage> {
   List<ReaderAnnotation> _all = const [];
   String _tab = 'all';
   bool _loading = true;
+
+  /// 导出进行中（按钮置灰，避免重复点）。
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -77,6 +81,14 @@ class _NotesPageState extends State<NotesPage> {
         backgroundColor: palette.canvas,
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
+        actions: [
+          IconButton(
+            key: const Key('notes-export-button'),
+            tooltip: '导出长图',
+            icon: const Icon(LucideIcons.image_down),
+            onPressed: _visible.isEmpty || _exporting ? null : _exportImage,
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -152,6 +164,33 @@ class _NotesPageState extends State<NotesPage> {
         ],
       ),
     );
+  }
+
+  /// 【青茄重构·新增】把当前筛选下的笔记导出为长图（PNG）。
+  ///
+  /// 只在主 isolate 里绘制：笔记数量级很小（最多几百条），
+  /// 不值得为它起一个 isolate 增加出错面。
+  Future<void> _exportImage() async {
+    final notes = _visible;
+    if (notes.isEmpty) return;
+    setState(() => _exporting = true);
+    try {
+      final path = await NoteCardExporter.export(notes: notes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('长图已保存：$path'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   /// 回到原文：优先本地书（直接有章节），网络书现场取目录。

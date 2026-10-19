@@ -71,10 +71,23 @@
 **只做提示、不做硬过滤**，阅读器顶栏显示标签：`lib/services/content_rating.dart`、
 `lib/widgets/content_rating_chip.dart`。
 
-### 5. 阅读统计
+### 5. 阅读统计（字数 / 打卡 / 批注数）
 
-沿用上游自带的 16 周热力图与阅读时长统计，新增「我的笔记」卡片显示批注/书摘总数
-并可进入笔记页：`lib/pages/stats_page.dart`。
+- 沿用上游自带的 16 周热力图与阅读时长统计
+- **新增按天字数计数器**：`lib/services/reading_stats_store.dart`（SharedPreferences
+  单键 JSON，内存累加 + 2 秒防抖落盘），阅读器按章计一次正文字符数
+- 概览卡从 4 项扩到 6 项：今日 / 本月 / 总计时长、活跃天数、**累计字数**（万字档位）、
+  **连续打卡**（今天没读时自动从昨天起算）
+- 新增「我的笔记」卡片显示批注/书摘总数并可进入笔记页
+
+> 字数按「本章排版后的正文字符数」估算，一章计一次，用于展示量级，不做逐字精确统计。
+
+### 6. 批注导出长图
+
+笔记页右上角「导出长图」：`lib/services/note_card_exporter.dart` 用
+`PictureRecorder` 直接绘制 1080 宽 PNG（两趟排版：先量后画），
+输出到应用文档目录 `qingqie/exports/notes_<时间戳>.png` 并在 SnackBar 提示路径。
+不引入图片处理依赖，也不需要分享插件。
 
 ## 三、测试
 
@@ -94,11 +107,50 @@ flutter test             # 1954 passed / 10 skipped
 `home_page_test`、`search_page_test`、`search_id_page_test`、`home_provider_test`、
 `drama_page_test`、`kept_alive_pages_test`、`stats_page_widget_test`。
 
-## 四、二期候选（未实现）
+## 四、本地构建环境（已按国内镜像配置）
 
-1. **阅读字数与连续打卡**：需要给 `LibraryStore` 新增按天字数计数器（当前只有时长），
-   属数据层新增，不放进本次改造。
-2. **批注块拖动排序**：批注与段落是字符偏移绑定，拖动需要额外的锚点模型。
-3. **批注导出**：金句卡片（长图）导出。
-4. **书源/本地书接入**：本分支沿用上游在线能力，TXT/EPUB 本地导入在另一条线
+本机实测可用的工具链（全部走国内镜像，比官方源快一个数量级）：
+
+| 组件 | 版本 / 来源 | 说明 |
+|---|---|---|
+| Rust | 1.99.1 `stable-x86_64-pc-windows-gnu` | `RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static` |
+| crates 索引 | USTC sparse 镜像 | `~/.cargo/config.toml` 内 `[source.crates-io] replace-with = 'ustc'` |
+| 宿主链接器 | WinLibs MinGW-w64 16.2.0 (UCRT) | 本机无 MSVC，改用 GNU 宿主工具链；`winget install BrechtSanders.WinLibs.POSIX.UCRT` |
+| Android 目标 | `aarch64-linux-android` | `rustup target add aarch64-linux-android` |
+| NDK | 28.2.13676358（脚本硬校验） | `ANDROID_NDK_HOME` 指向该版本 |
+| Flutter | 3.47.7 stable | pub 依赖正常解析 |
+
+构建步骤（PowerShell，命令片段）：
+
+1. 原生核心（仓库已带生成的绑定，`-SkipCodegen` 更快）：
+   - PATH 追加 `%USERPROFILE%\.cargo\bin` 与 MinGW 的 `mingw64\bin`
+   - `ANDROID_NDK_HOME` 指向 `...\ndk\28.2.13676358`
+   - 执行 `scripts\build_rust_backend.ps1 -SkipCodegen`
+2. 打包 APK：`flutter build apk --debug --target-platform android-arm64`
+
+### 镜像加速的额外处理（都不改仓库文件）
+
+| 卡点 | 处理 |
+|---|---|
+| Gradle 发行包下载被代理掐断 | 从华为云镜像 `https://repo.huaweicloud.com/gradle/gradle-9.1.0-all.zip` 直接预置到 `~/.gradle/wrapper/dists/gradle-9.1.0-all/<md5(url) 的 36 进制>/` |
+| AGP / Kotlin / 三方依赖慢 | `~/.gradle/init.d/mirrors.gradle` 把阿里云 Maven（google / public / gradle-plugin）前置 |
+| Gradle JVM 不读 http_proxy | `~/.gradle/gradle.properties` 里 `systemProp.http(s).proxyPort` 跟随 VPN 当前端口（本机实测会变：58503 → 53482 → 51981） |
+| Rust 工具链与 crates | `RUSTUP_DIST_SERVER` 指 USTC，`~/.cargo/config.toml` 用 USTC sparse 索引 |
+| Flutter 资源 | `PUB_HOSTED_URL` / `FLUTTER_STORAGE_BASE_URL` 走 `flutter-io.cn` |
+
+### 构建验证结果（本机实测）
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze` | **No issues found** |
+| `flutter test` | **1961 passed / 10 skipped** |
+| Rust 交叉编译 | 成功，`libfqapi_core.so` 6.4 MB（release profile，2m03s） |
+| Debug APK | 构建成功，**118 MB**（arm64-v8a，含 `libfqapi_core.so` 与 `libshortplay_crypto.so`） |
+| Release APK | 构建成功，**31.7 MB**（R8 混淆 + 资源压缩，字体 tree-shake 96%），未配 keystore 时回落 debug 签名 |
+
+## 五、二期候选（未实现）
+
+1. **批注块拖动排序**：批注与段落是字符偏移绑定，拖动需要额外的锚点模型。
+2. **长图接系统分享**：当前只落盘到应用目录，接入分享需新增 share 插件。
+3. **书源 / 本地书接入**：本分支沿用上游在线能力，TXT/EPUB 本地导入在另一条线
    （`qingqie-reader` 项目）里实现。
