@@ -306,6 +306,9 @@ class ReaderTextPage {
 // Note: 两种阅读方式共用行测量，进度保存规范化正文的文字偏移；见
 // .agents/notes/implemented/feature/2026-09-10-reader-pagination.md
 class ReaderChapterLayout {
+  /// 批注块正文最多显示的行数（排版测量与渲染共用）。
+  static const int inlineNoteMaxLines = _kNoteMaxLines;
+
   final ReaderLayoutSpec spec;
   final List<ReaderContentBlock> blocks;
   final List<ReaderTextPage> pages;
@@ -931,6 +934,21 @@ const double _kNoteChromeHeight = 22;
 /// 角标高度（批注块首行至少这么高）。
 const double _kNoteBadgeHeight = 20;
 
+/// 批注正文最多测量的行数。超出部分渲染端以省略号收尾。
+///
+/// 这个上限是崩溃的止血点：`_measureInlineNote` 会把 `note.body`（用户想法，
+/// 但也可能是整段被选中的原文）整段排版，行数不封顶时，窄屏 / 分屏 /
+/// 大字号下可用宽度会被压到几十像素，一段两千字能折出上千行、上万像素高。
+/// 这个高度会作为「单行块」进入分页并参与整章重排，真机上表现为
+/// `RenderFlex overflowed by 99336 pixels` 后整页退出。
+const int _kNoteMaxLines = 8;
+
+/// 批注正文测量的可用宽度下限。
+///
+/// 不能取 40 这种小值：`spec.width - 80` 在窄屏上会退到 40，
+/// 13px 的中文一行只放得下 3 个字，行数被极端放大。
+const double _kNoteMinBodyWidth = 120;
+
 /// 批注块用的合成块 index 起点，远离正文段落序号，避免 key 冲突。
 const int _kInlineNoteIndexBase = 1000000;
 
@@ -985,7 +1003,16 @@ const int _kInlineNoteIndexBase = 1000000;
 }
 
 /// 测量一条批注块：先按批注文字风格量出正文高度，再折算成整块高度。
-/// 渲染端（[ReaderNoteBlock]）用同一个高度与行数，因此不会溢出。
+/// 渲染端（[ReaderNoteBlock]）用同一个高度与行数（[ReaderContentBlock.noteLines]），
+/// 因此不会溢出。
+///
+/// 【崩溃修复】这里必须同时封顶「行数」和「高度」：
+/// * 行数封顶 [_kNoteMaxLines]：`note.body` 可能是整段被选中的原文，窄屏下
+///   一行只放两三个字，行数会被放大到几百上千（修复前实测 2000 字在 40px
+///   可用宽度下折出 700 行、14022px 高，真机日志里见过 99336px 的溢出）。
+///   渲染端用 `maxLines: block.noteLines` 画省略号，封顶行数两边就一致。
+/// * 高度再夹到半屏：即使行高被 textScaler 放大，单块也不会超过一页，
+///   分页不会出现「比页还高的块」，滚动模式也不会拿到异常高度。
 ReaderContentBlock _measureInlineNote(
   ReaderInlineNote note, {
   required int index,
@@ -1003,18 +1030,37 @@ ReaderContentBlock _measureInlineNote(
     textBaseline: TextBaseline.alphabetic,
   );
   final body = note.body;
-  final painter =
-      TextPainter(
-          text: TextSpan(text: body, style: style),
-          textDirection: TextDirection.ltr,
-          textScaler: spec.textScaler,
-        )
-        ..layout(
-          maxWidth: math.max(40, spec.width - _kNoteChromeWidth),
-        );
-  final lines = math.max(1, painter.computeLineMetrics().length);
-  final rowHeight = math.max(_kNoteBadgeHeight, painter.height);
-  final height = rowHeight + _kNoteChromeHeight;
+  // 宽度下限不能用 40：`spec.width - 80` 在窄屏 / 分屏 / 大字号下会退到
+  // 几十像素，13px 中文一行只放得下 3 个字，行数被极端放大。
+  final bodyWidth = math.max(
+    _kNoteMinBodyWidth,
+    spec.width - _kNoteChromeWidth,
+  );
+  final painter = TextPainter(
+    text: TextSpan(text: body, style: style),
+    textDirection: TextDirection.ltr,
+    textScaler: spec.textScaler,
+    // 测量端与渲染端一样按行数截断，多出来的字渲染端用省略号收尾。
+    maxLines: _kNoteMaxLines,
+    ellipsis: '…',
+  );
+  final int lines;
+  final double rawHeight;
+  try {
+    painter.layout(maxWidth: bodyWidth);
+    lines = painter.computeLineMetrics().length.clamp(1, _kNoteMaxLines);
+    rawHeight =
+        math.max(_kNoteBadgeHeight, painter.height) + _kNoteChromeHeight;
+  } finally {
+    painter.dispose();
+  }
+  // 上限：半屏。下限：角标 20 + 容器内边距 16 + 底部外边距 6 = 42，
+  // 低于它渲染端的 Row 会垂直溢出（角标画不进块里）。
+  final maxHeight = math.max(
+    _kNoteBadgeHeight + _kNoteChromeHeight,
+    spec.pageHeight / 2,
+  );
+  final height = math.min(rawHeight, math.min(maxHeight, spec.pageHeight));
   return ReaderContentBlock(
     index: index,
     text: body,
@@ -1029,6 +1075,44 @@ ReaderContentBlock _measureInlineNote(
     inlineNote: note,
     noteLines: lines,
   );
+}
+
+/// 在一段文字里找出包含 [index] 的句子范围（半开区间，返回 `(start, end)`）。
+///
+/// 【青茄修复·长按选句】长按选区的默认粒度从「整段」改成「一句话」：
+/// 句末按中文句读切分——`。！？!?…；;` 与换行；紧随其后的右引号/右书名号
+/// 计入本句（"好吧。" 整体算一句）。与 TTS 的分句口径保持一致
+/// （system_tts 的 `_speak` 用同一组断句字符）。
+(int, int) sentenceRangeInText(String text, int index) {
+  if (text.isEmpty) return (0, 0);
+  const enders = '。！？!?…；;\n';
+  const closers = '”』」》〉）)';
+  final i = index.clamp(0, text.length - 1);
+  // 句子起点：往回找最近的句末标点，落在其后。
+  var start = 0;
+  for (var j = i - 1; j >= 0; j--) {
+    if (enders.contains(text[j])) {
+      start = j + 1;
+      break;
+    }
+  }
+  // 起点落在右引号上（前一句刚以 "。”" 收尾）时跳过，别选出一个空壳句。
+  while (start < text.length && closers.contains(text[start])) {
+    start++;
+  }
+  // 句子终点：从按下处往后找第一个句末标点，连着右引号一起收进来。
+  var end = text.length;
+  for (var j = i; j < text.length; j++) {
+    if (enders.contains(text[j])) {
+      end = j + 1;
+      while (end < text.length && closers.contains(text[end])) {
+        end++;
+      }
+      break;
+    }
+  }
+  if (end <= start) return (start, text.length);
+  return (start, end);
 }
 
 int _floorIndex(int length, bool Function(int) atOrBefore) {
@@ -1132,7 +1216,8 @@ class ReaderBlockContent extends StatelessWidget {
           onParagraphLongPress!(block, details.globalPosition),
       onLongPressMoveUpdate: onParagraphLongPressMoveUpdate == null
           ? null
-          : (details) => onParagraphLongPressMoveUpdate!(details.globalPosition),
+          : (details) =>
+                onParagraphLongPressMoveUpdate!(details.globalPosition),
       onLongPressEnd: onParagraphLongPressEnd == null
           ? null
           : (details) => onParagraphLongPressEnd!(details.globalPosition),

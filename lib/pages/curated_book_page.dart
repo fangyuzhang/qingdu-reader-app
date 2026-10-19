@@ -2,16 +2,61 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/curated_book.dart';
+import '../services/curated_resolver.dart';
 import '../widgets/curated/curated_book_cover.dart';
 import '../widgets/home/home_design.dart';
+import 'detail_page.dart';
 import 'search_page.dart';
+
+/// 书单条目「直达阅读」的公共链路。
+///
+/// 【青茄修复·新增】先把书目解析成书城里的同名书，再交给
+/// `DetailPage(autoOpenReader: true)` 打开上次进度；解析失败（离线/书城
+/// 没有结果）时回退到搜索页，让用户自己挑一个来源。
+///
+/// 首页和荐读页共用这一条链路，避免两处行为跑偏。
+Future<void> openCuratedReading(
+  BuildContext context,
+  CuratedBook book, {
+  ValueChanged<bool>? onBusy,
+}) async {
+  onBusy?.call(true);
+  CuratedResolution? resolution;
+  try {
+    resolution = await CuratedResolver.instance.resolve(book);
+  } catch (_) {
+    resolution = null;
+  }
+  onBusy?.call(false);
+  if (!context.mounted) return;
+
+  if (resolution != null) {
+    final item = resolution.toMediaItem();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DetailPage(item: item, autoOpenReader: true),
+      ),
+    );
+    return;
+  }
+
+  // 网络失败和「书城没有这本书」都会走到这里，文案不要只说断网。
+  ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(const SnackBar(content: Text('暂时找不到可读的书源，先帮你搜一下')));
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SearchPage(initialQuery: book.keyword),
+    ),
+  );
+}
 
 /// 单本荐读书目详情。
 ///
 /// 【青茄重构·新增】首页不再直接推网文流，这里是「编辑部书单」的落点：
-/// 展示书目信息 + 荐语，阅读入口是「在书城搜索这本书」——
-/// 搜索能力完整保留，书从哪个源来由搜索结果决定。
-class CuratedBookPage extends StatelessWidget {
+/// 展示书目信息 + 荐语。主按钮已改为「开始阅读」（直达阅读器），
+/// 下方仍保留「在书城搜索」作为手动挑源的次要入口。
+class CuratedBookPage extends StatefulWidget {
   const CuratedBookPage({
     super.key,
     required this.book,
@@ -27,6 +72,35 @@ class CuratedBookPage extends StatelessWidget {
   final List<CuratedBook> siblings;
 
   final CuratedCategory? Function(String key)? categoryOf;
+
+  @override
+  State<CuratedBookPage> createState() => _CuratedBookPageState();
+}
+
+class _CuratedBookPageState extends State<CuratedBookPage> {
+  bool _opening = false;
+
+  CuratedBook get book => widget.book;
+  CuratedCategory? get category => widget.category;
+  List<CuratedBook> get siblings => widget.siblings;
+  CuratedCategory? Function(String key)? get categoryOf => widget.categoryOf;
+
+  @override
+  void initState() {
+    super.initState();
+    // 长按进来时封面可能还在后台解析，解析完成后要换掉文字封面。
+    CuratedResolver.instance.changes.addListener(_onResolutionChanged);
+  }
+
+  @override
+  void dispose() {
+    CuratedResolver.instance.changes.removeListener(_onResolutionChanged);
+    super.dispose();
+  }
+
+  void _onResolutionChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +158,9 @@ class CuratedBookPage extends StatelessWidget {
                             category: category,
                             width: 96,
                             showAge: false,
+                            coverUrl: CuratedResolver.instance
+                                .cached(book.id)
+                                ?.cover,
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -163,8 +240,11 @@ class CuratedBookPage extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: CuratedBookRow(
                           book: sibling,
-                          category: categoryOf?.call(sibling.category) ??
-                              category,
+                          category:
+                              categoryOf?.call(sibling.category) ?? category,
+                          coverUrl: CuratedResolver.instance
+                              .cached(sibling.id)
+                              ?.cover,
                           onTap: () => Navigator.of(context).pushReplacement(
                             MaterialPageRoute<void>(
                               builder: (_) => CuratedBookPage(
@@ -190,32 +270,78 @@ class CuratedBookPage extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              key: const Key('curated-search-button'),
-              style: FilledButton.styleFrom(
-                backgroundColor: HomePalette.accent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton.icon(
+                  key: const Key('curated-search-button'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HomePalette.accent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: _opening ? null : _startReading,
+                  icon: _opening
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(LucideIcons.book_open, size: 18),
+                  label: Text(
+                    _opening ? '正在打开…' : '开始阅读',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => SearchPage(initialQuery: book.keyword),
+              TextButton(
+                key: const Key('curated-browse-button'),
+                style: TextButton.styleFrom(
+                  foregroundColor: palette.muted,
+                  minimumSize: const Size(0, 40),
+                ),
+                onPressed: _browse,
+                child: Text(
+                  '在书城搜索',
+                  style: TextStyle(fontSize: 12.5, color: palette.muted),
                 ),
               ),
-              icon: const Icon(LucideIcons.search, size: 18),
-              label: Text(
-                '在书城搜索《${book.title}》',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
-              ),
-            ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _startReading() async {
+    // 按钮要等下一帧才刷新成 disabled，同一帧的第二次点击会重复 push。
+    if (_opening) return;
+    await openCuratedReading(
+      context,
+      book,
+      onBusy: (busy) {
+        if (mounted) setState(() => _opening = busy);
+      },
+    );
+  }
+
+  void _browse() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SearchPage(initialQuery: book.keyword),
       ),
     );
   }
@@ -243,11 +369,7 @@ class _BlurbCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                LucideIcons.quote,
-                size: 15,
-                color: HomePalette.accent,
-              ),
+              Icon(LucideIcons.quote, size: 15, color: HomePalette.accent),
               const SizedBox(width: 6),
               Text(
                 '编辑部荐语',
@@ -299,7 +421,7 @@ class _BlurbCard extends StatelessWidget {
   }
 }
 
-/// 诚实说明「书从哪来」：书单只做推荐，正文来自搜索到的书源。
+/// 诚实说明「书从哪来」：书单只做推荐，正文来自书城书源。
 class _HowToReadCard extends StatelessWidget {
   const _HowToReadCard({required this.keyword});
 
@@ -328,13 +450,10 @@ class _HowToReadCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '青茄只做书目推荐，不内置正文。点下方按钮会在书城按「$keyword」搜索，'
-            '你可以从搜索结果里选择来源阅读，也可以先加入书架。',
-            style: TextStyle(
-              fontSize: 12.5,
-              height: 1.6,
-              color: palette.muted,
-            ),
+            '书单只做推荐，正文来自书城书源；点开始阅读会直接打开同名书的'
+            '最新可读来源。如果暂时找不到，也可以在书城搜索「$keyword」'
+            '自己挑一个来源。',
+            style: TextStyle(fontSize: 12.5, height: 1.6, color: palette.muted),
           ),
         ],
       ),

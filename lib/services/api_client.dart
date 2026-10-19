@@ -225,7 +225,19 @@ class ApiClient {
     Duration? timeout,
     String method = 'GET',
     Uint8List? body,
-  }) {
+  }) async {
+    // 【青茄修复·启动提速】首页不再等后端就绪才显示；把等待挪到真正
+    // 发请求的地方。后端没起来就先等 start()（可重入、并发共享同一个
+    // Future）——用户立刻能看到首页，第一次搜索/解析也只会多等后端
+    // 剩余的启动时间，而不是「后端未就绪」的报错。
+    if (!BackendService.instance.isRunning &&
+        BackendService.instance.isStarting) {
+      try {
+        await BackendService.instance.start();
+      } catch (_) {
+        // 启动失败继续走原请求，让它报出真实的连接错误。
+      }
+    }
     // The transport owns the deadline: cancelling drops the in-flight Rust
     // dispatch (and therefore the upstream request, its retry backoff and any
     // pending write), so a late result can never be published.

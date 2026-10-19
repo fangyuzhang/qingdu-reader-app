@@ -3,17 +3,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/models/curated_book.dart';
+import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/curated_book_page.dart';
+import 'package:fqapp/pages/detail_page.dart';
 import 'package:fqapp/pages/home_page.dart';
 import 'package:fqapp/pages/search_page.dart';
+import 'package:fqapp/services/curated_resolver.dart';
+import 'package:fqapp/widgets/curated/curated_book_cover.dart';
 
 /// 新首页（编辑部书单）的测试。
 ///
-/// 旧首页测试针对的是上游网文推荐流（tab 栏 / 网格 / 分页加载），
-/// 那套 UI 已被整页替换，这里按新结构重写：分类推荐、今日荐读、
-/// 点书进详情、详情里「在书城搜索」仍走得通。
+/// 点书 = 解析成书城书籍后直达阅读器；长按 = 荐读页（荐语 + 搜索入口）。
+/// 所有搜索都注入假实现，禁止真联网。
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    CuratedResolver.instance.resetForTest();
+    // 默认给一个「搜不到」的假搜索，避免任何用例漏注入时真的联网。
+    CuratedResolver.instance.search = (query) async => const <MediaItem>[];
+  });
 
   CuratedCategory category(String key, String label) => CuratedCategory(
     key: key,
@@ -27,6 +35,7 @@ void main() {
     String title,
     String categoryKey, {
     String age = '12+',
+    bool audio = false,
   }) => CuratedBook(
     id: id,
     title: title,
@@ -35,21 +44,37 @@ void main() {
     blurb: '$title 的一句话荐语。',
     tags: const ['经典'],
     age: age,
+    audio: audio,
   );
 
   final catalog = CuratedCatalog(
-    categories: [
-      category('classic', '古典名著'),
-      category('science', '科普百科'),
-    ],
+    categories: [category('classic', '古典名著'), category('science', '科普百科')],
     books: [
-      book('a', '西游记', 'classic'),
+      book('a', '西游记', 'classic', audio: true),
       book('b', '水浒传', 'classic', age: '15+'),
       book('c', '时间简史', 'science', age: '15+'),
     ],
   );
 
   Widget app(Widget child) => MaterialApp(home: child);
+
+  MediaItem searchHit(String title) => MediaItem(
+    id: 'hit-$title',
+    title: title,
+    cover: 'https://example.com/$title.jpg',
+    author: '作者a',
+    badge: '',
+    ep: '',
+    kind: 'book',
+  );
+
+  /// 只让今日荐读的那本解析成功，其余返回空。
+  void mockSearchFor(String title) {
+    CuratedResolver.instance.search = (query) async {
+      if (query == title) return [searchHit(title)];
+      return const <MediaItem>[];
+    };
+  }
 
   testWidgets('首页展示今日荐读、分类条与分类书单', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
@@ -60,13 +85,127 @@ void main() {
     await tester.pumpWidget(app(HomePage(catalog: catalog)));
     await tester.pumpAndSettle();
 
-    expect(find.text('青茄 · 青少年书房'), findsOneWidget);
-    expect(find.byKey(const Key('home-today-pick')), findsOneWidget);
+    // 【青茄】问候语已删，顶栏固定：分类条 + 搜索按钮全程可见。
+    expect(find.text('青茄 · 青少年书房'), findsNothing);
     expect(find.byKey(const Key('home-category-bar')), findsOneWidget);
+    expect(find.byKey(const Key('home-today-pick')), findsOneWidget);
+    expect(find.byKey(const Key('home-cat-button-classic')), findsOneWidget);
+    expect(find.byKey(const Key('home-category-listen')), findsOneWidget);
     // 两个分类标题都在（分类区按顺序渲染）
     expect(find.text('古典名著'), findsWidgets);
     expect(find.text('科普百科'), findsWidgets);
     expect(find.byKey(const Key('home-search-button')), findsOneWidget);
+  });
+
+  testWidgets('分类功能按钮：点一下切到对应分类', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-cat-button-science')));
+    await tester.pumpAndSettle();
+
+    // 分类描述出现了（该分类视图），横滑分类区消失。
+    expect(find.textContaining('科普'), findsWidgets);
+    expect(find.byKey(const Key('home-today-pick')), findsNothing);
+  });
+
+  testWidgets('听书分类列出有声书，点开走直达阅读链路', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    // 让「西游记」的解析命中一个 audio 源，验证听书点开直接给音频。
+    CuratedResolver.instance.search = (query) async {
+      if (query.contains('西游记')) {
+        return [
+          MediaItem(
+            id: 'hit-audio',
+            title: '西游记',
+            cover: '',
+            author: '吴承恩',
+            badge: '',
+            ep: '',
+            kind: 'audio',
+          ),
+        ];
+      }
+      return const <MediaItem>[];
+    };
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    // 「听书」在分类条最末尾，先把横条滚出来再点。
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('home-category-listen')),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('home-category-bar')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('home-category-listen')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('听书'), findsWidgets);
+    expect(find.byKey(const Key('home-listen-row-a')), findsOneWidget);
+
+    // 遮罩里是无限循环的 CircularProgressIndicator，这里不能用
+    // pumpAndSettle（永远不会 settle），用定步 pump 等解析完成。
+    await tester.tap(find.byKey(const Key('home-listen-row-a')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 400));
+    final detail = tester.widget<DetailPage>(
+      find.byType(DetailPage, skipOffstage: false),
+    );
+    expect(detail.item.kind, 'audio');
+  });
+
+  testWidgets('滑离顶部后上滑弹出浮动搜索按钮，回顶自动收起', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    final list = find.byKey(const Key('home_curated'));
+    double fabOpacity() => tester
+        .widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byKey(const Key('home-search-float')),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+
+    // 往下滑很多：浮动搜索按钮滑入（opacity = 1）。
+    for (var i = 0; i < 12; i++) {
+      await tester.drag(list, const Offset(0, -300));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('home-search-float')), findsOneWidget);
+    expect(fabOpacity(), 1);
+
+    // 回到顶部：按钮收起（opacity = 0）。
+    for (var i = 0; i < 20; i++) {
+      await tester.drag(list, const Offset(0, 400));
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    await tester.pumpAndSettle();
+    expect(fabOpacity(), 0);
   });
 
   testWidgets('点分类只显示该分类的书', (tester) async {
@@ -87,28 +226,282 @@ void main() {
     expect(find.text('西游记'), findsNothing);
   });
 
-  testWidgets('点书进详情，详情可跳书城搜索', (tester) async {
+  testWidgets('点今日荐读直接进阅读器（解析 → DetailPage autoOpenReader）', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final pick = catalog.pickOfDay()!;
+    mockSearchFor(pick.title);
+
     await tester.pumpWidget(app(HomePage(catalog: catalog)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final detail = tester.widget<DetailPage>(find.byType(DetailPage));
+    expect(detail.autoOpenReader, isTrue);
+    expect(detail.item.id, 'hit-${pick.title}');
+    // 不再先进荐读页
+    expect(find.byType(CuratedBookPage), findsNothing);
+  });
+
+  testWidgets('解析期间有可见反馈，快速连点只打开一个详情页', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final pick = catalog.pickOfDay()!;
+    CuratedResolver.instance.search = (query) async {
+      // 【青茄】只有今日荐读慢（让点击出现 spinner）；其余书立即返回空，
+      // prefetch 的整条队列不会在测试结束时留下未到期的定时器。
+      if (query != pick.keyword) return const <MediaItem>[];
+      await Future<void>.delayed(const Duration(seconds: 2));
+      return [searchHit(query)];
+    };
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    // 同一帧内连点两下：第二次必须被闸门挡住。
+    await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(DetailPage, skipOffstage: false), findsOneWidget);
+    final detail = tester.widget<DetailPage>(find.byType(DetailPage));
+    expect(detail.item.id, 'hit-${pick.title}');
+  });
+
+  testWidgets('分类列表里的书点一下也直达阅读器', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    mockSearchFor('时间简史');
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-category-science')));
+    await tester.pumpAndSettle();
+
+    // 封面回退态里也有书名，按 Text 找会命中同一个 Row 两次，这里按类型找。
+    final row = find.byType(CuratedBookRow);
+    expect(row, findsOneWidget);
+    await tester.ensureVisible(row);
+    await tester.tap(row);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final detail = tester.widget<DetailPage>(find.byType(DetailPage));
+    expect(detail.autoOpenReader, isTrue);
+    expect(detail.item.id, 'hit-时间简史');
+    expect(find.byType(CuratedBookPage), findsNothing);
+  });
+
+  testWidgets('荐读页连点「开始阅读」也只打开一个详情页', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    CuratedResolver.instance.search = (query) async {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      return [searchHit('西游记')];
+    };
+
+    await tester.pumpWidget(
+      app(
+        CuratedBookPage(
+          book: catalog.books.first,
+          category: catalog.categories.first,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(const Key('curated-search-button'));
+    await tester.tap(button);
+    await tester.tap(button);
+    await tester.pump();
+
+    expect(find.text('正在打开…'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(DetailPage, skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('长按卡片进荐读页，主按钮改为「开始阅读」', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final pick = catalog.pickOfDay()!;
+    mockSearchFor(pick.title);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.byKey(const Key('home-today-pick')));
     await tester.pumpAndSettle();
 
     expect(find.byType(CuratedBookPage), findsOneWidget);
+    expect(find.text('开始阅读'), findsOneWidget);
     expect(find.byKey(const Key('curated-search-button')), findsOneWidget);
-    // 详情页说明「不内置正文，走搜索」
-    expect(find.textContaining('不内置正文'), findsOneWidget);
+    expect(find.byKey(const Key('curated-browse-button')), findsOneWidget);
+    // 免责声明同步成「正文来自书城书源」
+    expect(find.textContaining('正文来自书城书源'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('curated-search-button')));
-    // 搜索页自带加载态动画，pumpAndSettle 会等不到静止
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(DetailPage), findsOneWidget);
+  });
+
+  testWidgets('荐读页的封面在后台解析完成后会刷新', (tester) async {
+    final target = catalog.books.first;
+    CuratedResolver.instance.search = (query) async => [searchHit('西游记')];
+
+    await tester.pumpWidget(
+      app(CuratedBookPage(book: target, category: catalog.categories.first)),
+    );
+    await tester.pumpAndSettle();
+
+    CuratedBookCover cover() =>
+        tester.widget<CuratedBookCover>(find.byType(CuratedBookCover));
+    expect(cover().coverUrl, isNull);
+
+    // 模拟首页的 prefetch 在荐读页打开之后才完成。
+    await CuratedResolver.instance.resolve(target);
+    await tester.pump();
+
+    expect(cover().coverUrl, isNotNull);
+  });
+
+  testWidgets('荐读页「在书城搜索」仍打开搜索页', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      app(
+        CuratedBookPage(
+          book: catalog.books.first,
+          category: catalog.categories.first,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('curated-browse-button')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(SearchPage), findsOneWidget);
+  });
+
+  testWidgets('解析失败时回退搜索页并提示', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    CuratedResolver.instance.search = (query) async {
+      throw Exception('offline');
+    };
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final search = tester.widget<SearchPage>(find.byType(SearchPage));
+    final pick = catalog.pickOfDay()!;
+    expect(search.initialQuery, pick.keyword);
+    expect(find.text('暂时找不到可读的书源，先帮你搜一下'), findsOneWidget);
+  });
+
+  testWidgets('书城搜不到结果时也回退搜索页并带上关键词', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    // setUp 里的默认假搜索返回空列表，等价于「书城没有这本书」。
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('home-today-pick')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final search = tester.widget<SearchPage>(find.byType(SearchPage));
+    expect(search.initialQuery, catalog.pickOfDay()!.keyword);
+    expect(find.byType(DetailPage), findsNothing);
+  });
+
+  testWidgets('解析出的真实封面会传到首页卡片', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    CuratedResolver.instance.search = (query) async => [searchHit(query)];
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    final covers = tester
+        .widgetList<CuratedBookCover>(find.byType(CuratedBookCover))
+        .toList(growable: false);
+    expect(covers, isNotEmpty);
+    expect(covers.every((cover) => cover.coverUrl != null), isTrue);
+  });
+
+  testWidgets('异步解析完成后首页会重绘真实封面', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    CuratedResolver.instance.search = (query) async {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      return [searchHit(query)];
+    };
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    List<CuratedBookCover> covers() => tester
+        .widgetList<CuratedBookCover>(find.byType(CuratedBookCover))
+        .toList(growable: false);
+
+    // 首帧还没解析完：全部走文字封面。
+    expect(covers(), isNotEmpty);
+    expect(covers().every((cover) => cover.coverUrl == null), isTrue);
+
+    // 并发上限 2：3 本书要两轮（2s + 2s），留足时间。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    // 后台解析完成 → changes 通知 → 首页 setState → 换成真实封面。
+    expect(covers().every((cover) => cover.coverUrl != null), isTrue);
   });
 
   testWidgets('搜索按钮打开搜索页', (tester) async {
@@ -143,7 +536,10 @@ void main() {
       final first = catalog.pickOfDay(now: day);
       final again = catalog.pickOfDay(now: day.add(const Duration(hours: 6)));
       expect(first!.id, again!.id);
-      expect(catalog.pickOfDay(now: day.add(const Duration(days: 1))), isNotNull);
+      expect(
+        catalog.pickOfDay(now: day.add(const Duration(days: 1))),
+        isNotNull,
+      );
       expect(catalog.books, hasLength(3));
     });
 

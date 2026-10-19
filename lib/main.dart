@@ -7,11 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'pages/home_page.dart';
 import 'pages/audio_page.dart';
-import 'pages/cached_books_page.dart';
 import 'pages/library_page.dart';
 import 'pages/mine_page.dart';
 import 'pages/notes_page.dart';
@@ -40,83 +38,100 @@ void main() {
   // 原先 ensureInitialized() 在根 zone、runApp 在 runZonedGuarded 的子 zone，
   // debug 模式启动即抛 "Zone mismatch"（BindingBase.debugCheckZone），
   // 且子 zone 的未捕获异常处理对绑定回调不生效。
-  runZonedGuarded(
-    () {
-      WidgetsFlutterBinding.ensureInitialized();
-      // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
-      // runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
-      AppLog.instance.install();
-      unawaited(AppLog.instance.startPersistence());
-      // 短剧分享的「系统分享」走 Android 的 Intent.ACTION_SEND
-      //（官方同一条路径）。桥不可用时 PlayletShare 自动降级为复制链接，
-      // 不会把失败说成成功。
-      // 插件回 false 表示没能调起选择器（没有可分享的应用），必须原样返回：
-      // 「调不起来」与「已分享」是两件事。
-      SharePlusLite.handler = ({required title, required text}) async {
-        final launched = await const MethodChannel(
-          'fqapp/share',
-        ).invokeMethod<bool>('shareText', {'title': title, 'text': text});
-        return launched ?? false;
-      };
-      // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
-      // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
-      RustLogSource.reader = BackendService.instance.readRustLog;
-      runApp(const ProviderScope(child: FqApp()));
-    },
-    (error, stack) => AppLog.e('zone', '未捕获异步异常', error: error, stack: stack),
-  );
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+    // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
+    // runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
+    AppLog.instance.install();
+    unawaited(AppLog.instance.startPersistence());
+    // 短剧分享的「系统分享」走 Android 的 Intent.ACTION_SEND
+    //（官方同一条路径）。桥不可用时 PlayletShare 自动降级为复制链接，
+    // 不会把失败说成成功。
+    // 插件回 false 表示没能调起选择器（没有可分享的应用），必须原样返回：
+    // 「调不起来」与「已分享」是两件事。
+    SharePlusLite.handler = ({required title, required text}) async {
+      final launched = await const MethodChannel(
+        'fqapp/share',
+      ).invokeMethod<bool>('shareText', {'title': title, 'text': text});
+      return launched ?? false;
+    };
+    // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
+    // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
+    RustLogSource.reader = BackendService.instance.readRustLog;
+    runApp(const ProviderScope(child: FqApp()));
+    // 【青茄修复·启动提速】Rust 后端进程的拉起（解压/端口/握手）是
+    // 启动最耗时的一步，与本地数据初始化完全独立。这里就并发开跑，
+    // RootShell 等待的是同一个 Future（start() 可重入），总耗时从
+    // 「本地 + 后端 相加」变成「两者取最大」。失败由 RootShell 的
+    // 错误态统一展示，这里吞掉即可。
+    unawaited(
+      BackendService.instance.start().then((_) {}, onError: (Object _) {}),
+    );
+  }, (error, stack) => AppLog.e('zone', '未捕获异步异常', error: error, stack: stack));
 }
 
 Future<void> _initializeLocalData() async {
   await Hive.initFlutter();
-  await LibraryStore.instance.init();
+  // 【青茄修复·启动提速】AppBootstrap 会等本方法返回才放出首页。
+  // 首页真正依赖的只有三个：书架历史、书架收藏、偏好（含主题），
+  // 三者互相独立，并行打开；其余可选数据挪到 [_initializeOptionalData]，
+  // 在首帧之后继续，不再串行拖住进入首页。
+  final spFuture = SharedPreferences.getInstance();
+  await Future.wait([LibraryStore.instance.init(), ShelfStore.instance.init()]);
+  final sp = await spFuture;
   // The 加入书架 collection is optional data: a failure here must not block
   // startup, which is why it shares the retryable bootstrap with the history.
   await ShelfStore.instance.init();
-  // 短剧 feed 的 点赞 也是可选本地数据，与书架同一处理：开箱失败不能让
-  // 启动失败，否则一个纯装饰性的集合会拖住短剧页之外的所有功能。
+  _initializeOptionalData();
+  // Note: Optional preference schemas cannot block local data startup; see
+  // .agents/notes/implemented/bug-fix/2026-09-17-persistent-data-and-web-cancellation.md.
+  final savedTheme = sp.get(themeModeKey);
+  themeModeNotifier.value = themeModeFromName(
+    savedTheme is String ? savedTheme : null,
+  );
+  // 墨水屏模式与深色模式同为可选偏好：读不到退化为关闭，不拖住启动。
+  einkModeNotifier.value = sp.getBool(einkModeKey) ?? false;
+}
+
+/// 不阻塞进入首页的可选本地数据与预热。
+///
+/// 这些能力都自带「不可用退化」：读不到就当没有（点赞/一次性弹窗/冷启动
+/// 缓存/榜单缓存），或使用方只在 box 就绪时才查（离线下载）。放在首帧
+/// 之后继续跑，启动曲线从「串行打开全部箱子」变成「首页先出、后台补齐」。
+Future<void> _initializeOptionalData() async {
   try {
     await DiggStore.instance.init();
   } catch (_) {
     // DiggStore 自己把「不可用」当成「没有点赞」处理（见 _openBox）。
   }
-  // 「上滑查看更多视频」的一次性标记同样是可选数据：读不到就当没弹过，
-  // 弹一次的语义退化成「本次启动弹一次」也不能拖住启动。
   try {
     await SwipeGuideStore.instance.init();
   } catch (_) {
     // SwipeGuideStore 自己把「不可用」当成「未显示」处理。
   }
-  // 首页 feed 的冷启动缓存也是可选数据：打不开就当没有缓存，
-  // 首页退化为先加载再显示，其余行为不变。
   try {
     HomeFeedCache.hiveReady = true;
     await HomeFeedCache.instance.warmUp();
   } catch (_) {
     // HomeFeedCache 自己把「不可用」当成「没有缓存」处理。
   }
-  // 榜单缓存同理：开箱失败只是退化为每次现拉。
   try {
     RankCache.hiveReady = true;
     await RankCache.instance.warmUp();
   } catch (_) {
     // RankCache 自己把「不可用」当成「没有缓存」处理。
   }
-  // 官方播放页开关（PlayerBottomStyleConfig / 清屏反转 / 横屏锁）随同一份
-  // 运行时配置读取；读不到就用默认值，不能拖住启动。
+  // 官方播放页开关与字号档：SharedPreferences 级别的读取，成本可忽略，
+  // 保持 await 确保播放器随时拿到配置。
   await PlayerStyleConfig.load();
-  // 官方播放页字号档（jk3/b 的 SP）同理：读失败回标准档，不拖启动。
   await ShortSeriesFontScale.load();
-  // 听书后台播放开关：异步读取 SharedPreferences，失败退化为默认开启。
+  // 听书后台播放开关：异步读取，失败退化为默认开启。
   unawaited(AudioPreferences.instance.load());
-  // 离线缓存的记录箱启动即打开：播放器的离线命中只在 box 就绪时才查
-  // （避免运行中途首次 openBox 失败产生游离异步错误）。可选数据，失败
-  // 只退化为「本会话不查离线」。
+  // 离线缓存的记录箱启动即打开：播放器的离线命中只在 box 就绪时才查。
   try {
     await HiveDramaDownloadStore.instance.warmUp();
   } catch (_) {}
-  // 离线缓存的网络门（官方 onNetChangeCheck）：断网/只剩计费链路时
-  // 自动暂停下载队列，半成品保留。监听失败只退化为「无自动暂停」。
+  // 离线缓存的网络门：断网/计费链路时自动暂停下载队列。
   try {
     Connectivity().onConnectivityChanged.listen((results) {
       final view = foldConnectivity(results);
@@ -126,17 +141,8 @@ Future<void> _initializeLocalData() async {
       );
     });
   } catch (_) {}
-  // 海报缓存的字节预算清扫：超额时删最旧的图。失败不影响任何页面。
+  // 海报缓存的字节预算清扫：超额时删最旧的图。
   unawaited(PosterCache.instance.enforceBudget());
-  final sp = await SharedPreferences.getInstance();
-  // Note: Optional preference schemas cannot block local data startup; see
-  // .agents/notes/implemented/bug-fix/2026-09-17-persistent-data-and-web-cancellation.md.
-  final savedTheme = sp.get(themeModeKey);
-  themeModeNotifier.value = themeModeFromName(
-    savedTheme is String ? savedTheme : null,
-  );
-  // 墨水屏模式与深色模式同为可选偏好：读不到退化为关闭，不拖住启动。
-  einkModeNotifier.value = sp.getBool(einkModeKey) ?? false;
 }
 
 class FqApp extends StatefulWidget {
@@ -271,8 +277,6 @@ class RootShell extends StatefulWidget {
 
 class _RootShellState extends State<RootShell> {
   int _index = 0;
-  bool _backendReady = false;
-  String? _backendError;
 
   @override
   void initState() {
@@ -281,76 +285,24 @@ class _RootShellState extends State<RootShell> {
   }
 
   Future<void> _startBackend() async {
-    setState(() {
-      _backendError = null;
-    });
     try {
       await (widget.backendStarter ?? BackendService.instance.start)();
-      if (mounted) {
-        setState(() => _backendReady = true);
-      }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _backendError = '$e';
-        });
-      }
+      // 【青茄修复·启动提速】后端失败不再扣住整页：弹一条可重试的提示，
+      // 页面照常显示（本地功能全可用；在线功能由请求侧等待/重试）。
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('本地服务启动失败：$e'),
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(label: '重试', onPressed: _startBackend),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_backendReady) {
-      return Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_backendError == null)
-                    const CircularProgressIndicator()
-                  else
-                    Icon(
-                      LucideIcons.triangle_alert,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  const SizedBox(height: 16),
-                  Text(_backendError == null ? '正在启动本地服务...' : '启动失败'),
-                  TextButton.icon(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CachedBooksPage(),
-                      ),
-                    ),
-                    icon: const Icon(LucideIcons.download),
-                    label: const Text('离线阅读'),
-                  ),
-                  if (_backendError != null) ...[
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        _backendError!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 12, color: Colors.red),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: _startBackend,
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
     final palette = HomePalette.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 【青茄重构·删除】短剧 tab（原 index 1）已移除，剩余三页均为浅色内容页，
@@ -368,9 +320,7 @@ class _RootShellState extends State<RootShell> {
         shadowColor: Colors.transparent,
         indicatorColor: eink
             ? Colors.black
-            : HomePalette.accent.withValues(
-                alpha: glassDark ? 0.20 : 0.12,
-              ),
+            : HomePalette.accent.withValues(alpha: glassDark ? 0.20 : 0.12),
         indicatorShape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
@@ -378,9 +328,7 @@ class _RootShellState extends State<RootShell> {
           (states) => IconThemeData(
             size: 22,
             color: states.contains(WidgetState.selected)
-                ? (eink
-                      ? Colors.white
-                      : HomePalette.accent)
+                ? (eink ? Colors.white : HomePalette.accent)
                 : (eink
                       ? Colors.black
                       : (glassDark
@@ -397,9 +345,7 @@ class _RootShellState extends State<RootShell> {
             color: states.contains(WidgetState.selected)
                 ? (eink
                       ? Colors.black
-                      : (glassDark
-                            ? HomePalette.accent
-                            : palette.accentText))
+                      : (glassDark ? HomePalette.accent : palette.accentText))
                 : (eink
                       ? Colors.black
                       : (glassDark
@@ -442,8 +388,15 @@ class _RootShellState extends State<RootShell> {
       ),
     );
 
+    // 【青茄修复·启动提速】不再用「正在启动本地服务」的整页加载门挡住
+    // 首页：首页内容是本地的（书单/缓存封面），后端只服务搜索与在线阅读。
+    // 后台把服务拉起来；某次启动失败时用 SnackBar 提示 + 可重试，不再
+    // 把所有页面一起扣住 2~3 秒。
+    // 【青茄修复·底栏固定】extendBody 关闭：底栏是实心固定条（对齐番茄
+    // 正式版的处理），正文不再垫到底栏后面。之前悬浮玻璃条 + extendBody
+    // 会让每个列表的底部内容被底栏遮住一截，页内只好各自垫大 padding。
     return Scaffold(
-      extendBody: true,
+      extendBody: false,
       // 状态栏图标亮度挂在壳层、按主题明暗切换。样式放壳层而不是各页内部，
       // 是因为 IndexedStack 里未选中的页不参与绘制，页内 AnnotatedRegion
       // 切走后会残留上一个页的样式。
@@ -463,72 +416,27 @@ class _RootShellState extends State<RootShell> {
           ],
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        left: false,
-        right: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: RepaintBoundary(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                // 墨水屏：阴影是灰阶 + 刷新残影来源，直接去掉，改用实线边框。
-                boxShadow: eink
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: glassDark ? 0.38 : 0.08,
-                          ),
-                          blurRadius: 22,
-                          offset: const Offset(0, 8),
-                        ),
-                        BoxShadow(
-                          color: HomePalette.accent.withValues(
-                            alpha: glassDark ? 0.06 : 0.03,
-                          ),
-                          blurRadius: 14,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                // 墨水屏：BackdropFilter 毛玻璃会把底部栏变成一团灰，改实色。
-                child: eink
-                    ? Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(28),
-                          border: Border.all(
-                            color: Colors.black,
-                            width: 0.8,
-                          ),
-                        ),
-                        child: navBar,
-                      )
-                    : BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: glassDark
-                                ? const Color(0xFF161619).withValues(alpha: 0.72)
-                                : Colors.white.withValues(alpha: 0.82),
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                              color: glassDark
-                                  ? Colors.white.withValues(alpha: 0.16)
-                                  : Colors.white.withValues(alpha: 0.75),
-                              width: 0.8,
-                            ),
-                          ),
-                          child: navBar,
-                        ),
-                      ),
+      // 【青茄修复·底栏固定】整宽实色固定条（学习番茄正式版的处理方式，
+      // 样式保持青茄配色）：不悬浮、不圆角、不毛玻璃；顶部一条细分隔线
+      // 与正文区分，SafeArea 只保手势区高度。
+      bottomNavigationBar: RepaintBoundary(
+        child: Container(
+          decoration: BoxDecoration(
+            color: eink
+                ? Colors.white
+                : (glassDark ? const Color(0xFF161619) : Colors.white),
+            border: Border(
+              top: BorderSide(
+                color: eink
+                    ? Colors.black
+                    : (glassDark
+                          ? Colors.white.withValues(alpha: 0.10)
+                          : palette.line),
+                width: eink ? 0.8 : 0.6,
               ),
             ),
           ),
+          child: SafeArea(top: false, left: false, right: false, child: navBar),
         ),
       ),
     );

@@ -44,6 +44,7 @@ class BackendService {
   Future<void>? _startFuture;
   Future<void>? _stopFuture;
   bool _running = false;
+
   /// Whether this service successfully initialized the core, so [stop] only
   /// tears down something it created.
   bool _coreStarted = false;
@@ -64,13 +65,19 @@ class BackendService {
   /// The loopback adapter only answers a request carrying the per-launch
   /// capability, and this is the URL that hands it to a browser as a session
   /// cookie before redirecting to `/`.
-  String get webUiEntryUrl => backendResourceBase(baseUrl, _transport.capability);
+  String get webUiEntryUrl =>
+      backendResourceBase(baseUrl, _transport.capability);
 
   /// Whether the Rust FFI transport is in use (as opposed to the HTTP adapter).
   bool get usesRustTransport => _transport is RustBackendTransport;
 
   /// Whether the backend core is currently running.
   bool get isRunning => _running;
+
+  /// 是否已有一次 start() 在进行中（尚未完成）。请求侧的「等待后端就绪」
+  /// 只在这种状态下才等待：生产环境 main() 一进来就会 kick start()，
+  /// 测试环境没人 kick，就不会被真实文件 IO 卡死在假时钟里。
+  bool get isStarting => _startFuture != null;
 
   /// Recent backend log lines (for diagnostics).
   List<String> get logLines => List.unmodifiable(_logLines);
@@ -99,7 +106,7 @@ class BackendService {
     } catch (_) {
       return null;
     }
-}
+  }
 
   /// Copies an asset bundle entry to [dest] if missing or stale.
   Future<void> _copyAsset(String assetPath, File dest) async {
@@ -138,35 +145,40 @@ class BackendService {
     final configDir = Directory('${dir.path}/config');
     await configDir.create(recursive: true);
 
-    await _copyAsset(
-      'assets/config/config.json',
-      File('${dir.path}/config/config.json'),
-    );
-    await _copyAsset(
-      'assets/config/device_pool.example.json',
-      File('${dir.path}/config/device_pool.example.json'),
-    );
-    await _copyAsset(
-      'assets/config/filter.json',
-      File('${dir.path}/config/filter.json'),
-    );
-    // Seed the device pool from the example on first launch (the core
-    // registers a real device on demand and persists it here).
-    final poolFile = File('${dir.path}/config/device_pool.json');
-    if (!await poolFile.exists()) {
-      await _copyAsset('assets/config/device_pool.example.json', poolFile);
-    }
-
-    // Use the bundle manifest so nested CSS/fonts and plugin files are
-    // deployed along with the top-level HTML and filters.
+    // 【青茄修复·启动提速】部署以前逐个 await 拷贝（几十个文件串行读 +
+    // 字节比对），是后端启动的大头之一。文件之间互不依赖，改成并行；
+    // 内容没变的文件在 _copyAsset 里直接跳过写入。
+    final tasks = <Future<void>>[
+      _copyAsset(
+        'assets/config/config.json',
+        File('${dir.path}/config/config.json'),
+      ),
+      _copyAsset(
+        'assets/config/device_pool.example.json',
+        File('${dir.path}/config/device_pool.example.json'),
+      ),
+      _copyAsset(
+        'assets/config/filter.json',
+        File('${dir.path}/config/filter.json'),
+      ),
+      // Use the bundle manifest so nested CSS/fonts and plugin files are
+      // deployed along with the top-level HTML and filters.
+    ];
     const runtimeRoots = ['assets/filters/', 'assets/web/', 'assets/plugins/'];
     final manifest = await AssetManifest.loadFromAssetBundle(_assets);
     for (final asset in manifest.listAssets()) {
       if (runtimeRoots.any(asset.startsWith)) {
         final relative = asset.substring('assets/'.length);
-        await _copyAsset(asset, File('${dir.path}/$relative'));
+        tasks.add(_copyAsset(asset, File('${dir.path}/$relative')));
       }
     }
+    // Seed the device pool from the example on first launch (the core
+    // registers a real device on demand and persists it here).
+    final poolFile = File('${dir.path}/config/device_pool.json');
+    if (!await poolFile.exists()) {
+      tasks.add(_copyAsset('assets/config/device_pool.example.json', poolFile));
+    }
+    await Future.wait(tasks);
   }
 
   void _log(String line) {

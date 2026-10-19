@@ -53,6 +53,7 @@ class CuratedBook {
     required this.tags,
     required this.age,
     this.searchKeyword,
+    this.audio = false,
   });
 
   final String id;
@@ -72,8 +73,11 @@ class CuratedBook {
   /// 搜索用的关键词，缺省用书名。
   final String? searchKeyword;
 
-  String get keyword =>
-      (searchKeyword == null || searchKeyword!.isEmpty)
+  /// 【青茄修复·听书分类】书城有该书的有声版：听书分类里点开会优先
+  /// 解析音频源，没有音频时退回文字阅读。
+  final bool audio;
+
+  String get keyword => (searchKeyword == null || searchKeyword!.isEmpty)
       ? title
       : searchKeyword!;
 
@@ -90,6 +94,7 @@ class CuratedBook {
         .toList(growable: false),
     age: json['age']?.toString() ?? '12+',
     searchKeyword: json['search']?.toString(),
+    audio: json['audio'] == true,
   );
 }
 
@@ -115,9 +120,11 @@ class CuratedCatalog {
   CuratedBook? pickOfDay({DateTime? now}) {
     if (books.isEmpty) return null;
     final day = now ?? DateTime.now();
-    final epoch = DateTime(day.year, day.month, day.day)
-        .difference(DateTime(2024, 1, 1))
-        .inDays;
+    final epoch = DateTime(
+      day.year,
+      day.month,
+      day.day,
+    ).difference(DateTime(2024, 1, 1)).inDays;
     return books[epoch.abs() % books.length];
   }
 

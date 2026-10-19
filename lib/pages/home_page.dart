@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/curated_book.dart';
+import '../services/curated_resolver.dart';
 import '../widgets/curated/curated_book_cover.dart';
 import '../widgets/home/home_design.dart';
 import 'curated_book_page.dart';
@@ -17,7 +18,8 @@ import 'search_page.dart';
 /// * 数据来自打包的 `assets/config/curated_books.json`，不联网、不受上游影响；
 /// * 按 7 个类型分组（古典名著/世界文学/历史人文/科普百科/科幻想象/成长青春/诗歌散文）；
 /// * 顶部「今日荐读」按日期稳定轮换（同一天固定同一本）；
-/// * 书目本身只做推荐，阅读入口是「在书城搜索」——搜索网文的能力完整保留。
+/// * 【青茄修复·新增】点书直接进阅读器（书单条目先解析成书城书籍）；
+///   长按卡片才进荐读页，荐语入口仍然保留。
 class HomePage extends StatefulWidget {
   const HomePage({super.key, this.catalog});
 
@@ -31,23 +33,51 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _allKey = 'all';
 
+  /// 【青茄修复·听书分类】书单里标了 audio 的书集中在这里，点开优先听。
+  static const _listenKey = 'listen';
+
   CuratedCatalog _catalog = CuratedCatalog.empty;
   bool _loading = true;
   String _category = _allKey;
 
+  /// 正在解析/打开某本书：给一层很轻的遮罩，避免重复点击和闪屏。
+  bool _opening = false;
+
+  /// 【青茄修复·上滑搜索】滑离顶部后，往上稍一滑动就在页顶弹出搜索按钮。
+  bool _searchFabVisible = false;
+
   @override
   void initState() {
     super.initState();
+    CuratedResolver.instance.changes.addListener(_onResolutionChanged);
     unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    CuratedResolver.instance.changes.removeListener(_onResolutionChanged);
+    super.dispose();
+  }
+
+  void _onResolutionChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
     final catalog = widget.catalog ?? await CuratedLibrary.load();
+    // 先读回上次解析的封面/书源，首帧就能显示真实封面。
+    await CuratedResolver.instance.load();
     if (!mounted) return;
     setState(() {
       _catalog = catalog;
       _loading = false;
     });
+    // 后台补齐缺失封面，失败静默。
+    // 【青茄修复·首屏封面】今日荐读排到队列最前：prefetch 并发 2、按
+    // 入队顺序解析，首屏那本永远最先拿到真实封面；其余书按书单顺序
+    // 跟在后面慢慢补。重复条目由 prefetch 内部去重。
+    final priorityBooks = [?catalog.pickOfDay(), ...catalog.books];
+    unawaited(CuratedResolver.instance.prefetch(priorityBooks));
   }
 
   @override
@@ -55,116 +85,81 @@ class _HomePageState extends State<HomePage> {
     final palette = HomePalette.of(context);
     return Scaffold(
       backgroundColor: palette.canvas,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          color: HomePalette.accent,
-          backgroundColor: palette.surface,
-          onRefresh: () => _load(),
-          child: CustomScrollView(
-            key: const Key('home_curated'),
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            slivers: [
-              SliverToBoxAdapter(child: _header(palette)),
-              if (_loading)
-                const SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 80),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: HomePalette.accent,
+      body: Stack(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                // 【青茄修复·固定标签栏】分类条固定在顶部，不再随内容滚走；
+                // 滑到再深的位置也能随时换分类或听书。
+                _topBar(palette),
+                Expanded(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onHomeScroll,
+                    child: RefreshIndicator(
+                      color: HomePalette.accent,
+                      backgroundColor: palette.surface,
+                      onRefresh: () => _load(),
+                      child: CustomScrollView(
+                        key: const Key('home_curated'),
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        slivers: [
+                          if (_loading)
+                            const SliverToBoxAdapter(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 80),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: HomePalette.accent,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else if (_catalog.books.isEmpty)
+                            SliverToBoxAdapter(child: _empty(palette))
+                          else ...[
+                            ..._homeSlivers(palette),
+                            SliverToBoxAdapter(child: _footer(palette)),
+                          ],
+                          const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                        ],
                       ),
                     ),
                   ),
-                )
-              else if (_catalog.books.isEmpty)
-                SliverToBoxAdapter(child: _empty(palette))
-              else ...[
-                SliverToBoxAdapter(child: _todayPick(palette)),
-                SliverToBoxAdapter(child: _categoryBar(palette)),
-                ..._contentSlivers(palette),
-                SliverToBoxAdapter(child: _footer(palette)),
+                ),
               ],
-              const SliverToBoxAdapter(child: SizedBox(height: 96)),
-            ],
+            ),
           ),
-        ),
+          _searchFab(palette),
+          if (_opening) const _OpeningOverlay(),
+        ],
       ),
     );
   }
 
-  // ---------------- 头部 ----------------
+  // ---------------- 固定顶栏 ----------------
 
-  Widget _header(HomePalette palette) {
-    final hour = DateTime.now().hour;
-    final greeting = hour < 6
-        ? '夜深了'
-        : hour < 11
-        ? '早上好'
-        : hour < 14
-        ? '中午好'
-        : hour < 18
-        ? '下午好'
-        : '晚上好';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+  /// 固定顶栏：搜索按钮 + 分类标签条，全程钉在页面顶部。
+  Widget _topBar(HomePalette palette) {
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.canvas,
+        border: Border(bottom: BorderSide(color: palette.line, width: 0.6)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: HomePalette.accent.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        '青茄 · 青少年书房',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          height: 1.3,
-                          fontWeight: FontWeight.w600,
-                          color: HomePalette.accentStrong,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  greeting,
-                  style: TextStyle(
-                    fontSize: 26,
-                    height: 1.2,
-                    fontWeight: FontWeight.w800,
-                    color: palette.ink,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '今天想读点什么？书单由编辑部挑过一遍。',
-                  style: TextStyle(fontSize: 12.5, color: palette.muted),
-                ),
-              ],
-            ),
-          ),
+          Expanded(child: _categoryBar(palette)),
+          const SizedBox(width: 6),
           IconButton(
             key: const Key('home-search-button'),
             tooltip: '搜索你想读的书',
             onPressed: _openSearch,
-            icon: const Icon(LucideIcons.search),
+            icon: const Icon(LucideIcons.search, size: 20),
             style: IconButton.styleFrom(
               backgroundColor: palette.surface,
               foregroundColor: palette.ink,
@@ -172,6 +167,62 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 【青茄修复·上滑搜索】滑离顶部后，往上稍一滑动就在页顶弹出搜索按钮；
+  /// 回到顶部自动收起。按钮始终浮在固定标签栏下方，点一下直接进搜索页。
+  bool _onHomeScroll(ScrollNotification notification) {
+    final pixels = notification.metrics.pixels;
+    final delta = notification is ScrollUpdateNotification
+        ? notification.scrollDelta
+        : null;
+    final shouldShow =
+        pixels > 160 || (pixels > 8 && delta != null && delta > 24);
+    if (shouldShow != _searchFabVisible) {
+      setState(() => _searchFabVisible = shouldShow);
+    }
+    return false;
+  }
+
+  Widget _searchFab(HomePalette palette) {
+    return Positioned(
+      top: 8,
+      left: 0,
+      right: 0,
+      child: Center(
+        child: AnimatedSlide(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          offset: Offset(0, _searchFabVisible ? 0 : -1.6),
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 180),
+            opacity: _searchFabVisible ? 1 : 0,
+            child: IgnorePointer(
+              ignoring: !_searchFabVisible,
+              child: FilledButton.icon(
+                key: const Key('home-search-float'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: palette.surface,
+                  foregroundColor: palette.ink,
+                  elevation: 3,
+                  side: BorderSide(color: palette.line, width: 0.6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                ),
+                onPressed: _openSearch,
+                icon: const Icon(LucideIcons.search, size: 17),
+                label: const Text('搜索', style: TextStyle(fontSize: 13)),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -187,128 +238,132 @@ class _HomePageState extends State<HomePage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
       child: HomeEntrance(
-        child: HomePressable(
-          key: const Key('home-today-pick'),
-          onTap: () => _openBook(book),
-          borderRadius: BorderRadius.circular(22),
-          semanticLabel: '今日荐读：${book.title}',
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: gradient,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: gradient.last.withValues(alpha: 0.28),
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
+        child: GestureDetector(
+          // 长按才进荐读页：点一下直接读书，荐语入口不丢。
+          onLongPress: () => _openCuratedPage(book),
+          child: HomePressable(
+            key: const Key('home-today-pick'),
+            onTap: () => _openBook(book),
+            borderRadius: BorderRadius.circular(22),
+            semanticLabel: '今日荐读：${book.title}',
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: gradient,
                 ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -50,
-                  top: -60,
-                  child: Container(
-                    width: 190,
-                    height: 190,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.08),
+                boxShadow: [
+                  BoxShadow(
+                    color: gradient.last.withValues(alpha: 0.28),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Positioned(
+                    right: -50,
+                    top: -60,
+                    child: Container(
+                      width: 190,
+                      height: 190,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CuratedBookCover(
-                        book: book,
-                        category: category,
-                        width: 88,
-                        showAge: false,
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                _Label(
-                                  icon: LucideIcons.sun,
-                                  text: '今日荐读',
-                                ),
-                                const SizedBox(width: 6),
-                                _Label(text: book.age),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              book.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 19,
-                                height: 1.2,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              book.author,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.84),
-                                fontSize: 11.5,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            // 大字号下允许撑开卡片，不再固定高度（会溢出）
-                            Text(
-                              book.blurb,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.92),
-                                fontSize: 12.5,
-                                height: 1.5,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Text(
-                                  '去看看',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.95),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(width: 3),
-                                const Icon(
-                                  LucideIcons.arrow_right,
-                                  size: 14,
-                                  color: Colors.white,
-                                ),
-                              ],
-                            ),
-                          ],
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CuratedBookCover(
+                          book: book,
+                          category: category,
+                          width: 88,
+                          showAge: false,
+                          coverUrl: _coverOf(book),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  _Label(icon: LucideIcons.sun, text: '今日荐读'),
+                                  const SizedBox(width: 6),
+                                  _Label(text: book.age),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                book.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 19,
+                                  height: 1.2,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                book.author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.84),
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              // 大字号下允许撑开卡片，不再固定高度（会溢出）
+                              Text(
+                                book.blurb,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  fontSize: 12.5,
+                                  height: 1.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Text(
+                                    '开始阅读',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.95,
+                                      ),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  const Icon(
+                                    LucideIcons.arrow_right,
+                                    size: 14,
+                                    color: Colors.white,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -320,9 +375,10 @@ class _HomePageState extends State<HomePage> {
 
   Widget _categoryBar(HomePalette palette) {
     final entries = <(String, String)>[
-      (_allKey, '全部'),
+      (_allKey, '推荐'),
       for (final category in _catalog.categories)
         (category.key, category.label),
+      (_listenKey, '听书'),
     ];
     return SizedBox(
       height: 46,
@@ -367,6 +423,143 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- 书单内容 ----------------
 
+  /// 按选中的标签分发内容：推荐（今日荐读 + 分类按钮 + 各分类横滑）、
+  /// 单个分类、听书。
+  List<Widget> _homeSlivers(HomePalette palette) {
+    if (_category == _listenKey) return _listenSlivers(palette);
+    if (_category == _allKey) {
+      return [
+        SliverToBoxAdapter(child: _todayPick(palette)),
+        SliverToBoxAdapter(child: _categoryButtons(palette)),
+        ..._contentSlivers(palette),
+      ];
+    }
+    return _contentSlivers(palette);
+  }
+
+  /// 【青茄修复·分类功能按钮】推荐页直接摆出全部分类入口，点一下切到
+  /// 对应分类，不用先滚回顶部。
+  Widget _categoryButtons(HomePalette palette) {
+    final categories = _catalog.categories
+        .where((category) => _catalog.booksOf(category.key).isNotEmpty)
+        .toList(growable: false);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+      child: GridView.count(
+        crossAxisCount: 3,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        childAspectRatio: 2.5,
+        children: [
+          for (final category in categories)
+            Material(
+              key: Key('home-cat-button-${category.key}'),
+              color: palette.surface,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => setState(() => _category = category.key),
+                child: Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: palette.line, width: 0.6),
+                  ),
+                  // 【青茄修复】1.8x 字号下按钮高度不够，整体等比缩放防溢出。
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          category.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: palette.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          '${_catalog.booksOf(category.key).length} 本',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: palette.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 【青茄修复·听书分类】书单里标了 audio 的书：点开优先解析有声源，
+  /// 没有音频的书源时退回文字阅读。
+  List<Widget> _listenSlivers(HomePalette palette) {
+    final audioBooks = _catalog.books
+        .where((book) => book.audio)
+        .toList(growable: false);
+    if (audioBooks.isEmpty) {
+      return [
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 60),
+            child: Center(
+              child: Text(
+                '有声书正在补充中，先去「推荐」挑一本吧',
+                style: TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: Text(
+            '这些书都有有声版，点开直接听；个别书源缺失时会退回文字阅读。',
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.55,
+              color: palette.muted,
+            ),
+          ),
+        ),
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        sliver: SliverList.separated(
+          itemCount: audioBooks.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final book = audioBooks[index];
+            return CuratedBookRow(
+              key: Key('home-listen-row-${book.id}'),
+              book: book,
+              category: _catalog.categoryOf(book.category),
+              coverUrl: _coverOf(book),
+              onTap: () => _openBook(book),
+              onLongPress: () => _openCuratedPage(book),
+            );
+          },
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _contentSlivers(HomePalette palette) {
     if (_category != _allKey) {
       final category = _catalog.categoryOf(_category);
@@ -393,7 +586,9 @@ class _HomePageState extends State<HomePage> {
             itemBuilder: (context, index) => CuratedBookRow(
               book: books[index],
               category: category,
+              coverUrl: _coverOf(books[index]),
               onTap: () => _openBook(books[index]),
+              onLongPress: () => _openCuratedPage(books[index]),
             ),
           ),
         ),
@@ -403,9 +598,7 @@ class _HomePageState extends State<HomePage> {
     return [
       for (final category in _catalog.categories)
         if (_catalog.booksOf(category.key).isNotEmpty)
-          SliverToBoxAdapter(
-            child: _categorySection(palette, category),
-          ),
+          SliverToBoxAdapter(child: _categorySection(palette, category)),
     ];
   }
 
@@ -462,10 +655,7 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       Text(
                         '全部',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: palette.muted,
-                        ),
+                        style: TextStyle(fontSize: 11.5, color: palette.muted),
                       ),
                       Icon(
                         LucideIcons.chevron_right,
@@ -490,7 +680,9 @@ class _HomePageState extends State<HomePage> {
                 book: books[index],
                 category: category,
                 width: tileWidth,
+                coverUrl: _coverOf(books[index]),
                 onTap: () => _openBook(books[index]),
+                onLongPress: () => _openCuratedPage(books[index]),
               ),
             ),
           ),
@@ -513,11 +705,7 @@ class _HomePageState extends State<HomePage> {
           children: [
             Row(
               children: [
-                Icon(
-                  LucideIcons.shield_check,
-                  size: 14,
-                  color: palette.muted,
-                ),
+                Icon(LucideIcons.shield_check, size: 14, color: palette.muted),
                 const SizedBox(width: 6),
                 Text(
                   '关于这份书单',
@@ -532,7 +720,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 6),
             Text(
               '共 ${_catalog.books.length} 本，按类型整理，标注 12+/15+ 适龄提示。'
-              '青茄只做推荐与阅读工具，不内置正文；想读哪本，点开后在书城搜索即可。',
+              '青茄只做推荐与阅读工具，不内置正文；点一下直接开始阅读，长按可以看荐语。',
               style: TextStyle(
                 fontSize: 11.5,
                 height: 1.6,
@@ -552,20 +740,14 @@ class _HomePageState extends State<HomePage> {
         children: [
           Icon(LucideIcons.book_open, size: 36, color: palette.line),
           const SizedBox(height: 12),
-          Text(
-            '书单准备中',
-            style: TextStyle(fontSize: 14, color: palette.muted),
-          ),
+          Text('书单准备中', style: TextStyle(fontSize: 14, color: palette.muted)),
           const SizedBox(height: 6),
           Text(
             '下拉刷新试试，也可以直接搜索想读的书',
             style: TextStyle(fontSize: 12, color: palette.muted),
           ),
           const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: _openSearch,
-            child: const Text('去搜索'),
-          ),
+          OutlinedButton(onPressed: _openSearch, child: const Text('去搜索')),
         ],
       ),
     );
@@ -579,7 +761,27 @@ class _HomePageState extends State<HomePage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const SearchPage()));
   }
 
-  void _openBook(CuratedBook book) {
+  /// 当前这本书解析出的真实封面（未解析/解析失败时为 null → 文字封面）。
+  String? _coverOf(CuratedBook book) =>
+      CuratedResolver.instance.cached(book.id)?.cover;
+
+  /// 点书：先解析成书城书籍，再直达阅读器；失败回退到搜索页。
+  ///
+  /// 【青茄修复·新增】原来这里进的是荐读页，用户还要自己搜一遍；
+  /// 现在「点一下 = 开始读」，长按才看荐语。
+  Future<void> _openBook(CuratedBook book) async {
+    if (_opening) return;
+    await openCuratedReading(
+      context,
+      book,
+      onBusy: (busy) {
+        if (mounted) setState(() => _opening = busy);
+      },
+    );
+  }
+
+  /// 长按：保留原来的荐读页（荐语 + 同类推荐 + 搜索入口）。
+  void _openCuratedPage(CuratedBook book) {
     final category = _catalog.categoryOf(book.category);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -591,6 +793,49 @@ class _HomePageState extends State<HomePage> {
               .where((b) => b.id != book.id)
               .toList(growable: false),
           categoryOf: _catalog.categoryOf,
+        ),
+      ),
+    );
+  }
+}
+
+/// 解析/打开书籍时的轻量遮罩：不弹页面、不闪白，只挡住重复点击。
+class _OpeningOverlay extends StatelessWidget {
+  const _OpeningOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: 0.08),
+          child: Center(
+            child: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: palette.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.10),
+                    blurRadius: 18,
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: HomePalette.accent,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

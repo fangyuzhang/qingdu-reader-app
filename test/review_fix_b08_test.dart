@@ -87,9 +87,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final button = find.byKey(const ValueKey('reader-scroll-chapter-comments'));
-    await tester.ensureVisible(button);
+    // 【青茄】章末「上一章/下一章/本章评论」按钮已按产品要求删除，
+    // 评论入口移到顶部工具栏；先点正文中央唤出工具栏再点入口。
+    await tester.tap(
+      find.byKey(const ValueKey('reader-page-surface')),
+      warnIfMissed: false,
+    );
     await tester.pumpAndSettle();
+    final button = find.byKey(const ValueKey('reader-toolbar-chapter-comments'));
+    expect(button, findsOneWidget);
     await tester.tap(button);
     await tester.pumpAndSettle();
 

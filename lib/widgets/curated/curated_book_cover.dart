@@ -1,10 +1,16 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/curated_book.dart';
+import '../../services/poster_cache.dart';
 import '../home/home_design.dart';
 
-/// 文字封面：书单里没有网络封面图，用分类渐变 + 书名排版生成，
+/// 文字封面：书单本身没有封面图时，用分类渐变 + 书名排版生成，
 /// 保证离线也能有稳定的视觉识别（每本书的颜色只取决于分类）。
+///
+/// 【青茄修复·新增】[coverUrl] 非空时改为渲染书城真实封面；加载中/失败
+/// 仍然显示文字封面（占位与 errorWidget 都返回它），所以不会闪白块，
+/// 断网时观感与以前完全一致。
 class CuratedBookCover extends StatelessWidget {
   const CuratedBookCover({
     super.key,
@@ -12,6 +18,7 @@ class CuratedBookCover extends StatelessWidget {
     required this.category,
     this.width = 104,
     this.showAge = true,
+    this.coverUrl,
   });
 
   final CuratedBook book;
@@ -19,12 +26,42 @@ class CuratedBookCover extends StatelessWidget {
   final double width;
   final bool showAge;
 
+  /// 书城封面地址；空/缺省时只渲染文字封面。
+  final String? coverUrl;
+
+  /// 回退文字封面的 key（测试用来断言离线/失败态）。
+  static const fallbackKey = Key('curated-cover-fallback');
+
   @override
   Widget build(BuildContext context) {
+    final height = width * 4 / 3;
+    final url = coverUrl?.trim() ?? '';
+    if (url.isEmpty) return _fallbackCover();
+
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: CachedNetworkImage(
+        cacheManager: PosterCache.instance,
+        imageUrl: url,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        memCacheWidth: (width * ratio).round(),
+        memCacheHeight: (height * ratio).round(),
+        fadeInDuration: const Duration(milliseconds: 180),
+        placeholder: (_, _) => _fallbackCover(),
+        errorWidget: (_, _, _) => _fallbackCover(),
+      ),
+    );
+  }
+
+  Widget _fallbackCover() {
     final gradient =
         category?.gradient ?? const [Color(0xFF2FA98C), Color(0xFF1F7F69)];
     final height = width * 4 / 3;
     return SizedBox(
+      key: fallbackKey,
       width: width,
       height: height,
       child: ClipRRect(
@@ -139,104 +176,114 @@ class CuratedBookRow extends StatelessWidget {
     required this.book,
     required this.category,
     required this.onTap,
+    this.onLongPress,
+    this.coverUrl,
   });
 
   final CuratedBook book;
   final CuratedCategory? category;
   final VoidCallback onTap;
 
+  /// 长按进「荐读页」（首页保留的荐语入口）。
+  final VoidCallback? onLongPress;
+  final String? coverUrl;
+
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return HomePressable(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      semanticLabel: '${book.title}，${book.author}',
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: palette.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: palette.line, width: 0.6),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CuratedBookCover(
-              book: book,
-              category: category,
-              width: 62,
-              showAge: false,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          book.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: palette.ink,
-                          ),
-                        ),
-                      ),
-                      _AgeTag(age: book.age),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    book.author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11.5, color: palette.muted),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    book.blurb,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.45,
-                      color: palette.ink.withValues(alpha: 0.78),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (final tag in book.tags.take(3))
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: palette.soft,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: HomePressable(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        semanticLabel: '${book.title}，${book.author}',
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: palette.line, width: 0.6),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CuratedBookCover(
+                book: book,
+                category: category,
+                width: 62,
+                showAge: false,
+                coverUrl: coverUrl,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
                           child: Text(
-                            tag,
+                            book.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 10,
-                              height: 1.3,
-                              color: palette.muted,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: palette.ink,
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                ],
+                        _AgeTag(age: book.age),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      book.author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: palette.muted),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      book.blurb,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.45,
+                        color: palette.ink.withValues(alpha: 0.78),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final tag in book.tags.take(3))
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: palette.soft,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                fontSize: 10,
+                                height: 1.3,
+                                color: palette.muted,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -281,6 +328,8 @@ class CuratedBookTile extends StatelessWidget {
     required this.category,
     required this.width,
     required this.onTap,
+    this.onLongPress,
+    this.coverUrl,
   });
 
   final CuratedBook book;
@@ -288,50 +337,58 @@ class CuratedBookTile extends StatelessWidget {
   final double width;
   final VoidCallback onTap;
 
+  /// 长按进「荐读页」（首页保留的荐语入口）。
+  final VoidCallback? onLongPress;
+  final String? coverUrl;
+
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return HomePressable(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      semanticLabel: '${book.title}，${book.author}',
-      child: SizedBox(
-        width: width,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CuratedBookCover(
-              book: book,
-              category: category,
-              width: width,
-              showAge: false,
-            ),
-            const SizedBox(height: 8),
-            // 用 Flexible 兜住：外层横滑列表是定高的，字号放大时宁可
-            // 挤压也不允许溢出（1.8x 字号实测会差 0.15px）。
-            Flexible(
-              child: Text(
-                book.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  height: 1.3,
-                  fontWeight: FontWeight.w600,
-                  color: palette.ink,
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: HomePressable(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        semanticLabel: '${book.title}，${book.author}',
+        child: SizedBox(
+          width: width,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CuratedBookCover(
+                book: book,
+                category: category,
+                width: width,
+                showAge: false,
+                coverUrl: coverUrl,
+              ),
+              const SizedBox(height: 8),
+              // 用 Flexible 兜住：外层横滑列表是定高的，字号放大时宁可
+              // 挤压也不允许溢出（1.8x 字号实测会差 0.15px）。
+              Flexible(
+                child: Text(
+                  book.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    color: palette.ink,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Flexible(
-              child: Text(
-                book.author,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: palette.muted),
+              const SizedBox(height: 2),
+              Flexible(
+                child: Text(
+                  book.author,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

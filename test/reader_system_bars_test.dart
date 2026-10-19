@@ -42,9 +42,7 @@ void main() {
       .map((call) => call.arguments['enabled'] as bool)
       .toList();
 
-  testWidgets('system bars follow reader route and foreground ownership', (
-    tester,
-  ) async {
+  testWidgets('状态栏常显：阅读器全程不再请求沉浸模式', (tester) async {
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       MaterialApp(navigatorKey: navigator, home: const Scaffold()),
@@ -53,7 +51,10 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => _reader()),
     );
     await tester.pumpAndSettle();
-    expect(immersiveRequests(), [true]);
+    // 【青茄修复·状态栏常显】进正文不再隐藏系统状态栏（电量/信号/时间
+    // 全程可见），也就没有了「正文整体上移→下移」的两跳。
+    expect(immersiveRequests(), isNotEmpty);
+    expect(immersiveRequests(), everyElement(isFalse));
     final viewport = tester.getRect(_surface);
     final layout = tester
         .widget<ReaderPagedView>(find.byType(ReaderPagedView))
@@ -67,14 +68,14 @@ void main() {
         same(layout),
       );
     }
-    expect(immersiveRequests(), [true]);
+    expect(immersiveRequests(), everyElement(isFalse));
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
     expect(calls.any((call) => call.method == 'suspend'), isTrue);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    expect(immersiveRequests().last, isTrue);
+    expect(immersiveRequests().last, isFalse);
 
     navigator.currentState!.push(
       MaterialPageRoute<void>(
@@ -90,7 +91,7 @@ void main() {
     expect(immersiveRequests(), isNot(contains(true)));
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
-    expect(immersiveRequests().last, isTrue);
+    expect(immersiveRequests().last, isFalse);
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(calls.any((call) => call.method == 'stop'), isTrue);
@@ -101,7 +102,7 @@ void main() {
     expect(immersiveRequests(), hasLength(count));
   });
 
-  testWidgets('paragraph-ideas sheet keeps immersive on (#57)', (tester) async {
+  testWidgets('段评弹层不再切换系统栏（状态栏常显）', (tester) async {
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       MaterialApp(navigatorKey: navigator, home: const Scaffold()),
@@ -110,24 +111,21 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => _readerWithIdeas()),
     );
     await tester.pumpAndSettle();
-    expect(immersiveRequests(), isNot(contains(false)));
-    expect(immersiveRequests().last, isTrue);
+    expect(immersiveRequests(), isNot(contains(true)));
 
     // Open the ideas sheet via the paragraph bubble.
     await tester.tap(find.text('42'));
     await tester.pumpAndSettle();
     expect(find.text('这段太真实了'), findsOneWidget);
-    // The sheet pushes a route; immersive must NOT be released.
-    expect(immersiveRequests(), isNot(contains(false)));
-    expect(immersiveRequests().last, isTrue);
+    // The sheet pushes a route; system bars stay visible either way.
+    expect(immersiveRequests(), isNot(contains(true)));
 
-    // Close the sheet; immersive stays on with no transient release:
-    // the close used to flash the status bar for a frame (#57).
+    // Close the sheet; still no immersive request (the #57 flash is gone
+    // together with immersive mode).
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(find.text('这段太真实了'), findsNothing);
-    expect(immersiveRequests(), isNot(contains(false)));
-    expect(immersiveRequests().last, isTrue);
+    expect(immersiveRequests(), isNot(contains(true)));
     expect(tester.takeException(), isNull);
   });
 
@@ -175,10 +173,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('42'));
     await tester.pumpAndSettle();
-    expect(
-      animatedBarrierColor(),
-      Colors.black.withValues(alpha: 0.4),
-    );
+    expect(animatedBarrierColor(), Colors.black.withValues(alpha: 0.4));
     expect(tester.takeException(), isNull);
   });
 

@@ -120,6 +120,11 @@ android {
             // key cannot be overwritten by these -- it must be uninstalled.
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
+            } else {
+                // 【青茄】没有正式签名时退回 debug 签名：否则 release APK 完全
+                // 未签名，adb install 直接报 INSTALL_PARSE_FAILED_NO_CERTIFICATES，
+                // 用户日常只能装 400MB+ 的 debug 包。
+                signingConfig = signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
             isShrinkResources = true

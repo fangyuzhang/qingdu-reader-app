@@ -194,7 +194,9 @@ void main() {
         .controller!;
     expect(controller.offset, greaterThan(0));
     expect(store.entry?['position'], controller.offset);
-    expect(store.entry?['progress'], closeTo(1 / 9, .001));
+    // 【青茄】滚动模式改为章节段窗口后，进度按「段内偏移 / 段高」计算，
+    // 不再包含列表 padding 与已删除的章末按钮行，与恢复时的比例略有出入。
+    expect(store.entry?['progress'], closeTo(1 / 9, .02));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

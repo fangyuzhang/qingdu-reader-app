@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../services/reader_annotation_store.dart';
@@ -197,115 +199,220 @@ Future<String?> showAnnotationEditor(
   String initial = '',
   String title = '写批注',
 }) {
-  final controller = TextEditingController(text: initial);
-  final focus = FocusNode();
-  final future = showModalBottomSheet<String>(
+  return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
     backgroundColor: const Color(0xFFFBF6EC),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
     ),
-    builder: (sheetContext) {
-      final viewInsets = MediaQuery.viewInsetsOf(sheetContext);
-      // 【青茄重构·修复】弹层动画结束后再抢焦点：autofocus + 路由动画 +
-      // 输入法弹出三件事同时跑，真机上首帧会明显卡顿。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Future<void>.delayed(const Duration(milliseconds: 280), () {
-          if (focus.context != null && !focus.hasFocus) focus.requestFocus();
-        });
+    builder: (_) =>
+        _AnnotationEditorSheet(quote: quote, initial: initial, title: title),
+  );
+}
+
+/// 【青茄重构·修复】输入面板独立成 StatefulWidget。
+///
+/// 之前 `TextEditingController` / `FocusNode` 建在 `showAnnotationEditor`
+/// 函数里，用 `future.whenComplete` 释放：但 `showModalBottomSheet` 的 Future
+/// 在**路由开始 pop 时**就完成，此时退场动画（约 250ms）还在跑，TextField
+/// 仍挂在树上继续 rebuild，于是 `addListener` 撞上已 dispose 的 FocusNode，
+/// 真机上直接抛 `A FocusNode was used after being disposed`，并连带出
+/// RenderFlex 溢出、`_dependents.isEmpty` 等一串级联报错。
+///
+/// 交给 State.dispose 释放，时机严格晚于退场动画，且与 rebuild 顺序对齐。
+class _AnnotationEditorSheet extends StatefulWidget {
+  const _AnnotationEditorSheet({
+    required this.quote,
+    required this.initial,
+    required this.title,
+  });
+
+  final String quote;
+  final String initial;
+  final String title;
+
+  @override
+  State<_AnnotationEditorSheet> createState() => _AnnotationEditorSheetState();
+}
+
+class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
+  late final TextEditingController _controller;
+  late final FocusNode _focus;
+  Timer? _focusTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initial);
+    _focus = FocusNode(debugLabel: 'reader-annot-input');
+    // 【青茄重构·修复】弹层首帧就把焦点交出去，让「面板上滑」和
+    // 「键盘升起」同时发生，而不是先等面板停稳再弹键盘。
+    //
+    // 之前延迟 280ms 是为了躲开卡顿，但那个卡顿的真正来源是键盘 inset
+    // 触发了阅读页整章重排（现已由 resizeToAvoidBottomInset: false +
+    // viewInsets 清零解决），延迟反而制造了「先弹面板、再弹键盘」的两段式观感。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      // 个别 ROM 会在路由转场中吞掉第一次请求，补一次即可，不再无限重试。
+      _focusTimer = Timer(const Duration(milliseconds: 180), () {
+        if (!mounted || _focus.hasFocus) return;
+        _focus.requestFocus();
       });
-      return RepaintBoundary(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text(
-                    '写想法',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF3D3427),
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusTimer?.cancel();
+    _focusTimer = null;
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    return RepaintBoundary(
+      child: AnimatedPadding(
+        // 只把输入法高度作为内边距，内容自身可滚动，窄屏/大字号下不会溢出。
+        // 用 AnimatedPadding 而不是 Padding：Android 的 inset 是一次性跳变的，
+        // 直接改 padding 会让面板内容瞬移到键盘上方；补一段 140ms 的缓动，
+        // 面板与键盘看起来是同一次上滑，而不是弹两次。
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.only(bottom: viewInsets.bottom),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      widget.title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF3D3427),
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      key: const ValueKey('reader-annot-cancel'),
+                      onPressed: () => Navigator.of(context).pop(),
+                      // 颜色钉死：弹层是浅色米底，不能跟随深色主题的 onSurface。
+                      child: const Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF6B5B3E),
+                        ),
+                      ),
+                    ),
+                    FilledButton(
+                      key: const ValueKey('reader-annot-save'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFE85D26),
+                        foregroundColor: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: _submit,
+                      child: const Text(
+                        '保存',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3EAD8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    widget.quote,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: Color(0xFF6B5B3E),
                     ),
                   ),
-                  const Spacer(),
-                  TextButton(
-                    key: const ValueKey('reader-annot-cancel'),
-                    onPressed: () => Navigator.of(sheetContext).pop(),
-                    child: const Text('取消'),
+                ),
+                const SizedBox(height: 10),
+                // TextField 没有 selectionColor 参数，选中态只能走主题；
+                // 单独包一层 TextSelectionTheme，避免深色主题把选区/光标也刷成浅色。
+                TextSelectionTheme(
+                  data: const TextSelectionThemeData(
+                    cursorColor: Color(0xFF2E2A24),
+                    // 品牌绿 12% 透明：选区在米白面板上可辨，又不盖住文字。
+                    selectionColor: Color(0x1F3DA88A),
+                    selectionHandleColor: Color(0xFF3DA88A),
                   ),
-                  FilledButton(
-                    key: const ValueKey('reader-annot-save'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFE85D26),
-                      visualDensity: VisualDensity.compact,
+                  child: TextField(
+                    key: const ValueKey('reader-annot-input'),
+                    controller: _controller,
+                    focusNode: _focus,
+                    // 不开 autofocus：焦点由上面的 post-frame 回调在入场动画
+                    // 结束后再抢，避免与路由/输入法动画抢同一批帧。
+                    maxLines: 4,
+                    minLines: 3,
+                    textInputAction: TextInputAction.newline,
+                    // 【修复】输入文字颜色必须显式指定：面板挂在独立路由上，
+                    // 若宿主是深色主题，bodyLarge.color / onSurface 是浅色，
+                    // 浅色字落在白色输入框上等于隐形。这里钉死深棕色，不随主题走。
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.55,
+                      color: Color(0xFF2E2A24),
                     ),
-                    onPressed: () {
-                      final text = controller.text.trim();
-                      if (text.isEmpty) return;
-                      Navigator.of(sheetContext).pop(text);
-                    },
-                    child: const Text('保存'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF3EAD8),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  quote,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    height: 1.5,
-                    color: Color(0xFF8A7B62),
+                    cursorColor: const Color(0xFF2E2A24),
+                    decoration: InputDecoration(
+                      hintText: '写下你的想法…',
+                      hintStyle: const TextStyle(
+                        fontSize: 14,
+                        height: 1.55,
+                        color: Color(0xFFA29483),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: const EdgeInsets.all(12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFEADFC8)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFEADFC8)),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                key: const ValueKey('reader-annot-input'),
-                controller: controller,
-                focusNode: focus,
-                // 不开 autofocus：焦点由上面的 post-frame 回调在入场动画
-                // 结束后再抢，避免与路由/输入法动画抢同一批帧。
-                maxLines: 4,
-                minLines: 3,
-                style: const TextStyle(fontSize: 14, height: 1.55),
-                decoration: InputDecoration(
-                  hintText: '写下你的想法…',
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.all(12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFEADFC8)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFEADFC8)),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      );
-    },
-  );
-  // 弹层关闭后再释放输入控制器与焦点，避免监听泄漏。
-  return future.whenComplete(() {
-    controller.dispose();
-    focus.dispose();
-  });
+      ),
+    );
+  }
 }

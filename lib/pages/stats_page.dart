@@ -12,6 +12,7 @@ import '../services/reader_annotation_store.dart';
 import '../services/reading_stats_store.dart';
 import 'notes_page.dart';
 import 'detail_page.dart';
+import 'reading_report_page.dart';
 
 /// Reading statistics page modeled after the legado ReadRecordFragment:
 /// overview cards, a 16-week heatmap, recent books, daily records, recent
@@ -99,9 +100,11 @@ class _StatsPageState extends State<StatsPage> {
       ..addListener(_scheduleStoreReload);
     // 【青茄重构·新增】字数/打卡来自独立存储，单独监听。
     ReadingStatsStore.instance.changes.addListener(_reloadReadingTotals);
-    unawaited(ReadingStatsStore.instance.init().then((_) {
-      if (mounted) _reloadReadingTotals();
-    }));
+    unawaited(
+      ReadingStatsStore.instance.init().then((_) {
+        if (mounted) _reloadReadingTotals();
+      }),
+    );
   }
 
   void _reloadReadingTotals() {
@@ -175,6 +178,7 @@ class _StatsPageState extends State<StatsPage> {
   Future<void> _load() async {
     _reloadFromStore();
   }
+
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -316,7 +320,14 @@ class _StatsPageState extends State<StatsPage> {
           const SizedBox(height: 12),
           _Card(
             title: '阅读热力图',
-            subtitle: '最近 16 周',
+            subtitle: '最近 16 周 · 点击查看详细报告',
+            key: const ValueKey('stats-heatmap-card'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => const ReadingReportPage(),
+              ),
+            ),
             child: _Heatmap(cells: heatmap),
           ),
           const SizedBox(height: 12),
@@ -573,59 +584,90 @@ class _Card extends StatelessWidget {
   final String? subtitle;
   final Widget child;
 
-  const _Card({this.title, this.subtitle, required this.child});
+  /// 【青茄重构·新增】整卡可点（目前用于「阅读热力图 → 我的阅读」）。
+  final VoidCallback? onTap;
+
+  const _Card({
+    super.key,
+    this.title,
+    this.subtitle,
+    required this.child,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant, width: 0.6),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (title != null) ...[
-            Row(
-              children: [
-                Container(
-                  width: 3.5,
-                  height: 15,
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title != null) ...[
+          Row(
+            children: [
+              Container(
+                width: 3.5,
+                height: 15,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                Text(
+              ),
+              Expanded(
+                child: Text(
                   title!,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-              ],
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
-              Padding(
-                padding: const EdgeInsets.only(left: 11.5),
-                child: Text(
-                  subtitle!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
               ),
+              if (onTap != null)
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
             ],
-            const SizedBox(height: 14),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 11.5),
+              child: Text(
+                subtitle!,
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
+            ),
           ],
-          child,
+          const SizedBox(height: 14),
         ],
+        child,
+      ],
+    );
+    if (onTap == null) {
+      return Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: scheme.outlineVariant, width: 0.6),
+        ),
+        child: body,
+      );
+    }
+    // 可点击时把底色/描边放到 Material 上，水波纹才不会盖在 Container 底下。
+    return Material(
+      key: ValueKey('stats-card-$title'),
+      color: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant, width: 0.6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(padding: const EdgeInsets.all(18), child: body),
       ),
     );
   }
@@ -948,7 +990,11 @@ class _RecentBooksCard extends StatelessWidget {
         width: w,
         height: h,
         color: scheme.surfaceContainerHighest,
-        child: Icon(LucideIcons.book_open, color: scheme.onSurfaceVariant, size: 20),
+        child: Icon(
+          LucideIcons.book_open,
+          color: scheme.onSurfaceVariant,
+          size: 20,
+        ),
       );
     }
     return ClipRRect(
@@ -965,7 +1011,11 @@ class _RecentBooksCard extends StatelessWidget {
           width: w,
           height: h,
           color: scheme.surfaceContainerHighest,
-          child: Icon(LucideIcons.book_open, color: scheme.onSurfaceVariant, size: 20),
+          child: Icon(
+            LucideIcons.book_open,
+            color: scheme.onSurfaceVariant,
+            size: 20,
+          ),
         ),
       ),
     );
