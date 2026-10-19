@@ -35,27 +35,33 @@ import 'widgets/lazy_indexed_stack.dart';
 import 'widgets/home/home_design.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
-  // runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
-  AppLog.instance.install();
-  unawaited(AppLog.instance.startPersistence());
-  // 短剧分享的「系统分享」走 Android 的 Intent.ACTION_SEND
-  //（官方同一条路径）。桥不可用时 PlayletShare 自动降级为复制链接，
-  // 不会把失败说成成功。
-  // 插件回 false 表示没能调起选择器（没有可分享的应用），必须原样返回：
-  // 「调不起来」与「已分享」是两件事。
-  SharePlusLite.handler = ({required title, required text}) async {
-    final launched = await const MethodChannel(
-      'fqapp/share',
-    ).invokeMethod<bool>('shareText', {'title': title, 'text': text});
-    return launched ?? false;
-  };
-  // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
-  // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
-  RustLogSource.reader = BackendService.instance.readRustLog;
+  // 【青茄重构·修复】绑定初始化与 runApp 必须落在**同一个 zone**：
+  // 原先 ensureInitialized() 在根 zone、runApp 在 runZonedGuarded 的子 zone，
+  // debug 模式启动即抛 "Zone mismatch"（BindingBase.debugCheckZone），
+  // 且子 zone 的未捕获异常处理对绑定回调不生效。
   runZonedGuarded(
-    () => runApp(const ProviderScope(child: FqApp())),
+    () {
+      WidgetsFlutterBinding.ensureInitialized();
+      // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
+      // runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
+      AppLog.instance.install();
+      unawaited(AppLog.instance.startPersistence());
+      // 短剧分享的「系统分享」走 Android 的 Intent.ACTION_SEND
+      //（官方同一条路径）。桥不可用时 PlayletShare 自动降级为复制链接，
+      // 不会把失败说成成功。
+      // 插件回 false 表示没能调起选择器（没有可分享的应用），必须原样返回：
+      // 「调不起来」与「已分享」是两件事。
+      SharePlusLite.handler = ({required title, required text}) async {
+        final launched = await const MethodChannel(
+          'fqapp/share',
+        ).invokeMethod<bool>('shareText', {'title': title, 'text': text});
+        return launched ?? false;
+      };
+      // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
+      // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
+      RustLogSource.reader = BackendService.instance.readRustLog;
+      runApp(const ProviderScope(child: FqApp()));
+    },
     (error, stack) => AppLog.e('zone', '未捕获异步异常', error: error, stack: stack),
   );
 }
