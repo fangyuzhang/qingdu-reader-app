@@ -8,6 +8,7 @@ import '../models/book_comment.dart';
 import '../models/book_detail.dart';
 import '../models/chapter_summary.dart';
 import '../models/media_item.dart';
+import '../services/content_rating.dart';
 import '../models/media_description.dart';
 import '../models/series_detail.dart';
 import '../services/api_client.dart';
@@ -1122,6 +1123,7 @@ class _DetailPageState extends State<DetailPage> {
         startIndex: startIndex,
       ),
       _ => ReaderPage(
+        ageRating: ContentRating.ofItem(widget.item),
         bookId: _contentId,
         title: widget.item.title,
         cover: widget.item.cover,

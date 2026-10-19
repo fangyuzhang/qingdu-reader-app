@@ -336,7 +336,8 @@ void main() {
       expect(dramaItems, isNotEmpty);
       expect(dramaItems.every((item) => item.kind == 'video'), isTrue);
 
-      container.read(homeProvider.notifier).selectTab(5); // 听书 supersedes it.
+      // 【青茄重构】新顺序下 index 2 是「听书」（tabType 5）。
+      container.read(homeProvider.notifier).selectTab(2);
       await Future<void>.delayed(Duration.zero);
 
       expect(container.read(dramaProvider).tabIndex, dramaTabIndex);
@@ -710,7 +711,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the bottom bar lists 短剧 right after 首页', (tester) async {
+  // 【青茄重构】产品删除短剧后主导航只剩 首页 / 书架 / 我的 三栏，
+  // 原「短剧紧跟首页」用例改为验证三栏顺序 + 短剧入口确实不再存在。
+  testWidgets('the bottom bar lists 首页, 书架 and 我的', (tester) async {
     await tester.binding.setSurfaceSize(const Size(400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
@@ -722,33 +725,20 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Scoped to the bar: the home page's own category strip also has a 短剧 entry.
     Finder navLabel(String label) => find.descendant(
       of: find.byType(NavigationBar),
       matching: find.text(label),
     );
 
     final home = tester.getCenter(navLabel('首页')).dx;
-    final drama = tester.getCenter(navLabel('短剧')).dx;
     final library = tester.getCenter(navLabel('书架')).dx;
     final mine = tester.getCenter(navLabel('我的')).dx;
-    expect(home, lessThan(drama));
-    expect(drama, lessThan(library));
+    expect(home, lessThan(library));
     expect(library, lessThan(mine));
 
-    // The destination is lazy: nothing of the 短剧 feed is built before a tap.
+    // 短剧 tab 已删除：导航栏里不再有该入口，也没有 DramaPage。
+    expect(navLabel('短剧'), findsNothing);
     expect(find.byType(DramaPage), findsNothing);
-    await tester.tap(navLabel('短剧'));
-    await tester.pumpAndSettle();
-    expect(find.byType(DramaPage), findsOneWidget);
-    expect(find.byKey(const Key('drama_feed')), findsOneWidget);
-    // 用户已移除右侧追剧入口。
-    expect(find.text('追剧'), findsNothing);
-    // The shell mounts its own DramaPage without seams, so its inline session
-    // starts a real directory request here. Advance past the client timeout to
-    // drain that timer, which would otherwise outlive the test.
-    await tester.pump(const Duration(seconds: 25));
-    await tester.pump();
     expect(tester.takeException(), isNull);
   });
 

@@ -687,18 +687,21 @@ void main() {
     addTearDown(container.dispose);
     final notifier = container.read(provider.notifier);
 
+    // 【青茄重构】首页分类删除 短剧/漫剧/漫画 后，索引 2 是「听书」（tabType 5）。
+    // 本用例验证「旧 tab 的迟到响应不会覆盖新 tab」，与具体分类无关。
     notifier.selectTab(1); // 小说, request still pending.
     expect(requests[2], hasLength(1));
-    notifier.selectTab(2); // 短剧 supersedes it.
-    expect(requests[8], hasLength(1));
+    notifier.selectTab(2); // 听书 supersedes it.
+    expect(requests[5], hasLength(1));
 
-    requests[8]!.single.complete(
-      HomepagePage(items: [_item('video')], nextOffset: null, sessionId: null),
+    requests[5]!.single.complete(
+      HomepagePage(items: [_item('audio-1')], nextOffset: null, sessionId: null),
     );
     await _flushMicrotasks();
     expect(container.read(provider).tabIndex, 2);
-    expect(container.read(provider).items.single.id, 'video');
-    expect(container.read(provider).items.single.kind, 'video');
+    expect(container.read(provider).items.single.id, 'audio-1');
+    // 听书 tab 会把条目 kind 强制为 audio（_forceKind）。
+    expect(container.read(provider).items.single.kind, 'audio');
 
     // Completing the older novel request must not change the selected feed.
     requests[2]!.single.complete(
@@ -710,7 +713,7 @@ void main() {
     );
     await _flushMicrotasks();
     expect(container.read(provider).tabIndex, 2);
-    expect(container.read(provider).items.single.id, 'video');
+    expect(container.read(provider).items.single.id, 'audio-1');
 
     // The canceled novel request must not make an empty cache look loaded.
     notifier.selectTab(1);

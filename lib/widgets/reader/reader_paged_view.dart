@@ -6,6 +6,7 @@ import 'package:flutter/physics.dart' show ClampedSimulation;
 
 import '../../services/reader_preferences.dart';
 import '../../services/reader_underline_store.dart';
+import 'reader_note_block.dart';
 import 'reader_chapter_layout.dart';
 import 'reader_page_curl.dart';
 import 'reader_illustration.dart';
@@ -61,6 +62,9 @@ class ReaderPagedView extends StatefulWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
+  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  final List<ReaderRangeUnderline> annotationRanges;
+
   /// The sentence being narrated, in chapter display-text coordinates.
   final (int, int)? narrationRange;
 
@@ -108,6 +112,7 @@ class ReaderPagedView extends StatefulWidget {
     this.selectionScope,
     this.selection,
     this.rangeUnderlines = const [],
+    this.annotationRanges = const [],
     this.narrationRange,
   });
 
@@ -695,6 +700,7 @@ class ReaderPagedViewState extends State<ReaderPagedView>
       page: pages[index],
       spec: widget.layout.spec,
       imageProviderFactory: widget.imageProviderFactory,
+      annotationRanges: widget.annotationRanges,
     );
   }
 
@@ -748,6 +754,7 @@ class ReaderPagedViewState extends State<ReaderPagedView>
             onParagraphLongPressMoveUpdate:
                 widget.onParagraphLongPressMoveUpdate,
             onParagraphLongPressEnd: widget.onParagraphLongPressEnd,
+            annotationRanges: widget.annotationRanges,
             selectionScope: widget.selectionScope,
             selection: widget.selection,
             rangeUnderlines: widget.rangeUnderlines,
@@ -862,6 +869,9 @@ class ReaderPageContent extends StatelessWidget {
   final ReaderSelectionScope? selectionScope;
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
+
+  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  final List<ReaderRangeUnderline> annotationRanges;
   final (int, int)? narrationRange;
 
   const ReaderPageContent({
@@ -875,6 +885,7 @@ class ReaderPageContent extends StatelessWidget {
     this.selectionScope,
     this.selection,
     this.rangeUnderlines = const [],
+    this.annotationRanges = const [],
     this.narrationRange,
   });
 
@@ -893,6 +904,15 @@ class ReaderPageContent extends StatelessWidget {
               height: fragment.height,
               child: Builder(
                 builder: (context) {
+                  // 【青茄重构·新增】批注块：整块渲染，不参与选区与划线。
+                  final note = fragment.block.inlineNote;
+                  if (note != null) {
+                    return ReaderNoteBlock(
+                      note: note,
+                      height: fragment.height,
+                      maxLines: fragment.block.noteLines,
+                    );
+                  }
                   // Marks ride inside the block's own coordinate space (the
                   // OverflowBox child under the -sourceTop shift), so wash and
                   // underlines translate with the fragment and clip at its
@@ -916,6 +936,7 @@ class ReaderPageContent extends StatelessWidget {
                           scope: selectionScope!,
                           selection: selection,
                           rangeUnderlines: rangeUnderlines,
+                          annotationRanges: annotationRanges,
                           narrationRange: narrationRange,
                           windowTop: fragment.sourceTop,
                           windowBottom: fragment.sourceTop + fragment.height,

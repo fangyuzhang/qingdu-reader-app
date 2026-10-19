@@ -4,12 +4,47 @@ import 'package:hive_ce/hive.dart';
 import '../models/media_item.dart';
 import 'encrypted_hive.dart';
 
+/// 书架分组状态。
+///
+/// 【青茄重构·新增】三段式分组替代「单一书架」：在读 / 想读 / 读完。
+/// 存字符串而非枚举，老记录缺字段时按 [reading] 兜底，不会因为 schema
+/// 升级丢掉整架书。
+abstract final class ShelfStatus {
+  static const reading = 'reading';
+  static const want = 'want';
+  static const done = 'done';
+
+  static const all = {reading, want, done};
+
+  static String normalize(String? raw) =>
+      raw != null && all.contains(raw) ? raw : reading;
+
+  static String label(String status) => switch (status) {
+    want => '想读',
+    done => '读完',
+    _ => '在读',
+  };
+}
+
 /// One 加入书架 record.
 class ShelfRecord {
   final MediaItem item;
   final DateTime addedAt;
 
-  const ShelfRecord({required this.item, required this.addedAt});
+  /// 【青茄重构·新增】在读 / 想读 / 读完，见 [ShelfStatus]。
+  final String status;
+
+  const ShelfRecord({
+    required this.item,
+    required this.addedAt,
+    this.status = ShelfStatus.reading,
+  });
+
+  ShelfRecord copyWith({String? status}) => ShelfRecord(
+    item: item,
+    addedAt: addedAt,
+    status: status ?? this.status,
+  );
 }
 
 /// The device-local 加入书架 collection.
@@ -80,7 +115,11 @@ class ShelfStore {
       final item = _itemFrom(raw);
       if (item == null) continue;
       records.add(
-        ShelfRecord(item: item, addedAt: _addedAt(raw) ?? DateTime(1970)),
+        ShelfRecord(
+          item: item,
+          addedAt: _addedAt(raw) ?? DateTime(1970),
+          status: ShelfStatus.normalize(raw['status']?.toString()),
+        ),
       );
     }
     records.sort((a, b) => b.addedAt.compareTo(a.addedAt));
@@ -110,6 +149,21 @@ class ShelfStore {
     _revision.value++;
   }
 
+  /// 改变分组（在读 / 想读 / 读完）。记录不存在时静默忽略。
+  Future<void> setStatus(MediaItem item, String status) async {
+    final box = _openBox;
+    if (box == null) return;
+    final key = keyOf(item);
+    final raw = box.get(key);
+    if (raw is! Map) return;
+    final addedAt = _addedAt(raw) ?? DateTime.now();
+    await box.put(
+      key,
+      _recordOf(item, addedAt, status: ShelfStatus.normalize(status)),
+    );
+    _revision.value++;
+  }
+
   Future<void> removeKeys(Iterable<String> keys) async {
     final box = _openBox;
     if (box == null) return;
@@ -129,7 +183,10 @@ class ShelfStore {
     if (box == null) return;
     var wrote = false;
     for (final record in records) {
-      await box.put(keyOf(record.item), _recordOf(record.item, record.addedAt));
+      await box.put(
+        keyOf(record.item),
+        _recordOf(record.item, record.addedAt, status: record.status),
+      );
       wrote = true;
     }
     if (wrote) _revision.value++;
@@ -196,7 +253,11 @@ class ShelfStore {
     return changed;
   }
 
-  static Map<String, dynamic> _recordOf(MediaItem item, DateTime addedAt) => {
+  static Map<String, dynamic> _recordOf(
+    MediaItem item,
+    DateTime addedAt, {
+    String status = ShelfStatus.reading,
+  }) => {
     'id': item.id,
     'kind': item.kind,
     'title': item.title,
@@ -207,6 +268,7 @@ class ShelfStore {
     'seriesId': item.seriesId,
     'episodeId': item.episodeId,
     'addedAt': addedAt.millisecondsSinceEpoch,
+    'status': status,
   };
 
   static DateTime? _addedAt(Map<dynamic, dynamic> raw) {

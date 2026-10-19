@@ -8,6 +8,8 @@ import '../models/media_item.dart';
 import '../services/library_store.dart';
 import '../services/poster_cache.dart';
 import '../services/media_history_store.dart';
+import '../services/reader_annotation_store.dart';
+import 'notes_page.dart';
 import 'detail_page.dart';
 
 /// Reading statistics page modeled after the legado ReadRecordFragment:
@@ -31,6 +33,9 @@ class _StatsPageState extends State<StatsPage> {
   List<Map<String, dynamic>> _history = [];
   Map<String, Map<String, double>> _readTimeMap = {};
   bool _loading = true;
+
+  /// 【青茄重构·新增】全书架批注数（笔记页入口的计数）。
+  int _annotationCount = 0;
   // Derived aggregates, computed once per load so build() (which may be
   // called several times per frame for different cards) doesn't rebuild them.
   Map<String, double> _dayMinutes = const {};
@@ -137,6 +142,13 @@ class _StatsPageState extends State<StatsPage> {
       _rankItems = _computeRankItems(history, timeMap, kinds);
       _loading = false;
     });
+    // 批注来自另一个存储（Hive 异步读取），单独回填，不阻塞时长统计。
+    unawaited(
+      ReaderAnnotationStore.instance.countAll().then((count) {
+        if (!mounted) return;
+        setState(() => _annotationCount = count);
+      }),
+    );
   }
 
   /// Reload entry point shared by pull-to-refresh and the visibility catch-up.
@@ -284,6 +296,14 @@ class _StatsPageState extends State<StatsPage> {
             title: '阅读热力图',
             subtitle: '最近 16 周',
             child: _Heatmap(cells: heatmap),
+          ),
+          const SizedBox(height: 12),
+          _NotesEntryCard(
+            count: _annotationCount,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(builder: (_) => const NotesPage()),
+            ),
           ),
           const SizedBox(height: 12),
           _RecentBooksCard(
@@ -443,6 +463,88 @@ String _daySubtitle(DateTime date) {
 }
 
 // ---------- card shell ----------
+
+/// 【青茄重构·新增】笔记入口：显示批注/书摘总数，点进笔记页。
+class _NotesEntryCard extends StatelessWidget {
+  const _NotesEntryCard({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      key: const Key('stats-notes-entry'),
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0x1AD64545),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                LucideIcons.pen_line,
+                size: 18,
+                color: Color(0xFFD64545),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Expanded 而非 Spacer：窄屏 + 大字号时说明文案要能折行，
+            // 否则 Row 会横向溢出（stats_page_widget_test 覆盖该场景）。
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '我的笔记',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    count == 0 ? '还没有批注，阅读时长按选句写想法' : '$count 条批注与书摘',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (count > 0)
+              Text(
+                '$count',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFD64545),
+                ),
+              ),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _Card extends StatelessWidget {
   final String? title;

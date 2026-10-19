@@ -12,7 +12,6 @@ import 'dart:ui' show ImageFilter;
 import 'pages/home_page.dart';
 import 'pages/audio_page.dart';
 import 'pages/cached_books_page.dart';
-import 'pages/drama_page.dart';
 import 'pages/library_page.dart';
 import 'pages/mine_page.dart';
 import 'services/app_log.dart';
@@ -347,8 +346,9 @@ class _RootShellState extends State<RootShell> {
     }
     final palette = HomePalette.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isDramaTab = _index == 1;
-    final glassDark = isDark || isDramaTab;
+    // 【青茄重构·删除】短剧 tab（原 index 1）已移除，剩余三页均为浅色内容页，
+    // 状态栏与玻璃拟态配色只跟随系统明暗，不再需要 isDramaTab 特判。
+    final glassDark = isDark;
     // 墨水屏模式：本 build 由 Theme 变化触发重建（上面读了 Theme.of），
     // 这里直接读 notifier 当前值即可拿到最新开关，不另加监听。
     final eink = einkModeNotifier.value;
@@ -415,11 +415,6 @@ class _RootShellState extends State<RootShell> {
             label: '首页',
           ),
           NavigationDestination(
-            icon: Icon(LucideIcons.clapperboard),
-            selectedIcon: Icon(LucideIcons.clapperboard),
-            label: '短剧',
-          ),
-          NavigationDestination(
             icon: Icon(LucideIcons.library_big),
             selectedIcon: Icon(LucideIcons.library_big),
             label: '书架',
@@ -435,20 +430,18 @@ class _RootShellState extends State<RootShell> {
 
     return Scaffold(
       extendBody: true,
-      // 状态栏图标亮度挂在壳层、按选中 tab 切换：短剧页是黑底视频流（官方
-      // SeriesMallFragment 的透明顶栏直接压在 feed 上），深色图标在黑底上
-      // 整条状态栏都看不见，必须浅色；其余三页浅色底用深色。样式放壳层而不是
-      // 各页内部，是因为 IndexedStack 里未选中的页不参与绘制，页内
-      // AnnotatedRegion 切走后会残留上一个页的样式。
+      // 状态栏图标亮度挂在壳层、按主题明暗切换。样式放壳层而不是各页内部，
+      // 是因为 IndexedStack 里未选中的页不参与绘制，页内 AnnotatedRegion
+      // 切走后会残留上一个页的样式。
+      // 【青茄重构】删除短剧 tab 后不再有黑底视频流页面，无需按 tab 特判。
       body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: _index == 1
-            ? SystemUiOverlayStyle.light
-            : (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark),
+        value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
         child: LazyIndexedStack(
           index: _index,
           children: [
             const HomePage(),
-            const DramaPage(),
+            // 【青茄重构·删除】原第二个页面为 DramaPage（短剧 feed），
+            // 产品定位删除短剧后主导航为 首页/书架/我的 三 tab。
             // 空书架上的「去书城找书」切回首页 tab。
             LibraryPage(onBrowse: () => setState(() => _index = 0)),
             const MinePage(),

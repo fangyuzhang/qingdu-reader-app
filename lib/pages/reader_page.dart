@@ -20,6 +20,7 @@ import '../services/volume_key.dart';
 import '../services/reader_history.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_tap_zones.dart';
+import '../services/reader_annotation_store.dart';
 import '../services/reader_underline_store.dart';
 import '../services/system_tts.dart';
 import '../widgets/chapter_cache_sheet.dart';
@@ -31,6 +32,8 @@ import '../widgets/reader/reader_cutout_insets.dart';
 import '../widgets/reader/reader_illustration.dart';
 import '../widgets/reader/reader_ideas_sheet.dart';
 import '../widgets/reader/reader_paged_view.dart';
+import '../widgets/content_rating_chip.dart';
+import '../widgets/reader/reader_note_block.dart';
 import '../widgets/reader/reader_paragraph_menu.dart';
 import '../widgets/reader/reader_status_bar.dart';
 import '../widgets/reader/reader_text_selection.dart';
@@ -68,6 +71,17 @@ class ReaderPage extends StatefulWidget {
   /// Local 划线 storage. Defaults to the device-wide box.
   final ReaderUnderlineStore? underlineStore;
 
+  /// 【青茄重构·新增】批注/书摘存储（默认单例；测试可注入）。
+  final ReaderAnnotationStore? annotationStore;
+
+  /// 【青茄重构·新增】打开后直接定位到的正文偏移（字符坐标）。
+  /// 笔记页「定位原文」用它覆盖已保存进度。
+  final int? startTextOffset;
+
+  /// 【青茄重构·新增】内容分级（12+ / 15+），null 表示入口未提供，
+  /// 不显示标签。见 `ContentRating`。
+  final String? ageRating;
+
   /// Paragraph ideas for the current chapter. When both this and
   /// [commentResolver] are null the reader fetches them itself, unless a
   /// [chapterCache] was injected (an injected cache marks the caller as
@@ -93,6 +107,9 @@ class ReaderPage extends StatefulWidget {
     this.ideasLoader,
     this.commentResolver,
     this.underlineStore,
+    this.annotationStore,
+    this.startTextOffset,
+    this.ageRating,
   });
 
   @override
@@ -356,6 +373,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// records; paragraph ones live in [_underlines]).
   List<ReaderRangeUnderline> _rangeUnderlines = const [];
 
+  /// 【青茄重构·新增】本章批注/书摘（行内批注块 + 红线）。
+  List<ReaderAnnotation> _annotations = const [];
+  int _annotationRevision = 0;
+  int _layoutAnnotationRevision = -1;
+  late final VoidCallback _annotationListener;
+
+  // ===== 【青茄重构·新增】护眼提醒 =====
+  /// 连续阅读提醒间隔（青少年护眼边界，不做家长监护）。
+  static const _eyeCareInterval = Duration(minutes: 45);
+
+  Timer? _eyeCareTimer;
+
+  /// 本次阅读会话选择「今天不再提醒」后置位。
+  bool _eyeCareMuted = false;
+
   /// The live text selection — a whole paragraph right after a long press,
   /// then reshaped character-by-character by dragging a handle. Cleared on an
   /// outside tap, a scroll or a page turn, like the official selection.
@@ -424,7 +456,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         ? 0
         : widget.startIndex.clamp(0, widget.chapters.length - 1);
     _scrollController.addListener(_onScroll);
+    // 【青茄重构·新增】批注块内的删除/编辑直接写存储，这里跟随后刷新。
+    _annotationListener = () {
+      if (mounted) unawaited(_loadAnnotations());
+    };
+    _annotationStore.changes.addListener(_annotationListener);
     _preferencesFuture = _loadPreferences();
+    _startEyeCareTimer();
     if (widget.chapters.isEmpty) {
       _loading = false;
       _error = '暂无可阅读章节';
@@ -813,6 +851,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         await _toggleSelectionUnderline(
           add: action == ReaderParagraphAction.underline,
         );
+      // 【青茄重构·新增】批注 / 书摘：选中范围落库后由排版层插入行内批注块。
+      case ReaderParagraphAction.annot:
+        await _createAnnotation(excerpt: false);
+      case ReaderParagraphAction.excerpt:
+        await _createAnnotation(excerpt: true);
     }
   }
 
@@ -967,6 +1010,170 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
+  // ==================== 【青茄重构·新增】护眼提醒 ====================
+
+  /// 每 [eyeCareInterval] 提醒一次休息。只在本页仍是当前路由时弹出，
+  /// 避免用户已经退出阅读却突然收到弹窗。
+  void _startEyeCareTimer() {
+    _eyeCareTimer?.cancel();
+    if (_eyeCareMuted) return;
+    _eyeCareTimer = Timer(_eyeCareInterval, () {
+      if (!mounted) return;
+      if (ModalRoute.of(context)?.isCurrent != true) {
+        // 不在前台就顺延，回来后再提醒。
+        _startEyeCareTimer();
+        return;
+      }
+      unawaited(_showEyeCareReminder());
+    });
+  }
+
+  Future<void> _showEyeCareReminder() async {
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('reader-eye-care-dialog'),
+        title: const Text('休息一下眼睛'),
+        content: const Text(
+          '你已经连续阅读 45 分钟。抬头看看远处，让眼睛放松一会儿再继续吧。',
+          style: TextStyle(fontSize: 13, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('reader-eye-care-mute'),
+            onPressed: () => Navigator.of(dialogContext).pop('mute'),
+            child: const Text('今天不再提醒'),
+          ),
+          TextButton(
+            key: const ValueKey('reader-eye-care-later'),
+            onPressed: () => Navigator.of(dialogContext).pop('later'),
+            child: const Text('再看 15 分钟'),
+          ),
+          FilledButton(
+            key: const ValueKey('reader-eye-care-rest'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFE85D26),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop('rest'),
+            child: const Text('休息一下'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'mute':
+        _eyeCareMuted = true;
+        _eyeCareTimer?.cancel();
+        _showMessage('本次阅读不再提醒');
+      case 'rest':
+        await _persistProgress();
+        if (mounted) Navigator.of(context).maybePop();
+      default:
+        // 再看 15 分钟：把提醒顺延到一个较短周期。
+        _eyeCareTimer?.cancel();
+        _eyeCareTimer = Timer(const Duration(minutes: 15), () {
+          if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+            unawaited(_showEyeCareReminder());
+          }
+        });
+    }
+  }
+
+  // ==================== 【青茄重构·新增】批注 / 书摘 ====================
+
+  ReaderAnnotationStore get _annotationStore =>
+      widget.annotationStore ?? ReaderAnnotationStore.instance;
+
+  /// 批注红线（蜗牛读书式 2px 下划线），与划线共用章节坐标空间。
+  List<ReaderRangeUnderline> get _annotationRanges => [
+    for (final note in _annotations)
+      ReaderRangeUnderline(
+        bookId: note.bookId,
+        chapterId: note.chapterId,
+        start: note.start,
+        end: note.end,
+        text: note.text,
+        createdAt: note.createdAt,
+      ),
+  ];
+
+  /// 交给排版层的行内批注块数据。
+  List<ReaderInlineNote> get _inlineNotes => [
+    for (final note in _annotations)
+      ReaderInlineNote(
+        id: note.key,
+        start: note.start,
+        end: note.end,
+        quote: note.text,
+        thought: note.thought,
+        isExcerpt: !note.isAnnot,
+      ),
+  ];
+
+  /// 加载本章批注/书摘（切章、切书、存储变化时都会重新走一遍）。
+  Future<void> _loadAnnotations() async {
+    final generation = _loadGeneration;
+    final chapterId = _chapter.itemId;
+    List<ReaderAnnotation> loaded;
+    try {
+      loaded = await _annotationStore.load(widget.bookId, chapterId);
+    } catch (_) {
+      loaded = const [];
+    }
+    if (!mounted || generation != _loadGeneration) return;
+    if (chapterId != _chapter.itemId) return;
+    setState(() {
+      _annotations = loaded;
+      ++_annotationRevision;
+    });
+  }
+
+  /// 把当前选区写成批注（带想法）或书摘（仅收藏原文）。
+  Future<void> _createAnnotation({required bool excerpt}) async {
+    final selection = _selection;
+    final layout = _chapterLayout;
+    if (selection == null || layout == null || !selection.isValid) return;
+    final quote = layout.textInRange(selection.start, selection.end).trim();
+    if (quote.isEmpty) return;
+    var thought = '';
+    if (!excerpt) {
+      final input = await showAnnotationEditor(
+        context,
+        quote: quote,
+        title: '写想法',
+      );
+      // 取消或留空视为放弃，不产生半成品批注。
+      if (input == null || input.trim().isEmpty) return;
+      thought = input.trim();
+    }
+    if (!mounted) return;
+    final note = ReaderAnnotation(
+      bookId: widget.bookId,
+      chapterId: _chapter.itemId,
+      start: selection.start,
+      end: selection.end,
+      text: quote,
+      thought: thought,
+      type: excerpt
+          ? ReaderAnnotation.kTypeExcerpt
+          : ReaderAnnotation.kTypeAnnot,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      bookTitle: widget.title,
+      chapterTitle: _chapter.title,
+    );
+    try {
+      await _annotationStore.add(note);
+    } catch (_) {
+      if (mounted) _showMessage('保存失败，请重试');
+      return;
+    }
+    if (!mounted) return;
+    await _loadAnnotations();
+    if (mounted) _showMessage(excerpt ? '已加入书摘' : '已添加批注');
+  }
+
   void _changeBrightness(double value, {bool followSystem = false}) {
     _preferencesDirty = true;
     final generation = ++_brightnessGeneration;
@@ -1006,6 +1213,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _settleReadTime();
     _sessionActive = false;
     unawaited(_persistProgress());
+    _eyeCareTimer?.cancel();
+    _annotationStore.changes.removeListener(_annotationListener);
     _scrollController.dispose();
     super.dispose();
   }
@@ -1084,19 +1293,32 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       setState(() {
         _content = text;
         _chapterContent = content;
-        _savedPosition = saved;
+        // 【青茄重构·新增】笔记页定位：首次加载的目标章直接跳到批注位置，
+        // 用与自动存档一致的 positionVersion=2 结构复用恢复逻辑。
+        final jump = widget.startTextOffset;
+        _savedPosition =
+            jump != null && _index == widget.startIndex && jump >= 0
+            ? {
+                'chapterId': chapter.itemId,
+                'positionVersion': 2,
+                'textOffset': jump,
+                'kind': 'book',
+              }
+            : saved;
         _loading = false;
         // Ideas and 划线 belong to the chapter, so they are dropped on every
         // load and fetched again; a stale entry would point at another chapter.
         _ideas = ChapterIdeas.empty;
         _underlines = const {};
         _rangeUnderlines = const [];
+        _annotations = const [];
         _selection = null;
         _selectionBarOpen = false;
       });
       unawaited(_prefetchAround(_index));
       unawaited(_loadIdeas(chapter, generation));
       unawaited(_loadUnderlines());
+      unawaited(_loadAnnotations());
       if (!loaded.fetched && content.needsRefresh()) {
         unawaited(_refreshCachedChapter(chapter));
       }
@@ -1523,6 +1745,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _chapterLayout?.spec == spec &&
         _layoutIdeasRevision == _ideasRevision &&
         _layoutUnderlineRevision == _underlineRevision &&
+        _layoutAnnotationRevision == _annotationRevision &&
         _layoutBubblesVisible == bubblesVisible;
     final layout = reusable
         ? _chapterLayout!
@@ -1536,9 +1759,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 : const {},
             underlinedParagraphs: _underlines,
             bubbleBuilder: bubblesVisible ? _buildParagraphBubble : null,
+            // 【青茄重构·新增】批注块参与排版：分页/滚动两种模式共用。
+            inlineNotes: _inlineNotes,
           );
     _layoutIdeasRevision = _ideasRevision;
     _layoutUnderlineRevision = _underlineRevision;
+    _layoutAnnotationRevision = _annotationRevision;
     _layoutBubblesVisible = bubblesVisible;
     final initialRestore = _needsRestore;
     final restored = initialRestore
@@ -2341,15 +2567,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: preset.textColor,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: preset.textColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (widget.ageRating != null) ...[
+                        const SizedBox(width: 6),
+                        ContentRatingChip(rating: widget.ageRating!, compact: true),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -2470,6 +2706,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         selectionScope: scope,
                         selection: _selection,
                         rangeUnderlines: _rangeUnderlines,
+                        annotationRanges: _annotationRanges,
                         narrationRange: _narrationRange,
                       )
                     : _buildScrollContent(layout, scope),
@@ -2799,6 +3036,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 selectionScope: scope,
                 selection: _selection,
                 rangeUnderlines: _rangeUnderlines,
+                annotationRanges: _annotationRanges,
                 narrationRange: _narrationRange,
                 onParagraphLongPress: (block, position) =>
                     unawaited(_onParagraphLongPress(block, position)),

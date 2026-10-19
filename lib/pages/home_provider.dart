@@ -155,7 +155,10 @@ typedef _AllManjuGroup = ({
 /// and feed before the first await, so switching tabs can never redirect a
 /// late response into a different tab's cache.
 class HomeNotifier extends Notifier<HomeState> {
-  static const tabs = ['全部', '小说', '短剧', '漫剧', '漫画', '听书', '视频'];
+  // 【青茄重构】前三位与首页分类（推荐/小说/听书）按索引对齐：
+  // 首页只展示前三项，后四项（短剧/漫剧/漫画/视频）保留给 DramaPage 的
+  // 频道源与既有测试基础设施（DramaPage 已无主导航入口，见 docs/02）。
+  static const tabs = ['全部', '小说', '听书', '短剧', '漫剧', '漫画', '视频'];
   static const tabKinds = {
     '小说': 'book',
     '短剧': 'video',

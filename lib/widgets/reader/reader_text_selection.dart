@@ -287,6 +287,10 @@ class ReaderBlockMarkLayer extends StatefulWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
+  /// 【青茄重构·新增】批注/书摘的章节空间范围，以红色 2px 下划线绘制
+  /// （蜗牛读书式批注标识）。与划线的 [rangeUnderlines] 同一坐标空间。
+  final List<ReaderRangeUnderline> annotationRanges;
+
   /// The sentence being narrated, in chapter display-text coordinates
   /// (same space as [ReaderTextSelection]); painted as a background wash
   /// behind the text. Null when nothing is being narrated.
@@ -305,6 +309,7 @@ class ReaderBlockMarkLayer extends StatefulWidget {
     required this.selection,
     required this.rangeUnderlines,
     required this.child,
+    this.annotationRanges = const [],
     this.narrationRange,
     this.windowTop = 0,
     this.windowBottom = double.infinity,
@@ -384,6 +389,7 @@ class _ReaderBlockMarkLayerState extends State<ReaderBlockMarkLayer> {
               painter: _lazyPainter,
               selectionRange: range,
               rangeUnderlines: widget.rangeUnderlines,
+              annotationRanges: widget.annotationRanges,
               washColor: widget.scope.washColor,
               underlineColor: widget.scope.underlineColor,
               narrationRange: narrationRange,
@@ -504,16 +510,23 @@ class ReaderBlockMarkPainter extends CustomPainter {
   final TextPainter painter;
   final (int, int)? selectionRange;
   final List<ReaderRangeUnderline> rangeUnderlines;
+
+  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  final List<ReaderRangeUnderline> annotationRanges;
   final Color washColor;
   final Color underlineColor;
   final (int, int)? narrationRange;
   final Color narrationColor;
+
+  /// 批注红线颜色（蜗牛读书式）。
+  static const annotationColor = Color(0xFFD64545);
 
   const ReaderBlockMarkPainter({
     required this.block,
     required this.painter,
     required this.selectionRange,
     required this.rangeUnderlines,
+    this.annotationRanges = const [],
     required this.washColor,
     required this.underlineColor,
     required this.narrationRange,
@@ -578,12 +591,25 @@ class ReaderBlockMarkPainter extends CustomPainter {
         canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), line);
       }
     }
+    // 【青茄重构·新增】批注/书摘红线（2px，压在划线之上）。
+    final annot = Paint()
+      ..color = annotationColor
+      ..strokeWidth = 2;
+    for (final note in annotationRanges) {
+      final range = blockSelectionRange(block, note.start, note.end);
+      if (range == null) continue;
+      for (final rect in _lineRects(range.$1, range.$2)) {
+        final y = rect.bottom - 1;
+        canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), annot);
+      }
+    }
   }
 
   @override
   bool shouldRepaint(ReaderBlockMarkPainter old) =>
       old.selectionRange != selectionRange ||
       !listEquals(old.rangeUnderlines, rangeUnderlines) ||
+      !listEquals(old.annotationRanges, annotationRanges) ||
       old.washColor != washColor ||
       old.underlineColor != underlineColor ||
       old.narrationRange != narrationRange ||

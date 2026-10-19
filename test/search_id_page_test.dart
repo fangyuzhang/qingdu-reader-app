@@ -19,7 +19,7 @@ void main() {
         _app(
           idLoader: (id) async {
             ids.add(id);
-            return _item(id, '精确漫剧', 'manju');
+            return _item(id, '精确作品', 'book');
           },
           keywordLoader:
               (query, {required int tabType, required int offset}) async {
@@ -31,19 +31,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(ids, [_id]);
       expect(keywordCalls, 0);
-      expect(find.text('精确漫剧'), findsOneWidget);
-      expect(find.byType(ChoiceChip), findsNWidgets(6));
+      expect(find.text('精确作品'), findsOneWidget);
+      // 【青茄重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书。
+      expect(find.byType(ChoiceChip), findsNWidgets(3));
       expect(find.text('加载更多'), findsNothing);
       expect(find.text('没有更多了'), findsNothing);
-      await tester.tap(find.widgetWithText(ChoiceChip, '短剧'));
+      // 听书分类下没有这本书 → 空分类提示
+      await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pumpAndSettle();
       expect(find.byType(MediaCard), findsNothing);
       expect(find.text('该分类下没有匹配的作品'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫剧'));
+      // 小说分类下命中
+      await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<MediaCard>(find.byType(MediaCard)).item.kind,
-        'manju',
+        'book',
       );
       expect(ids, [_id]);
       expect(keywordCalls, 0);
@@ -53,7 +56,7 @@ void main() {
       await tester.tap(find.text(_id));
       await tester.pumpAndSettle();
       expect(ids, [_id, _id]);
-      expect(find.text('精确漫剧'), findsOneWidget);
+      expect(find.text('精确作品'), findsOneWidget);
     },
   );
 
@@ -135,14 +138,14 @@ void main() {
       _app(
         idLoader: (id) async {
           if (++attempts == 1) throw Exception('网络暂时不可用');
-          return _item(id, '重试成功', 'manju');
+          return _item(id, '重试成功', 'book');
         },
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('加载失败，点击重试'), findsOneWidget);
     expect(find.text('未找到该 ID 对应的作品'), findsNothing);
-    await tester.tap(find.widgetWithText(ChoiceChip, '漫剧'));
+    await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
     await tester.pumpAndSettle();
     expect(attempts, 1);
     await tester.tap(find.text('加载失败，点击重试'));
@@ -164,27 +167,26 @@ void main() {
           },
           keywordLoader:
               (query, {required int tabType, required int offset}) async => [
-                // The search stays on the current tab (漫画), and the real
-                // loader normalizes the returned tab title to the requested
-                // category, so the stub must return the manga tab.
+                // 搜索停留在当前 tab（小说），真实 loader 会按请求分类
+                // 归一化返回的 tab 标题，所以 stub 也要返回小说 tab。
                 SearchTab(
-                  title: '漫画',
-                  items: [_item('new', '新关键词结果', 'manga')],
+                  title: '书籍',
+                  items: [_item('new', '新关键词结果', 'book')],
                   hasMore: false,
                 ),
               ],
         ),
       );
       await tester.pump();
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫剧'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pump();
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫画'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
       await tester.pump();
       expect(idCalls, 1);
       await tester.enterText(find.byType(TextField), '新关键词');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      pending.complete(_item(_id, '过期 ID 结果', 'manju'));
+      pending.complete(_item(_id, '过期 ID 结果', 'book'));
       await tester.pumpAndSettle();
       expect(find.text('新关键词结果'), findsOneWidget);
       expect(find.text('过期 ID 结果'), findsNothing);
@@ -198,7 +200,7 @@ void main() {
     await tester.pumpWidget(
       _app(
         initialQuery: '旧关键词',
-        idLoader: (id) async => _item(id, 'ID 结果', 'manju'),
+        idLoader: (id) async => _item(id, 'ID 结果', 'book'),
         keywordLoader: (query, {required int tabType, required int offset}) =>
             pending.future,
       ),
@@ -231,7 +233,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.byTooltip('清空'));
       await tester.pumpAndSettle();
-      pending.first.complete(_item(_id, '过期 ID 结果', 'manju'));
+      pending.first.complete(_item(_id, '过期 ID 结果', 'book'));
       await tester.pumpAndSettle();
       expect(find.text('搜索历史'), findsOneWidget);
       expect(find.text('过期 ID 结果'), findsNothing);

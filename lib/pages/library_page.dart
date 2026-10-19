@@ -89,6 +89,9 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage> {
   int _tab = 0;
+
+  /// 【青茄重构·新增】书架分组筛选：all / reading / want / done。
+  String _group = 'all';
   BookshelfLayout _layout = BookshelfLayout.grid;
   int _layoutGeneration = 0;
   bool _editing = false;
@@ -137,9 +140,21 @@ class _LibraryPageState extends State<LibraryPage> {
     if (!mounted) return;
     final history = LibraryStore.instance.historySnapshot();
     setState(() {
-      _shelf = _shelfEntries(ShelfStore.instance.records(), history);
+      // 【青茄重构·删除】产品已删除 短剧/漫剧/漫画 三类内容入口，
+      // 书架（收藏）与浏览历史不再展示这三类条目；数据保留在本地，
+      // 二期恢复分类时移除本过滤即可。
+      const hiddenKinds = {'video', 'manju', 'manga'};
+      _shelf = _shelfEntries(
+        ShelfStore.instance
+            .records()
+            .where((record) => !hiddenKinds.contains(record.item.kind))
+            .toList(),
+        history,
+      );
       _browseHistory = [
-        for (final entry in history) _ShelfEntry.fromHistory(entry),
+        for (final entry in history)
+          if (!hiddenKinds.contains(entry['kind']?.toString() ?? 'book'))
+            _ShelfEntry.fromHistory(entry),
       ];
       // 选中集合随数据回真：条目在别处被移出 / 删除后，它的键不该继续占着
       // 「已选择 N 本」，也不该把全选判定带偏。
@@ -413,8 +428,12 @@ class _LibraryPageState extends State<LibraryPage> {
     MaterialPageRoute<void>(builder: (_) => const CachedBooksPage()),
   );
 
-  List<_ShelfEntry> get _visibleEntries =>
-      _tab == 0 ? _sortShelf(_shelf) : _browseHistory;
+  List<_ShelfEntry> get _visibleEntries {
+    if (_tab != 0) return _browseHistory;
+    final sorted = _sortShelf(_shelf);
+    if (_group == 'all') return sorted;
+    return sorted.where((entry) => entry.status == _group).toList();
+  }
 
   bool get _allSelected {
     final entries = _visibleEntries;
@@ -666,6 +685,7 @@ class _LibraryPageState extends State<LibraryPage> {
                       ),
               ),
               if (!_editing && _tab == 0) _toolbar(palette),
+              if (!_editing && _tab == 0) _groupBar(palette),
               Expanded(child: _content(palette)),
             ],
           ),
@@ -779,6 +799,63 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 2026-10-13 按用户要求删掉排序 / 筛选 / 编辑三个入口：排序退回固定「最近
   /// 阅读优先」，类型筛选整个移除，编辑改由卡片长按进入（见 `_longPress`）。
   /// 页头因此少一行；只剩两个控件，[Row] 即可放下，无需再折行。
+  /// 【青茄重构·新增】书架分组切换：在读 / 想读 / 读完。
+  ///
+  /// 分组是筛选而非分类容器——一本书只属于一个分组，默认「在读」，
+  /// 老记录没有分组字段时按在读兜底（见 [ShelfStatus.normalize]）。
+  Widget _groupBar(HomePalette palette) {
+    final groups = [
+      ('all', '全部'),
+      (ShelfStatus.reading, '在读'),
+      (ShelfStatus.want, '想读'),
+      (ShelfStatus.done, '读完'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(
+        left: ShelfTokens.screenPadding,
+        right: ShelfTokens.screenPadding,
+        bottom: ShelfTokens.spaceS,
+      ),
+      child: Row(
+        children: [
+          for (final (key, label) in groups) ...[
+            _GroupChip(
+              key: Key('shelf-group-$key'),
+              label: label,
+              count: key == 'all'
+                  ? _shelf.length
+                  : _shelf.where((entry) => entry.status == key).length,
+              selected: _group == key,
+              palette: palette,
+              onTap: () => setState(() {
+                _group = key;
+                _selected.clear();
+              }),
+            ),
+            if (key != groups.last.$1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 把选中的书移到指定分组。
+  Future<void> _moveSelectedTo(String status) async {
+    final targets = [
+      for (final entry in _shelf)
+        if (_selected.contains(entry.selectionKey)) entry,
+    ];
+    if (targets.isEmpty) return;
+    for (final entry in targets) {
+      await ShelfStore.instance.setStatus(entry.item, status);
+    }
+    if (!mounted) return;
+    setState(_selected.clear);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已移到「${ShelfStatus.label(status)}」')),
+    );
+  }
+
   Widget _toolbar(HomePalette palette) {
     return Padding(
       padding: const EdgeInsets.only(
@@ -1048,6 +1125,44 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 导入图书 / 最近删除 / 连载更新提醒，这些本地都没有数据源，不伪造入口；
   /// 有数据支撑的只有「移出书架」（书架 tab，可撤销故直接执行）与「删除」
   /// （浏览历史 tab，不可撤销故保留确认）。
+  /// 批量改分组的选择面板。
+  Future<void> _pickGroup() async {
+    final status = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                '移到分组',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+            for (final key in [ShelfStatus.reading, ShelfStatus.want, ShelfStatus.done])
+              ListTile(
+                key: Key('shelf-group-pick-$key'),
+                leading: Icon(
+                  switch (key) {
+                    ShelfStatus.want => LucideIcons.bookmark,
+                    ShelfStatus.done => LucideIcons.circle_check,
+                    _ => LucideIcons.book_open,
+                  },
+                  size: 20,
+                ),
+                title: Text(ShelfStatus.label(key)),
+                onTap: () => Navigator.of(sheetContext).pop(key),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (status == null) return;
+    await _moveSelectedTo(status);
+  }
+
   Widget _editBottomBar(HomePalette palette) {
     final removing = _tab == 0;
     return _SlideUp(
@@ -1090,10 +1205,64 @@ class _LibraryPageState extends State<LibraryPage> {
                         ? _removeFromShelf
                         : _deleteHistory,
                   ),
+                  // 【青茄重构·新增】批量改分组（仅在书架 tab 出现）。
+                  if (removing)
+                    _BottomAction(
+                      key: const Key('shelf-group-action'),
+                      icon: LucideIcons.folder_input,
+                      label: '分组',
+                      color: palette.ink,
+                      onTap: _selected.isEmpty ? null : _pickGroup,
+                    ),
                   const Spacer(),
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 书架分组 chip：选中态用强调色填充，后缀显示该组数量。
+class _GroupChip extends StatelessWidget {
+  const _GroupChip({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final bool selected;
+  final HomePalette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? palette.soft : Colors.transparent,
+          borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
+          border: Border.all(
+            color: selected ? HomePalette.accent.withValues(alpha: 0.45) : palette.line,
+            width: 0.6,
+          ),
+        ),
+        child: Text(
+          '$label $count',
+          style: TextStyle(
+            fontSize: ShelfTokens.subtitle,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? palette.accentText : palette.muted,
           ),
         ),
       ),
@@ -1122,6 +1291,9 @@ class _ShelfEntry {
   final int? episode;
   final bool importedResume;
 
+  /// 【青茄重构·新增】书架分组（在读/想读/读完）；浏览历史恒为在读占位。
+  final String status;
+
   const _ShelfEntry({
     required this.item,
     required this.selectionKey,
@@ -1131,6 +1303,7 @@ class _ShelfEntry {
     this.progress,
     this.episode,
     this.importedResume = false,
+    this.status = ShelfStatus.reading,
   });
 
   factory _ShelfEntry.fromRecord(
@@ -1149,6 +1322,7 @@ class _ShelfEntry {
         record.item.kind == 'book' &&
         history?['fanqieImported'] == true &&
         history?['chapterId'] != null,
+    status: record.status,
   );
 
   factory _ShelfEntry.fromHistory(Map<String, dynamic> history) {

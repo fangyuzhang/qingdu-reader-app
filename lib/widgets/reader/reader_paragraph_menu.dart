@@ -2,7 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 /// What the reader can do with a long-pressed paragraph.
-enum ReaderParagraphAction { copy, listen, underline, removeUnderline }
+///
+/// 【青茄重构·新增】annot（批注：写想法并生成行内批注块）与
+/// excerpt（书摘：收藏选中句子）为蜗牛读书式批注能力，见
+/// docs/02-增删功能方案.md。
+enum ReaderParagraphAction {
+  copy,
+  listen,
+  underline,
+  removeUnderline,
+  annot,
+  excerpt,
+}
 
 /// Floating action bar for a long-pressed paragraph or a dragged selection,
 /// matching the official one.
@@ -95,7 +106,11 @@ class ReaderParagraphMenu extends StatelessWidget {
     required bool underlined,
     required bool paragraphScoped,
     bool showListening = true,
-  }) => paragraphScoped ? (showListening ? 3 : 2) : 2;
+  }) {
+    // 【青茄重构】新增 批注/书摘 两个常驻动作（+2）。
+    final base = paragraphScoped ? (showListening ? 3 : 2) : 2;
+    return base + 2;
+  }
 
   /// Clamped top-left for the bar anchored at [anchor] (window coordinates),
   /// plus which side of the anchor it ended up on — the geometry
@@ -208,6 +223,20 @@ class ReaderParagraphMenu extends StatelessWidget {
                       ? ReaderParagraphAction.removeUnderline
                       : ReaderParagraphAction.underline,
                 ),
+              ),
+              // 【青茄重构·新增】批注：写想法 → 红线 + 行内批注块。
+              _Item(
+                key: const ValueKey('reader-action-annot'),
+                icon: LucideIcons.message_square,
+                label: '批注',
+                onTap: () => onAction(ReaderParagraphAction.annot),
+              ),
+              // 【青茄重构·新增】书摘：收藏选中句子（无想法）。
+              _Item(
+                key: const ValueKey('reader-action-excerpt'),
+                icon: LucideIcons.bookmark,
+                label: '书摘',
+                onTap: () => onAction(ReaderParagraphAction.excerpt),
               ),
             ],
           ),

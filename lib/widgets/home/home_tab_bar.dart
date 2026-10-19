@@ -10,12 +10,12 @@ class HomeCategory {
   const HomeCategory(this.label, this.icon);
 }
 
+// 【青茄重构·删除】原为 推荐/小说/短剧/漫剧/漫画/听书 六分类；
+// 按产品定位（青少年阅读软件，无短剧/无漫画）删除 短剧/漫剧/漫画 三个入口。
+// 底层服务与页面暂保留（见 docs/02-增删功能方案.md），不再从 UI 暴露。
 const homeCategories = [
   HomeCategory('推荐', LucideIcons.sparkles),
   HomeCategory('小说', LucideIcons.book_open),
-  HomeCategory('短剧', LucideIcons.clapperboard),
-  HomeCategory('漫剧', LucideIcons.film),
-  HomeCategory('漫画', LucideIcons.image),
   HomeCategory('听书', LucideIcons.headphones),
 ];
 

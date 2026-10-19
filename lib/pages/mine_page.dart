@@ -5,6 +5,7 @@ import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
 import 'cached_dramas_page.dart';
+import 'notes_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 
@@ -150,9 +151,21 @@ class MinePage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        // 4个快捷入口
+        // 【青茄重构·新增】快捷入口：笔记（批注/书摘） + 缓存 + 设置 + 关于
         Row(
           children: [
+            _buildShortcutTile(
+              context: context,
+              icon: LucideIcons.pen_line,
+              iconColor: const Color(0xFFD64545),
+              label: '我的笔记',
+              palette: palette,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotesPage()),
+              ),
+            ),
+            const SizedBox(width: 8),
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.bookmark,

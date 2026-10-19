@@ -155,6 +155,8 @@ void main() {
     'fixed categories request their own source and filter copied hits',
     (tester) async {
       final requests = <(String, int, int)>[];
+      // 【青茄重构】删除 短剧/漫剧/漫画 后仅保留 综合/小说/听书；
+      // mixed 仍含全部种类，用于验证三类被过滤、其余保留。
       final mixed = [
         for (final kind in ['book', 'video', 'manju', 'manga', 'audio'])
           _item('shared-id', '$kind 作品', kind: kind),
@@ -190,22 +192,14 @@ void main() {
         tester
             .widgetList<ChoiceChip>(find.byType(ChoiceChip))
             .map((chip) => (chip.label as Text).data),
-        ['综合', '小说', '短剧', '漫剧', '漫画', '听书'],
+        ['综合', '小说', '听书'],
       );
-      expect(_visibleKinds(tester), [
-        'book',
-        'video',
-        'manju',
-        'manga',
-        'audio',
-      ]);
+      // 综合结果过滤掉 短剧/漫剧/漫画，仅剩 小说/听书
+      expect(_visibleKinds(tester), ['book', 'audio']);
       expect(requests, [('测试', 1, 0)]);
 
       for (final category in [
         ('小说', 'book', 3),
-        ('短剧', 'video', 11),
-        ('漫剧', 'manju', 11),
-        ('漫画', 'manga', 8),
         ('听书', 'audio', 2),
       ]) {
         await tester.tap(find.widgetWithText(ChoiceChip, category.$1));
@@ -213,20 +207,14 @@ void main() {
         expect(_visibleKinds(tester), [category.$2]);
         expect(requests.last, ('测试', category.$3, 0));
       }
-      expect(requests.map((request) => request.$2), [1, 3, 11, 11, 8, 2]);
+      expect(requests.map((request) => request.$2), [1, 3, 2]);
 
       await tester.tap(find.widgetWithText(ChoiceChip, '综合'));
       await tester.pumpAndSettle();
-      expect(_visibleKinds(tester), [
-        'book',
-        'video',
-        'manju',
-        'manga',
-        'audio',
-      ]);
+      expect(_visibleKinds(tester), ['book', 'audio']);
       expect(
         requests,
-        hasLength(6),
+        hasLength(3),
         reason: 'Completed categories keep their cache',
       );
     },
@@ -269,6 +257,7 @@ void main() {
       await tester.pumpWidget(
         _app((query, {required int tabType, required int offset}) async {
           requests.add((tabType, offset));
+          // 【青茄重构】漫画分类已删除，改用听书（tabType 2）验证同类行为。
           if (tabType == 1) {
             return [
               SearchTab(
@@ -280,16 +269,16 @@ void main() {
                 nextOffset: offset == 0 ? 14 : 0,
               ),
               SearchTab(
-                title: '漫画',
-                items: [_item('old', '综合里的漫画', kind: 'manga')],
+                title: '听书',
+                items: [_item('old', '综合里的听书', kind: 'audio')],
                 hasMore: false,
               ),
             ];
           }
           return [
             SearchTab(
-              title: '漫画',
-              items: [_item('m$offset', '漫画 $offset', kind: 'manga')],
+              title: '听书',
+              items: [_item('m$offset', '听书 $offset', kind: 'audio')],
               hasMore: offset == 0,
               nextOffset: offset == 0 ? 23 : 0,
             ),
@@ -298,11 +287,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(requests, [(1, 0)]);
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫画'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pumpAndSettle();
-      expect(requests, [(1, 0), (8, 0), (8, 23)]);
-      expect(find.text('漫画 23'), findsOneWidget);
-      expect(find.text('综合里的漫画'), findsNothing);
+      expect(requests, [(1, 0), (2, 0), (2, 23)]);
+      expect(find.text('听书 23'), findsOneWidget);
+      expect(find.text('综合里的听书'), findsNothing);
 
       await tester.tap(find.widgetWithText(ChoiceChip, '综合'));
       await tester.pumpAndSettle();
@@ -311,6 +300,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(requests.last, (1, 14));
       expect(find.text('末页小说'), findsOneWidget);
+      // 综合结果过滤掉已删除的三类后仅剩小说
       expect(_visibleKinds(tester).toSet(), {'book'});
     },
   );
@@ -352,7 +342,9 @@ void main() {
   );
 
   testWidgets(
-    'filtered-empty manju pages continue independently of short drama',
+    // 【青茄重构】漫剧/短剧分类已删除，改用 小说/听书 验证同一行为：
+    // 分类内按 kind 过滤、翻页游标独立推进、跨分类结果互不串扰。
+    'filtered-empty pages continue independently of other categories',
     (tester) async {
       final requests = <(int, int)>[];
       await tester.pumpWidget(
@@ -361,44 +353,58 @@ void main() {
           if (tabType == 1) {
             return [SearchTab(title: '综合', items: [], hasMore: false)];
           }
+          if (tabType == 3) {
+            return [
+              SearchTab(
+                title: '综合',
+                items: [_item('unrelated', '其他栏目的内容', kind: 'manju')],
+                hasMore: true,
+                nextOffset: 99,
+              ),
+              SearchTab(
+                title: '书籍',
+                items: offset == 0
+                    ? const []
+                    : [_item('next', '后续小说', kind: 'book')],
+                hasMore: true,
+                nextOffset: offset == 0 ? 17 : 0,
+              ),
+            ];
+          }
           return [
             SearchTab(
-              title: '综合',
-              items: [_item('unrelated', '其他栏目的漫剧', kind: 'manju')],
+              title: '听书',
+              items: offset == 0
+                  ? const []
+                  : [_item('audio-next', '后续讲书', kind: 'audio')],
               hasMore: true,
-              nextOffset: 99,
-            ),
-            SearchTab(
-              title: '短剧',
-              items: [
-                if (offset == 0)
-                  _item('live', '真人短剧', kind: 'video')
-                else
-                  _item('animated', '后续漫剧', kind: 'manju'),
-              ],
-              hasMore: offset == 0,
-              nextOffset: offset == 0 ? 17 : 0,
+              nextOffset: offset == 0 ? 23 : 0,
             ),
           ];
         }),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫剧'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
       await tester.pumpAndSettle();
-      expect(requests, [(1, 0), (11, 0)]);
+      expect(requests, [(1, 0), (3, 0)]);
       expect(find.byType(MediaCard), findsNothing);
+      expect(find.text('其他栏目的内容'), findsNothing);
       expect(find.text('加载更多'), findsOneWidget);
       await tester.tap(find.text('加载更多'));
       await tester.pumpAndSettle();
-      expect(requests.last, (11, 17));
-      expect(find.text('后续漫剧'), findsOneWidget);
-      expect(find.text('其他栏目的漫剧'), findsNothing);
+      expect(requests.last, (3, 17));
+      expect(find.text('后续小说'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(ChoiceChip, '短剧'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pumpAndSettle();
-      expect(requests, [(1, 0), (11, 0), (11, 17), (11, 0), (11, 17)]);
-      expect(find.text('真人短剧'), findsOneWidget);
-      expect(find.text('后续漫剧'), findsNothing);
+      expect(requests, [(1, 0), (3, 0), (3, 17), (2, 0)]);
+      expect(find.byType(MediaCard), findsNothing);
+      expect(find.text('后续小说'), findsNothing);
+      expect(find.text('加载更多'), findsOneWidget);
+      await tester.tap(find.text('加载更多'));
+      await tester.pumpAndSettle();
+      expect(requests.last, (2, 23));
+      expect(find.text('后续讲书'), findsOneWidget);
     },
   );
 
@@ -459,14 +465,16 @@ void main() {
       final requests = <(int, int)>[];
       var attempts = 0;
       await tester.pumpWidget(
+        // 【青茄重构】漫画分类已删除，改用听书（tabType 2）验证：
+        // 某分类的首屏错误不影响其他分类，重试只重试失败的那个分类。
         _app((query, {required int tabType, required int offset}) async {
           requests.add((tabType, offset));
           if (tabType == 1 && attempts++ == 0) throw Exception('首屏失败');
           return [
             SearchTab(
-              title: tabType == 1 ? '综合' : '漫画',
+              title: tabType == 1 ? '综合' : '听书',
               items: [
-                _item('success', '成功作品', kind: tabType == 1 ? 'book' : 'manga'),
+                _item('success', '成功作品', kind: tabType == 1 ? 'book' : 'audio'),
               ],
               hasMore: false,
             ),
@@ -475,16 +483,16 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('加载失败，点击重试'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫画'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pumpAndSettle();
-      expect(_visibleKinds(tester), ['manga']);
+      expect(_visibleKinds(tester), ['audio']);
       expect(find.textContaining('首屏失败'), findsNothing);
       await tester.tap(find.widgetWithText(ChoiceChip, '综合'));
       await tester.pumpAndSettle();
-      expect(requests, [(1, 0), (8, 0)]);
+      expect(requests, [(1, 0), (2, 0)]);
       await tester.tap(find.text('加载失败，点击重试'));
       await tester.pumpAndSettle();
-      expect(requests, [(1, 0), (8, 0), (1, 0)]);
+      expect(requests, [(1, 0), (2, 0), (1, 0)]);
       expect(_visibleKinds(tester), ['book']);
     },
   );
@@ -528,31 +536,33 @@ void main() {
   testWidgets(
     'out of order category responses keep results and loading isolated',
     (tester) async {
-      final manga = Completer<List<SearchTab>>();
+      // 【青茄重构】漫画分类已删除，改用小说（tabType 3）验证同一行为：
+      // 两个分类的乱序响应互不污染，各自的加载态与结果保持隔离。
+      final novel = Completer<List<SearchTab>>();
       final audio = Completer<List<SearchTab>>();
       final requests = <int>[];
       await tester.pumpWidget(
         _app((query, {required int tabType, required int offset}) async {
           requests.add(tabType);
-          if (tabType == 8) return manga.future;
+          if (tabType == 3) return novel.future;
           if (tabType == 2) return audio.future;
           return [SearchTab(title: '综合', items: [], hasMore: false)];
         }),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫画'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
       await tester.pump();
       await tester.tap(find.widgetWithText(ChoiceChip, '听书'));
       await tester.pump();
-      manga.complete([
+      novel.complete([
         SearchTab(
-          title: '漫画',
-          items: [_item('manga', '漫画结果', kind: 'manga')],
+          title: '书籍',
+          items: [_item('novel', '小说结果', kind: 'book')],
           hasMore: false,
         ),
       ]);
       await tester.pump();
-      expect(find.text('漫画结果'), findsNothing);
+      expect(find.text('小说结果'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       audio.complete([
         SearchTab(
@@ -563,10 +573,10 @@ void main() {
       ]);
       await tester.pumpAndSettle();
       expect(find.text('听书结果'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ChoiceChip, '漫画'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '小说'));
       await tester.pumpAndSettle();
-      expect(find.text('漫画结果'), findsOneWidget);
-      expect(requests, [1, 8, 2]);
+      expect(find.text('小说结果'), findsOneWidget);
+      expect(requests, [1, 3, 2]);
     },
   );
 
@@ -637,7 +647,8 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(find.text('搜索历史'), findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNWidgets(6));
+    // 【青茄重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书 三个。
+    expect(find.byType(ChoiceChip), findsNWidgets(3));
     await tester.tap(find.text('测试'));
     await tester.pump();
     expect(pending, hasLength(2));

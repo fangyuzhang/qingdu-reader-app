@@ -25,12 +25,10 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
+  // 【青茄重构】文案数与 tab 数一致（推荐/小说/听书）。
   static const _captions = [
     '换个故事，换一种心情',
     '翻开之后，就舍不得合上',
-    '好戏开场，下一集更精彩',
-    '画中的故事，正在上演',
-    '每一格，都藏着一个新世界',
     '让好故事，陪你走过日常',
   ];
 
@@ -108,10 +106,16 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.read(homeProvider.notifier).loadMore();
   }
 
+  /// 【青茄重构·删除】产品已删除 短剧/漫剧/漫画 三类内容入口，
+  /// 这里在展示层过滤掉这三类（底层 provider 与上游请求保持不变，
+  /// 详见 docs/02-增删功能方案.md「删除策略：入口级删除」）。
+  static const _hiddenKinds = {'video', 'manju', 'manga'};
+
   List<MediaItem> _visibleItems(HomeState state) {
-    if (state.tabIndex == 0) return state.items;
+    final visible = state.items.where((item) => !_hiddenKinds.contains(item.kind));
+    if (state.tabIndex == 0) return visible.toList();
     final kind = HomeNotifier.tabKinds[homeCategories[state.tabIndex].label];
-    return state.items.where((item) => item.kind == kind).toList();
+    return visible.where((item) => item.kind == kind).toList();
   }
 
   @override

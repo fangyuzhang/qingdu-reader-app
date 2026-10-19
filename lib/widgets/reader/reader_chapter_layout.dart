@@ -8,6 +8,7 @@ import '../../services/reader_underline_store.dart';
 import 'reader_bubble.dart';
 import 'reader_illustration.dart';
 import '../../models/chapter_ideas.dart';
+import 'reader_note_block.dart';
 import 'reader_text_selection.dart';
 import 'reader_theme.dart';
 
@@ -98,6 +99,43 @@ class ReaderTextLine {
   double get height => bottom - top;
 }
 
+/// 行内批注块（蜗牛读书式）的排版数据。
+///
+/// 【青茄重构·新增】批注块在排版层是一个「单行、整块高度」的合成块：
+/// 分页时整块落页（本页放不下就整块推到下一页，绝不从中间切断），
+/// 滚动时按同一高度占位。分页与滚动因此共用一套测量结果，
+/// 不需要为两种阅读模式各写一套批注排版。
+@immutable
+class ReaderInlineNote {
+  const ReaderInlineNote({
+    required this.id,
+    required this.start,
+    required this.end,
+    required this.quote,
+    required this.thought,
+    this.isExcerpt = false,
+  });
+
+  /// 存储键（`ReaderAnnotationStore.keyFor`）——批注块内的编辑/删除回写用。
+  final String id;
+
+  /// 章节展示文本坐标，与 [ReaderRangeUnderline] 同一空间。
+  final int start;
+  final int end;
+
+  /// 被标注的原文。
+  final String quote;
+
+  /// 想法；书摘为空串。
+  final String thought;
+
+  /// true = 书摘（角标「摘」），false = 批注（角标「批」）。
+  final bool isExcerpt;
+
+  /// 块内展示的文字：有想法用想法，书摘/纯收藏用原文。
+  String get body => thought.trim().isEmpty ? quote : thought;
+}
+
 @immutable
 class ReaderContentBlock {
   final int index;
@@ -134,6 +172,12 @@ class ReaderContentBlock {
   /// Whether this paragraph carries a locally saved 划线.
   final bool underlined;
 
+  /// 【青茄重构·新增】非空表示这是一个行内批注块（不是正文段落）。
+  final ReaderInlineNote? inlineNote;
+
+  /// 批注块正文的实测行数（渲染时限制 maxLines，保证不发生溢出）。
+  final int noteLines;
+
   const ReaderContentBlock({
     required this.index,
     required this.text,
@@ -151,12 +195,42 @@ class ReaderContentBlock {
     this.bubbleCount,
     this.bubbleVariant,
     this.underlined = false,
+    this.inlineNote,
+    this.noteLines = 0,
   });
 
   int get end => start + text.length;
   bool get isTitle => index == 0;
   bool get isImage => illustration != null;
   bool get hasBubble => bubbleCount != null;
+
+  /// 【青茄重构·新增】行内批注块；正文段落为 false。
+  bool get isNote => inlineNote != null;
+
+  /// 可参与选区/划线/复制的正文段落。
+  bool get isBody => !isTitle && !isImage && !isNote;
+
+  /// 仅替换纵向位置（插入批注块后需要重排后续块的 top）。
+  ReaderContentBlock withTop(double value) => ReaderContentBlock(
+    index: index,
+    text: text,
+    start: start,
+    legacyStart: legacyStart,
+    top: value,
+    height: height,
+    span: span,
+    align: align,
+    lines: lines,
+    illustration: illustration,
+    paraIndex: paraIndex,
+    textId: textId,
+    startMs: startMs,
+    bubbleCount: bubbleCount,
+    bubbleVariant: bubbleVariant,
+    underlined: underlined,
+    inlineNote: inlineNote,
+    noteLines: noteLines,
+  );
 }
 
 /// Translates a TTS sentence range into layout display-text coordinates.
@@ -257,6 +331,7 @@ class ReaderChapterLayout {
     Set<int> underlinedParagraphs = const {},
     Widget Function(int paraIndex, int count, ParagraphBubbleVariant variant)?
     bubbleBuilder,
+    List<ReaderInlineNote> inlineNotes = const [],
   }) {
     final body = content.withoutLeadingTitle(title);
     final legacyText = [
@@ -330,13 +405,17 @@ class ReaderChapterLayout {
         top += block.height + spec.paragraphSpacing;
       }
     }
-    final pages = _paginate(blocks, spec);
+    // 【青茄重构·新增】把批注块插到所属段落之后，并统一重排纵向位置。
+    final (laidOutBlocks, contentTop) = inlineNotes.isEmpty
+        ? (blocks, top)
+        : _insertInlineNotes(blocks, inlineNotes, spec);
+    final pages = _paginate(laidOutBlocks, spec);
     return ReaderChapterLayout._(
       spec,
-      List.unmodifiable(blocks),
+      List.unmodifiable(laidOutBlocks),
       List.unmodifiable(pages),
       math.max(0, offset - 1),
-      top,
+      contentTop,
       legacyText.length,
     );
   }
@@ -579,6 +658,9 @@ class ReaderChapterLayout {
   /// The text block holding [offset], or null past the last block.
   ReaderContentBlock? blockAtOffset(int offset) {
     for (final block in blocks) {
+      // 批注块不参与正文定位：它的 start 贴着上一段末尾，若参与匹配
+      // 会与下一段的字符区间重叠，命中错误的块。
+      if (block.isNote) continue;
       if (block.start <= offset && offset < block.end) return block;
     }
     return null;
@@ -593,7 +675,7 @@ class ReaderChapterLayout {
     if (holding != null) return holding;
     ReaderContentBlock? previous;
     for (final block in blocks) {
-      if (block.isTitle || block.isImage || block.lines.isEmpty) continue;
+      if (!block.isBody || block.lines.isEmpty) continue;
       if (block.start >= offset) return isStart ? block : previous;
       previous = block;
     }
@@ -839,6 +921,116 @@ class ReaderChapterLayout {
   }
 }
 
+/// 批注块左右「非正文」宽度：容器内边距 16 + 角标 20 + 间距 8 +
+/// 折叠/删除图标 32 + 间隙 4 = 80；改 [ReaderNoteBlock] 布局时必须同步。
+const double _kNoteChromeWidth = 80;
+
+/// 批注块纵向固定开销：容器上下内边距 16 + 底部外边距 6。
+const double _kNoteChromeHeight = 22;
+
+/// 角标高度（批注块首行至少这么高）。
+const double _kNoteBadgeHeight = 20;
+
+/// 批注块用的合成块 index 起点，远离正文段落序号，避免 key 冲突。
+const int _kInlineNoteIndexBase = 1000000;
+
+/// 把批注块按字符位置插进所属段落之后。
+///
+/// 批注块的 `start` 落在某段落 [ReaderContentBlock.start]..[end] 之内即归属该段；
+/// 找不到归属（例如跨章残留）时挂到章末，保证不会静默丢失。
+/// 返回重排后的块列表与总高度。
+(List<ReaderContentBlock>, double) _insertInlineNotes(
+  List<ReaderContentBlock> blocks,
+  List<ReaderInlineNote> inlineNotes,
+  ReaderLayoutSpec spec,
+) {
+  final pending = List<ReaderInlineNote>.of(inlineNotes)
+    ..sort((a, b) => a.start.compareTo(b.start));
+  final out = <ReaderContentBlock>[];
+  var cursor = 0;
+  var ordinal = 0;
+  var running = 0.0;
+
+  void appendNote(ReaderInlineNote note, ReaderContentBlock anchor) {
+    final noteBlock = _measureInlineNote(
+      note,
+      index: _kInlineNoteIndexBase + ordinal++,
+      anchorStart: anchor.end,
+      anchorLegacy: anchor.legacyStart + anchor.text.length,
+      top: running,
+      spec: spec,
+    );
+    out.add(noteBlock);
+    running += noteBlock.height + spec.paragraphSpacing;
+  }
+
+  for (final block in blocks) {
+    final placed = block.withTop(running);
+    out.add(placed);
+    if (placed.lines.isNotEmpty) {
+      running += placed.height + spec.paragraphSpacing;
+    }
+    if (block.isTitle || block.isImage) continue;
+    while (cursor < pending.length && pending[cursor].start <= block.end) {
+      appendNote(pending[cursor++], block);
+    }
+  }
+  if (cursor < pending.length && blocks.isNotEmpty) {
+    final last = blocks.last;
+    while (cursor < pending.length) {
+      appendNote(pending[cursor++], last);
+    }
+  }
+  return (out, running);
+}
+
+/// 测量一条批注块：先按批注文字风格量出正文高度，再折算成整块高度。
+/// 渲染端（[ReaderNoteBlock]）用同一个高度与行数，因此不会溢出。
+ReaderContentBlock _measureInlineNote(
+  ReaderInlineNote note, {
+  required int index,
+  required int anchorStart,
+  required int anchorLegacy,
+  required double top,
+  required ReaderLayoutSpec spec,
+}) {
+  const style = TextStyle(
+    inherit: false,
+    color: Color(0xFF6B5B3E),
+    fontSize: 13,
+    height: 1.5,
+    letterSpacing: 0,
+    textBaseline: TextBaseline.alphabetic,
+  );
+  final body = note.body;
+  final painter =
+      TextPainter(
+          text: TextSpan(text: body, style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: spec.textScaler,
+        )
+        ..layout(
+          maxWidth: math.max(40, spec.width - _kNoteChromeWidth),
+        );
+  final lines = math.max(1, painter.computeLineMetrics().length);
+  final rowHeight = math.max(_kNoteBadgeHeight, painter.height);
+  final height = rowHeight + _kNoteChromeHeight;
+  return ReaderContentBlock(
+    index: index,
+    text: body,
+    start: anchorStart,
+    legacyStart: anchorLegacy,
+    top: top,
+    height: height,
+    span: TextSpan(text: body, style: style),
+    align: TextAlign.start,
+    // 单行、整块高度：分页时整块落页，绝不从中间切断。
+    lines: [ReaderTextLine(0, 0, 0, height)],
+    inlineNote: note,
+    noteLines: lines,
+  );
+}
+
 int _floorIndex(int length, bool Function(int) atOrBefore) {
   var low = 0;
   var high = length - 1;
@@ -876,6 +1068,9 @@ class ReaderBlockContent extends StatelessWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
+  /// 【青茄重构·新增】批注/书摘范围（红色下划线 + 行内批注块）。
+  final List<ReaderRangeUnderline> annotationRanges;
+
   /// The sentence being narrated, in chapter display-text coordinates.
   final (int, int)? narrationRange;
 
@@ -890,11 +1085,21 @@ class ReaderBlockContent extends StatelessWidget {
     this.selectionScope,
     this.selection,
     this.rangeUnderlines = const [],
+    this.annotationRanges = const [],
     this.narrationRange,
   });
 
   @override
   Widget build(BuildContext context) {
+    // 【青茄重构·新增】批注块：按排版层实测高度渲染，不再走正文/划线分支。
+    final inlineNote = block.inlineNote;
+    if (inlineNote != null) {
+      return ReaderNoteBlock(
+        note: inlineNote,
+        height: block.height,
+        maxLines: block.noteLines,
+      );
+    }
     final image = block.illustration;
     if (image != null) {
       return ReaderIllustration(
@@ -914,6 +1119,7 @@ class ReaderBlockContent extends StatelessWidget {
         scope: selectionScope!,
         selection: selection,
         rangeUnderlines: rangeUnderlines,
+        annotationRanges: annotationRanges,
         narrationRange: narrationRange,
         child: text,
       );

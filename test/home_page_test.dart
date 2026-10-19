@@ -10,10 +10,11 @@ import 'package:fqapp/pages/home_page.dart';
 import 'package:fqapp/pages/home_provider.dart';
 import 'package:fqapp/services/api_client.dart';
 import 'package:fqapp/widgets/home/home_design.dart';
+import 'package:fqapp/widgets/home/home_tab_bar.dart';
 
 void main() {
   testWidgets(
-    'manju, manga and audio tabs show the matching feed after insertion',
+    'novel and audio tabs show the matching feed after insertion',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(320, 850));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -58,15 +59,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      for (final label in ['漫剧', '漫画', '听书']) {
-        final index = HomeNotifier.tabs.indexOf(label);
+      // 【青茄重构】首页分类删除 短剧/漫剧/漫画 后仅剩 推荐/小说/听书，
+      // 这里验证 小说/听书 两个分类 tab 展示各自类型的内容。
+      for (final label in ['小说', '听书']) {
+        final index = homeCategories.indexWhere((c) => c.label == label);
         final tab = find.byKey(ValueKey('home_category_$index'));
         await tester.ensureVisible(tab);
         await tester.pumpAndSettle();
         await tester.tap(tab);
         await tester.pumpAndSettle();
         expect(find.text('$label 作品'), findsOneWidget);
-        if (label == '漫剧') expect(find.text('观看漫剧'), findsOneWidget);
         expect(tester.takeException(), isNull);
       }
     },
