@@ -5,6 +5,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'encrypted_hive.dart';
+import 'reader_annotation_store.dart';
 import 'reader_underline_store.dart';
 
 abstract interface class ReaderStore {
@@ -137,6 +138,10 @@ class LibraryStore implements ReaderStore {
     _watchedBox = await EncryptedHive.openBox(Hive, _watchedBoxName);
     // Hive has a directory now, so optional boxes may be opened too.
     ReaderUnderlineStore.hiveReady = true;
+    // 【青茄重构·修复】批注盒与划线盒同一时机就绪：此前漏了这一行，
+    // 导致 ReaderAnnotationStore._box() 恒为 null，写批注时抛
+    // StateError('批注存储不可用')，阅读器只能提示「保存失败，请重试」。
+    ReaderAnnotationStore.hiveReady = true;
     await _migrateFromSp();
     // Copy typed legacy media before a novel can reuse its original key.
     // The originals remain available if a write fails or migration is retried.

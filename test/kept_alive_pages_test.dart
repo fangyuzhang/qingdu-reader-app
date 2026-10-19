@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fqapp/pages/library_page.dart';
 import 'package:fqapp/pages/stats_page.dart';
 import 'package:fqapp/services/library_store.dart';
+import 'package:fqapp/services/reader_annotation_store.dart';
 import 'package:fqapp/widgets/lazy_indexed_stack.dart';
 
 void main() {
@@ -24,8 +25,15 @@ void main() {
 
   tearDown(() async {
     debugOnRebuildDirtyWidget = null;
+    // 统计页会懒加载批注盒（作为「我的笔记」计数），这里显式关掉，
+    // 否则 Windows 上临时目录仍被占用，删除失败。
+    ReaderAnnotationStore.instance.closeSync();
     await Hive.close();
-    await directory.delete(recursive: true);
+    try {
+      await directory.delete(recursive: true);
+    } catch (_) {
+      // Windows 上偶发「文件被占用」：清理尽力而为，不影响断言结论。
+    }
   });
 
   testWidgets('hidden shelf and statistics catch up on the next tab visit', (

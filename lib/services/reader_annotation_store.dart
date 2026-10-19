@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -274,6 +275,25 @@ class ReaderAnnotationStore {
     if (doomed.isNotEmpty) await box.deleteAll(doomed);
     changes.value++;
   }, onUnavailable: null);
+
+  /// 尽力关闭批注盒（同步触发，不等待可能还悬着的 open）。
+  ///
+  /// 用于测试清理与退出：Windows 上不释放会占住临时目录。之所以不带 await，
+  /// 是因为 widget 测试跑在 fake-async zone 里，等待一个未完成的 open
+  /// 会永久挂起（encrypted_hive 注释里的 CRIT-014 同类问题）。
+  void closeSync() {
+    _opening = null;
+    for (final name in [
+      _boxName,
+      EncryptedHive.encryptedBoxName(_boxName),
+    ]) {
+      try {
+        if (_hive.isBoxOpen(name)) unawaited(_hive.box(name).close());
+      } catch (_) {
+        // 盒不存在/已关闭，忽略。
+      }
+    }
+  }
 
   Future<void> _evictBeyondMax(Box<dynamic> box) async {
     if (box.length <= maxEntries) return;

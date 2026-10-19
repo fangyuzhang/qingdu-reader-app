@@ -20,6 +20,7 @@ import '../services/volume_key.dart';
 import '../services/reader_history.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_tap_zones.dart';
+import '../services/app_log.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
@@ -1140,8 +1141,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final selection = _selection;
     final layout = _chapterLayout;
     if (selection == null || layout == null || !selection.isValid) return;
-    final quote = layout.textInRange(selection.start, selection.end).trim();
+    // 先把区间与原文抓出来：下面要立刻清掉选区。
+    final start = selection.start;
+    final end = selection.end;
+    final quote = layout.textInRange(start, end).trim();
     if (quote.isEmpty) return;
+    // 【青茄重构·修复】弹层之前先收掉选区与工具条：否则弹层动画期间
+    // 选区高亮 + 两端手柄仍在逐帧重绘，真机上表现为「弹出特别卡」。
+    _closeSelectionBar(clearSelection: true);
+    // 等当前帧结束，让选区先真正从画面消失，再开始弹层动画。
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     var thought = '';
     if (!excerpt) {
       final input = await showAnnotationEditor(
@@ -1157,8 +1167,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final note = ReaderAnnotation(
       bookId: widget.bookId,
       chapterId: _chapter.itemId,
-      start: selection.start,
-      end: selection.end,
+      start: start,
+      end: end,
       text: quote,
       thought: thought,
       type: excerpt
@@ -1170,7 +1180,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
     try {
       await _annotationStore.add(note);
-    } catch (_) {
+    } catch (error, stack) {
+      // 落盘失败要能在「日志」页里看到具体原因，而不是只有一句提示。
+      AppLog.e('annot', '批注保存失败', error: error, stack: stack);
       if (mounted) _showMessage('保存失败，请重试');
       return;
     }
@@ -2687,8 +2699,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           child: Stack(
             key: _selectionOverlayKey,
             children: [
+              // 【青茄重构·修复】内容区独立成层：弹层/键盘动画期间正文
+              // 不必跟着重绘，真机上的弹出卡顿主要来自这里。
               Positioned.fill(
-                child: _paged
+                // 键盘弹出只影响弹层自身：把 viewInsets 从正文子树移除，
+                // 输入法动画就不会推动整章重排（真机卡顿的另一半原因）。
+                child: MediaQuery.removeViewInsets(
+                  context: context,
+                  removeBottom: true,
+                  child: RepaintBoundary(
+                    child: _paged
                     ? ReaderPagedView(
                         key: _pagedKey,
                         layout: layout,
@@ -2722,6 +2742,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         narrationRange: _narrationRange,
                       )
                     : _buildScrollContent(layout, scope),
+                  ),
+                ),
               ),
               ..._selectionHandles(scope),
               ?_selectionBar(preset, windowPadding),

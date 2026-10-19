@@ -198,7 +198,8 @@ Future<String?> showAnnotationEditor(
   String title = '写批注',
 }) {
   final controller = TextEditingController(text: initial);
-  return showModalBottomSheet<String>(
+  final focus = FocusNode();
+  final future = showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
     backgroundColor: const Color(0xFFFBF6EC),
@@ -207,88 +208,104 @@ Future<String?> showAnnotationEditor(
     ),
     builder: (sheetContext) {
       final viewInsets = MediaQuery.viewInsetsOf(sheetContext);
-      return Padding(
-        padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + viewInsets.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  '写想法',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF3D3427),
+      // 【青茄重构·修复】弹层动画结束后再抢焦点：autofocus + 路由动画 +
+      // 输入法弹出三件事同时跑，真机上首帧会明显卡顿。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 280), () {
+          if (focus.context != null && !focus.hasFocus) focus.requestFocus();
+        });
+      });
+      return RepaintBoundary(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    '写想法',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF3D3427),
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    key: const ValueKey('reader-annot-cancel'),
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    key: const ValueKey('reader-annot-save'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE85D26),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () {
+                      final text = controller.text.trim();
+                      if (text.isEmpty) return;
+                      Navigator.of(sheetContext).pop(text);
+                    },
+                    child: const Text('保存'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3EAD8),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  quote,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    height: 1.5,
+                    color: Color(0xFF8A7B62),
                   ),
                 ),
-                const Spacer(),
-                TextButton(
-                  key: const ValueKey('reader-annot-cancel'),
-                  onPressed: () => Navigator.of(sheetContext).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  key: const ValueKey('reader-annot-save'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFE85D26),
-                    visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const ValueKey('reader-annot-input'),
+                controller: controller,
+                focusNode: focus,
+                // 不开 autofocus：焦点由上面的 post-frame 回调在入场动画
+                // 结束后再抢，避免与路由/输入法动画抢同一批帧。
+                maxLines: 4,
+                minLines: 3,
+                style: const TextStyle(fontSize: 14, height: 1.55),
+                decoration: InputDecoration(
+                  hintText: '写下你的想法…',
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.all(12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFEADFC8)),
                   ),
-                  onPressed: () {
-                    final text = controller.text.trim();
-                    if (text.isEmpty) return;
-                    Navigator.of(sheetContext).pop(text);
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3EAD8),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                quote,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  height: 1.5,
-                  color: Color(0xFF8A7B62),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFEADFC8)),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              key: const ValueKey('reader-annot-input'),
-              controller: controller,
-              autofocus: true,
-              maxLines: 4,
-              minLines: 3,
-              style: const TextStyle(fontSize: 14, height: 1.55),
-              decoration: InputDecoration(
-                hintText: '写下你的想法…',
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.all(12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFEADFC8)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFEADFC8)),
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     },
   );
+  // 弹层关闭后再释放输入控制器与焦点，避免监听泄漏。
+  return future.whenComplete(() {
+    controller.dispose();
+    focus.dispose();
+  });
 }
