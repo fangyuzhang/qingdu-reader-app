@@ -210,3 +210,61 @@ flutter test             # 1954 passed / 10 skipped
 - 删除过时用例：`home_scroll_cost_test.dart`（测已移除的网格实现）、
   `comprehensive_ui_loading_test.dart` 的 U04（测已移除的首页分页）
 - 受影响的段评用例改为显式开启 `reader_show_paragraph_bubbles`（反映新的真实默认值）
+
+---
+
+# 七、v4 批次：稳定性 / 性能 / 体验修复（提交 ffd9b68）
+
+> 基线：`flutter analyze` 无问题；`flutter test` 2053 passed / 10 skipped；
+> release APK 31.8MB，已装真机（Redmi K20 Pro，versionName 1.0.121+126）验证启动正常。
+
+## 7.1 崩溃与卡顿修复（批注链路）
+
+- **FocusNode disposed 崩溃**：`showModalBottomSheet` 的 Future 在 pop 开始时即完成，
+  原实现用 whenComplete 释放 controller/focus，退场动画内 TextField 仍 rebuild 触发崩溃。
+  重构为 `_AnnotationEditorSheet` StatefulWidget，controller/focus 归 State 持有、dispose 释放
+- **批注块高度爆炸**：`_measureInlineNote` 行数无上限 + 宽度下限 40px，
+  2000 字批注在窄屏量出 14022px 高。修：maxLines=8、bodyWidth≥120、高度三重夹值、TextPainter dispose
+- **键盘两段式卡顿**：键盘升起时 viewInsets 与 padding 同时变化导致整章重分页。
+  修：`resizeToAvoidBottomInset: false` + 顶层 MediaQuery 冻结两值；弹层首帧即聚焦
+- **批注输入看不清**：输入框/光标/提示/按钮钉死深色，不继承主题
+- **进正文卡顿**：新增路由转场门控 `_watchRouteIntro`，动画完成后才放正文
+
+## 7.2 我的阅读报告页（对齐蜗牛读书统计页）
+
+- 我的页热力图卡片整卡可点进 `ReadingReportPage`：周/月/年/总/阅历五档、
+  自绘柱状图（可点柱）、四宫格指标、挑战卡、阅读最久卡、阅历时间线
+- 新增 `lib/services/reading_report.dart`（纯数据层）、
+  `lib/pages/reading_report_page.dart`、`lib/services/reading_report_exporter.dart`（1080 宽 PNG 分享图）
+- 无社交能力，用本地打卡/挑战替代朋友排名/会员卡
+
+## 7.3 精选书单直达阅读 + 真实封面
+
+- 新增 `lib/services/curated_resolver.dart`：搜索式解析器（SharedPreferences 缓存 7 天、
+  inflight 去重、标题归一化匹配、preferAudio 分支须在 books.isEmpty 兜底之前）
+- 点封面直达阅读（DetailPage autoOpenReader）；封面走书城同 CDN，文字封面兜底
+- 听书分类：19 本书加 `"audio": true`，kind=audio 自动进 AudioPage
+
+## 7.4 阅读器体验
+
+- **跨章无缝滚动**：`_ScrollSegment` 段窗口（append-only + 视口中心静默换章 + 停稳裁头补偿）；
+  删除章末「上一章/下一章/本章评论」三按钮
+- **长按按句选中**：`sentenceRangeInText`（句读口径与 TTS 一致）
+- **状态栏常显**：`_syncSystemBars` 恒 setImmersive(false)，进出正文不再跳动
+- 已知限制：跨章长按选区有意未做（几何表按块下标建键会撞章，属独立需求）
+
+## 7.5 首页与导航
+
+- 删问候语；分类条 + 搜索改固定顶栏；上滑 >160px 浮现搜索按钮；分类功能按钮宫格
+- 底部导航：悬浮毛玻璃胶囊 → 整宽实色固定条（extendBody: false）
+
+## 7.6 启动 / 搜索提速
+
+- 删 RootShell 整页「正在启动本地服务」门（后端失败改 SnackBar+重试）
+- main() 里 runApp 后立即并行启动 Rust 后端；关键三件并行初始化、可选存储推迟到首帧后
+- `ApiClient._get` 加「后端启动中则等待」门；`_deploy` 资源拷贝并行化
+
+## 7.7 构建与体积
+
+- 440MB 安装体积根因 = 装 debug 包；release 仅 31.8MB（R8 + 字体 tree-shake）
+- 删未用 cupertino_icons；release 无正式签名时回退 debug 签名；新增 `tool/build_release.ps1`
