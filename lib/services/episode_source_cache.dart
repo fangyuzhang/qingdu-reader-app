@@ -29,9 +29,6 @@ class EpisodeSource {
 
   const EpisodeSource(this.url, [this.keyHex = '', this.variants = const []]);
 
-  EpisodeSource withVariant(EpisodeVariant variant) =>
-      EpisodeSource(variant.url, variant.keyHex, variants);
-
   factory EpisodeSource.fromResponse(Map<String, dynamic> response) {
     final data = response['data'] is Map
         ? Map<String, dynamic>.from(response['data'] as Map)

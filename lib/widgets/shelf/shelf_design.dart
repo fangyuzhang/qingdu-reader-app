@@ -100,9 +100,6 @@ class ShelfTokens {
   /// 双列类型小标签字号。
   static const double kindTagSize = 10.0;
 
-  /// 小号控件文本（筛选胶囊 / 页头按钮 / 排序胶囊）。
-  static const double labelControl = 12.5;
-
   // ---- 行高倍率 ----
 
   /// 标题行高（近似官方 lineSpacingExtra 3dp 的观感）。
