@@ -4,15 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/media_item.dart';
-import '../services/app_theme.dart';
 import '../services/library_store.dart';
 import '../services/media_history_store.dart';
-import '../services/reader_annotation_store.dart';
 import '../services/reading_report.dart';
 import '../services/reading_stats_store.dart';
 import '../widgets/book_thumb.dart';
 import '../widgets/home/home_design.dart';
-import 'notes_page.dart';
 import 'detail_page.dart';
 import 'reading_report_page.dart';
 
@@ -39,7 +36,6 @@ class _StatsPageState extends State<StatsPage> {
   bool _loading = true;
 
   /// 【青茄重构·新增】全书架批注数（笔记页入口的计数）。
-  int _annotationCount = 0;
 
   /// 【青茄重构·新增】累计阅读字数与连续打卡天数。
   int _totalChars = 0;
@@ -163,13 +159,6 @@ class _StatsPageState extends State<StatsPage> {
       _rankItems = _computeRankItems(history, timeMap, kinds);
       _loading = false;
     });
-    // 批注来自另一个存储（Hive 异步读取），单独回填，不阻塞时长统计。
-    unawaited(
-      ReaderAnnotationStore.instance.countAll().then((count) {
-        if (!mounted) return;
-        setState(() => _annotationCount = count);
-      }),
-    );
   }
 
   /// Reload entry point shared by pull-to-refresh and the visibility catch-up.
@@ -327,14 +316,6 @@ class _StatsPageState extends State<StatsPage> {
               ),
             ),
             child: _Heatmap(cells: heatmap),
-          ),
-          const SizedBox(height: 12),
-          _NotesEntryCard(
-            count: _annotationCount,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(builder: (_) => const NotesPage()),
-            ),
           ),
           const SizedBox(height: 12),
           _RecentBooksCard(
@@ -495,88 +476,6 @@ String _formatDuring(double minutes) {
 }
 
 // ---------- card shell ----------
-
-/// 【青茄重构·新增】笔记入口：显示批注/书摘总数，点进笔记页。
-class _NotesEntryCard extends StatelessWidget {
-  const _NotesEntryCard({required this.count, required this.onTap});
-
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      key: const Key('stats-notes-entry'),
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppTheme.highlight.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                LucideIcons.pen_line,
-                size: 18,
-                color: AppTheme.highlight,
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Expanded 而非 Spacer：窄屏 + 大字号时说明文案要能折行，
-            // 否则 Row 会横向溢出（stats_page_widget_test 覆盖该场景）。
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '我的笔记',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    count == 0 ? '还没有批注，阅读时长按选句写想法' : '$count 条批注与书摘',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (count > 0)
-              Text(
-                '$count',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.highlight,
-                ),
-              ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _Card extends StatelessWidget {
   final String? title;

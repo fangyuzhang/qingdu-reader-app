@@ -152,16 +152,22 @@ void main() {
     expect(find.textContaining('连续打卡 0 天'), findsOneWidget);
   });
 
-  testWidgets('我的页不再重复放笔记快捷入口', (tester) async {
+  testWidgets('我的页只留右上角设置入口，不含书友卡与笔记卡', (tester) async {
     await tester.binding.setSurfaceSize(const Size(360, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
     await tester.pumpWidget(const MaterialApp(home: MinePage()));
     await tester.pumpAndSettle();
-    // 快捷栏里不再有「笔记」，只留底部导航 + 统计页的「我的笔记」卡。
+    // 笔记只剩底部导航一个入口；设置只剩右上角图标。
     expect(find.text('笔记'), findsNothing);
+    expect(find.text('我的笔记'), findsNothing);
+    expect(find.byTooltip('设置'), findsOneWidget);
+    expect(find.text('应用设置'), findsNothing);
+    // 书友名片整体去掉。
+    expect(find.text('书友'), findsNothing);
+    // 两个与统计无关的入口仍在。
     expect(find.text('章节缓存'), findsOneWidget);
-    expect(find.text('我的笔记'), findsOneWidget);
+    expect(find.text('关于我们'), findsOneWidget);
   });
 }
 

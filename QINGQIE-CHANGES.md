@@ -706,3 +706,22 @@ flutter test             # 1954 passed / 10 skipped
 - 测试：`flutter analyze` 无问题；`reader_interface_test` 的「clock and battery」用例改为盯百分比并新增「页数与百分比间距 > 8px」断言；全量 `flutter test` 通过 1497 项，失败 15 条与基线一致。
 - APK：签名、zipalign、ABI、16 KiB 对齐校验通过；SHA-256 `82695d06a4b7b0dc86896c5b9f75af4c467b49e42977a5dffac64ba1d0f4462b`；38,524,658 字节。
 - 真机（Redmi K20 Pro `b2f8e975`）核验：正文左下角显示「1781/1965　90.6%」，页数与百分比之间约两个数字宽的空档，右下角电量「100%」不受影响。
+
+# 三十三、v32 批次：我的页继续减法（去笔记卡、去书友栏、设置只留右上角）
+
+- 版本：`1.0.129 (134)` 覆盖安装。
+- 一、删除「我的笔记」入口卡（`lib/pages/stats_page.dart`）：
+  - 连同 `_NotesEntryCard` 组件、`_annotationCount` 字段与其异步计数回填一起删掉（`ReaderAnnotationStore.countAll()` 调用随之移除，页面少一次 Hive 读）；
+  - 笔记入口只剩底部导航「笔记」一处。
+- 二、设置入口只留右上角（`lib/pages/mine_page.dart`）：
+  - 删掉快捷栏里的「应用设置」磁贴，以及「书友」卡内右侧的「设置」胶囊按钮；
+  - 现在设置只有右上角图标（日夜切换按钮的右边），与页面其他地方不再重复。
+- 三、删除「书友」名片（`lib/pages/mine_page.dart`）：
+  - 整个卡片（头像 + 书友 + 副标题 + 设置胶囊）移除，页面上方只剩两格快捷入口（章节缓存 / 关于我们）与「阅读与视听统计」标题；
+  - `_buildProfileHeader` 同时去掉不再需要的 `ColorScheme` 参数，`build` 里也不再取 `theme/scheme`。
+- 测试：`flutter analyze` 无问题；`stats_page_widget_test` 的我的页用例改写为「只留右上角设置入口、不含书友卡与笔记卡」，新增对 `应用设置 / 我的笔记 / 书友` 均不存在的断言；全量 `flutter test` 通过 1497 项，失败 15 条与基线一致。
+- APK：签名、zipalign、ABI、16 KiB 对齐校验通过；SHA-256 `dde47f02ce7899fc4c51ae8b672da68e50972bc9ce453a7515846c0685f99bd9`。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 「我的」页顶部无书友卡，两格快捷入口（章节缓存 / 关于我们）居中铺满；
+  - 热力图下方直接是「最近阅读」，没有「我的笔记」卡；
+  - 右上角只有 日夜切换 + 设置 两个按钮，点设置正常进入设置页。

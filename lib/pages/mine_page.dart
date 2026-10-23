@@ -10,18 +10,16 @@ import 'cached_books_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 
-/// 个人中心（我的）页：顶部书友卡片 + 快捷入口（章节缓存/设置/关于）
+/// 个人中心（我的）页：快捷入口（章节缓存/关于）+ 嵌入式阅读与视听统计。
 ///
-/// 笔记不再放这里：底部导航本来就是笔记主入口，统计页还有一张带数量的
-/// 笔记卡，三处并排只会让人不知道点哪个。
-/// + 嵌入式阅读与视听统计。
+/// 顶部的「书友」名片、页面内的「设置」入口、「我的笔记」卡都已去掉：
+/// 设置只留右上角图标（日夜切换按钮右边），笔记只留底部导航这一个入口，
+/// 页面上方不再有和统计无关的装饰块。
 class MinePage extends StatelessWidget {
   const MinePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final palette = HomePalette.of(context);
 
     return Scaffold(
@@ -63,114 +61,15 @@ class MinePage extends StatelessWidget {
           ),
         ],
       ),
-      body: StatsPage(header: _buildProfileHeader(context, scheme, palette)),
+      body: StatsPage(header: _buildProfileHeader(context, palette)),
     );
   }
 
-  Widget _buildProfileHeader(
-    BuildContext context,
-    ColorScheme scheme,
-    HomePalette palette,
-  ) {
+  Widget _buildProfileHeader(BuildContext context, HomePalette palette) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 个人概览卡片
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: palette.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: palette.line, width: 0.6),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF2FA98C), Color(0xFF1F8A72)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: HomePalette.accent.withValues(alpha: 0.22),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  LucideIcons.circle_user_round,
-                  color: Colors.white,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '书友',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        color: palette.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '沉浸阅读，记录每一个好故事',
-                      style: TextStyle(fontSize: 12.5, color: palette.muted),
-                    ),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: palette.soft,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: palette.line, width: 0.5),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        LucideIcons.sliders_horizontal,
-                        size: 13,
-                        color: palette.accentText,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '设置',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: palette.accentText,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        // 【青茄重构·新增】快捷入口：笔记（批注/书摘） + 缓存 + 设置 + 关于
+        // 【青茄重构·新增】快捷入口：章节缓存 + 关于
         Row(
           children: [
             _buildShortcutTile(
@@ -181,17 +80,6 @@ class MinePage extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const CachedBooksPage()),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _buildShortcutTile(
-              context: context,
-              icon: LucideIcons.sliders_horizontal,
-              label: '应用设置',
-              palette: palette,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
               ),
             ),
             const SizedBox(width: 8),
