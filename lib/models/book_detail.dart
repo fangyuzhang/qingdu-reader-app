@@ -134,13 +134,6 @@ class BookDetail {
 
   bool get isEmpty => bookId.isEmpty && title.isEmpty;
 
-  /// Whether any of the extra metadata the redesigned hero shows is present.
-  bool get hasMeta =>
-      category.isNotEmpty ||
-      statusLabel.isNotEmpty ||
-      wordLabel.isNotEmpty ||
-      original;
-
   bool get finished => creationStatus == 0;
 
   String get statusLabel => switch (creationStatus) {

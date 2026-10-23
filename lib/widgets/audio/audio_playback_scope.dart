@@ -71,7 +71,7 @@ class AudioRouteWatcher extends NavigatorObserver with ChangeNotifier {
 /// 阅读页与听书胶囊之间的轻量协调层。
 ///
 /// 胶囊挂在 Navigator 之外的最外层 Overlay，读不到阅读页内部状态，所以
-/// 阅读页把「是否在阅读」「工具栏是否展开」「是否有置顶弹窗」写进这里。
+/// 阅读页把「工具栏是否展开」「是否有置顶弹窗」写进这里。
 /// 工具栏收起时胶囊不再退化成底部小按钮，而是始终保持完整形态，保证
 /// 播放/暂停、设置、关闭这些控制入口一直可用；只有弹出休息提醒等置顶
 /// 弹窗时才暂时隐藏，让弹窗真正压在最上层。
@@ -80,21 +80,15 @@ class ReadingCapsuleHost extends ChangeNotifier {
 
   static final ReadingCapsuleHost instance = ReadingCapsuleHost._();
 
-  int _readers = 0;
   bool _toolbarVisible = false;
   bool _dialogOpen = false;
 
-  bool get readerActive => _readers > 0;
   bool get toolbarVisible => _toolbarVisible;
   bool get dialogOpen => _dialogOpen;
 
-  void enterReader() {
-    _readers++;
-    notifyListeners();
-  }
+  void enterReader() => notifyListeners();
 
   void exitReader() {
-    if (_readers > 0) _readers--;
     _toolbarVisible = false;
     notifyListeners();
   }
@@ -113,7 +107,6 @@ class ReadingCapsuleHost extends ChangeNotifier {
 
   @visibleForTesting
   void resetForTest() {
-    _readers = 0;
     _toolbarVisible = false;
     _dialogOpen = false;
     notifyListeners();
