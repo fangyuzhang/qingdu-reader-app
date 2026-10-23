@@ -79,3 +79,8 @@ _sessionzip/
 
 # 项目文档（含研究记录）只保留在本地，不入库不上传。
 /docs/
+/.gradle-home/
+/.gradle/
+.omx/
+.omx-state-locks/
+.omx-state-locks.identity.json
