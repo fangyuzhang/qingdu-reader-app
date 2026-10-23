@@ -91,8 +91,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('笔记'), findsOneWidget);
     expect(find.textContaining('还没有'), findsOneWidget);
-    // 三个内容 chip（全部/批注/书摘）+ 批注类型 chip（全部类型 + 四个预设）
-    expect(find.byType(ChoiceChip), findsNWidgets(8));
+    // 三个内容 chip（全部/批注/书摘）+ 「全部类型」；
+    // 其余类型是可长按拖动的 PaletteTagChip，不再是 ChoiceChip。
+    expect(find.byType(ChoiceChip), findsNWidgets(4));
   });
 
   testWidgets('分级标签渲染 12+ 与 15+', (tester) async {
@@ -183,16 +184,21 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('notes-book-book-a')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('notes-timeline')), findsOneWidget);
-    expect(find.text('书：Book A'), findsOneWidget);
+    // 留在「按书查看」里展开这本书，不再跳时间线、也不再出现「书：X」摘要。
+    expect(find.byKey(const ValueKey('notes-book-back')), findsOneWidget);
+    expect(find.text('书：Book A'), findsNothing);
     expect(find.text('A one'), findsOneWidget);
     expect(find.text('A two'), findsOneWidget);
     expect(find.text('B one'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('notes-book-back')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('notes-books')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'notes timeline shows timestamps and reset clears the book dropdown',
+    'notes timeline shows timestamps and type chips toggle off on second tap',
     (tester) async {
       final firstTime = DateTime(2026, 10, 20, 8, 5);
       final secondTime = DateTime(2026, 10, 19, 21, 30);
@@ -237,28 +243,19 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.byKey(const ValueKey('notes-filter-button')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String?>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Book A').last);
-      await tester.pumpAndSettle();
+      // 顶部「筛选」按钮与「类型：X / 清除」摘要已移除。
+      expect(find.byKey(const ValueKey('notes-filter-button')), findsNothing);
+      expect(find.text('\u6e05\u9664'), findsNothing);
 
-      var field = tester.widget<DropdownButtonFormField<String?>>(
-        find.byType(DropdownButtonFormField<String?>),
-      );
-      expect(field.initialValue, 'book-a');
-
-      await tester.tap(find.byKey(const ValueKey('notes-filter-reset')));
+      await tester.tap(find.byKey(const ValueKey('notes-type-annot')));
       await tester.pumpAndSettle();
-      field = tester.widget<DropdownButtonFormField<String?>>(
-        find.byType(DropdownButtonFormField<String?>),
-      );
-      expect(field.initialValue, isNull);
-      expect(find.text('\u5168\u90e8\u4e66\u7c4d'), findsWidgets);
+      expect(find.text('first source'), findsOneWidget);
+      expect(find.text('second source'), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('notes-filter-apply')));
+      // 再点一次取消选择，书摘回到列表。
+      await tester.tap(find.byKey(const ValueKey('notes-type-annot')));
       await tester.pumpAndSettle();
+      expect(find.text('second source'), findsOneWidget);
       expect(
         find.byKey(ValueKey('note-timeline-${store.notes.first.key}')),
         findsOneWidget,

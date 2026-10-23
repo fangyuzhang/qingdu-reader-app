@@ -861,3 +861,59 @@ flutter test             # 1954 passed / 10 skipped
 - 日期选择器文案仍为英文，需要引入 `flutter_localizations` 并给 `MaterialApp` 配 locale，属于新增依赖，未在本批处理。
 - 墨水屏背景下仍有 93 处直接引用 `HomePalette.accent / highlight`，替换为语义色属中风险改动，未全量执行。
 - 阅读器批注块内 3 个 16dp 图标按钮热区不足 48dp，但其宽度参与分页折算，改动会移动分页点，暂缓。
+
+---
+
+# 三十八、v36 / v37 批次：笔记交互重构（多角标 + 拖拽标签）
+
+## 38.1 交互减法
+
+| 位置 | 改动 |
+| --- | --- |
+| 笔记页顶部 | 删除「筛选」按钮、筛选面板与「时间 / 分类 / 类型 / 标签」二级按钮；顶部只保留视图切换 + 一行快捷筛选 |
+| 类型 chip | 点「疑问 / 反驳 / 感悟 / 待查证 / 自定义」只做筛选切换；再点同一项即取消，不再弹出「类型 X / 清除」 |
+| 按书查看 | 选中一本书后留在本视图，用顶部范围条（返回 + 书名 + 条数）返回书籍网格；不再自动跳到时间线，也不再出现「书名 / 清除」两个按钮 |
+
+## 38.2 一条笔记多个角标
+
+`ReaderAnnotation` 新增 `extraMarkers`，`markerBadges` 统一输出「主标记 + 额外标记」并去重；旧数据没有 `extraMarkers` 时自动回退为单角标。筛选口径改为「任一角标命中」（`noteHasMarker`），一条笔记可以同时是「疑问 + 待查证」。
+
+## 38.3 「全部类型」= 批注类型 + 自由标签
+
+- 顶部同一行按用户顺序列出所有批注类型与所有自由标签，类型用彩色圆点、标签用 `#` 区分。
+- 点类型 = 单选筛选；点标签 = 多选筛选（多个标签之间为 OR），再点取消。
+- 长按任意一枚拖到另一枚后面即可换序；顺序持久化在 `ReaderMarkerTypeStore`（`type:<文案>` / `tag:<文案>`，旧的无前缀数据加载时自动补 `type:`）。
+- 笔记卡片上的多个角标按同一套顺序混排，超过 3 枚折成 `+N`。
+
+## 38.4 拖拽打标
+
+| 手势 | 行为 |
+| --- | --- |
+| 长按「全部类型」里的标签 → 拖到笔记 | 打标；原位置留空，松手后弹性重生（复制语义，来源笔记不受影响） |
+| 长按笔记上的角标 → 拖到另一条笔记 | 移动；目标已有同名角标时整次拖动视为无操作，不会误删来源 |
+| 长按笔记上的角标 → 拖到空白处松手 | 取消该角标 / 标签 |
+| 拖动经过笔记卡片 | 出现磁力虚影（0.8 → 1，`easeOutBack`），提示松手后的落点 |
+| 拿起标签 | 反馈层弹性放大 1.12，提示可移动 |
+
+细节：`DragTarget` 接受拖回自身，避免「原地松手」被当成丢到空白处而误删；拖拽结束统一清空悬停虚影。
+
+## 38.5 文件
+
+- `lib/pages/notes_page.dart`：删除筛选面板与摘要条，新增统一 `_paletteEntries` / `_badgesOf` / `_reorderTag` / `_toggleType` / `_clearHover` 与笔记落点。
+- `lib/widgets/notes/note_tag_drag.dart`（新增）：`NoteTagDrag`、`PaletteTagChip`、`NoteBadgeChip`、`NoteTagGhost`、标签稳定配色。
+- `lib/services/reader_annotation_store.dart`：`extraMarkers`、`markerBadges`、`updateTags` / `updateMarkerTags` / `normalizeMarkerTypes`。
+- `lib/services/reader_marker_type_store.dart`：统一顺序 `order`（`type:` / `tag:`）与旧数据迁移。
+- `lib/services/note_timeline.dart`：多角标筛选。
+
+## 38.6 验证
+
+- `flutter analyze`：0 问题。
+- 全量 `flutter test`：**1501 通过 / 10 跳过 / 0 失败**（新增 `reader_annotation_markers_test.dart` 4 条；`notes_page_test.dart` 增至 13 条，覆盖双击取消、多角标、按书查看不跳转、拖类型打标、拖标签打标、跨笔记移动、跨类型换序、拖到空白取消）。
+- Release APK：**38,459,051 字节**，SHA-256 `b93ad85d7d9cddff5b36ab902f439100359e1e61c78d4c6f05e2601e47c13896`（`/mnt/d/APP/agent/apk/fqapp-v37.apk`）。
+- 真机（Redmi K20 Pro `b2f8e975`）覆盖安装复核：类型与标签同排显示；点标签 A 后书籍网格只剩含该标签的书；「按书查看」选中《西游记》后停留本视图并显示返回条。
+
+## 38.7 已知边界
+
+- 新建自由标签仍走笔记编辑弹层（`initialTags` / `knownTags`），本批没有新增「在筛选行直接输入新标签」的入口。
+- 标签颜色由文案稳定派生（浅色/深色各一组），不支持用户单独改色。
+- 拖拽在真机上依赖长按 500ms；快速滑动只会滚动这一行，不会误触发打标。

@@ -62,6 +62,7 @@ class ReaderMarkerTypeStore {
 
   static const _boxName = 'reader_marker_types_v1';
   static const _listKey = 'types';
+  static const _orderKey = 'order';
   static const int maxEntries = 24;
 
   final HiveInterface _hive;
@@ -74,8 +75,29 @@ class ReaderMarkerTypeStore {
 
   bool _loaded = false;
   List<ReaderMarkerType> _types = const [];
+  List<String> _order = const [];
 
   List<ReaderMarkerType> get types => _types;
+
+  /// 笔记页「全部类型」一行的显示顺序。
+  ///
+  /// 批注类型与自由标签共用这一条序列，元素形如 `type:疑问` / `tag:1万`，
+  /// 因此「把标签拖到某个类型后面」也能持久化。空表示还没排过。
+  List<String> get order => _order;
+
+  /// 统一排序 id：批注类型。
+  static String typeOrderId(String label) => 'type:${label.trim()}';
+
+  /// 统一排序 id：自由标签。
+  static String tagOrderId(String label) => 'tag:${label.trim()}';
+
+  /// 旧版本只存了类型文案（没有前缀），加载时补成 `type:` 不丢顺序。
+  static String _normalizeOrderEntry(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    if (value.startsWith('type:') || value.startsWith('tag:')) return value;
+    return 'type:$value';
+  }
 
   Future<Box<dynamic>?> _box() async {
     if (!hiveReady) return null;
@@ -116,6 +138,14 @@ class ReaderMarkerTypeStore {
     return _serialize((box) async {
       final parsed = _decode(box.get(_listKey));
       _types = List.unmodifiable(parsed);
+      final rawOrder = box.get(_orderKey);
+      _order = rawOrder is List
+          ? List.unmodifiable(
+              rawOrder
+                  .map((value) => _normalizeOrderEntry(value.toString()))
+                  .where((value) => value.isNotEmpty),
+            )
+          : const [];
       _loaded = true;
       return _types;
     }, onUnavailable: const <ReaderMarkerType>[]).then((types) {
@@ -159,6 +189,22 @@ class ReaderMarkerTypeStore {
     }, onUnavailable: null);
   }
 
+  /// 记住「全部类型」的手动排序；重复项自动丢弃。
+  Future<void> setOrder(Iterable<String> orderIds) async {
+    final seen = <String>{};
+    final next = <String>[];
+    for (final raw in orderIds) {
+      final id = _normalizeOrderEntry(raw);
+      if (id.isEmpty || !seen.add(id)) continue;
+      next.add(id);
+    }
+    _order = List.unmodifiable(next);
+    changes.value++;
+    await _serialize((box) async {
+      await box.put(_orderKey, next);
+    }, onUnavailable: null);
+  }
+
   static List<ReaderMarkerType> _decode(dynamic raw) {
     if (raw is! List) return const [];
     return [for (final entry in raw) ?ReaderMarkerType.fromMap(entry)];
@@ -192,6 +238,7 @@ class ReaderMarkerTypeStore {
   void resetForTest() {
     _loaded = false;
     _types = const [];
+    _order = const [];
     changes.value = 0;
   }
 }

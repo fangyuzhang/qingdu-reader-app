@@ -6,6 +6,7 @@ import 'package:hive_ce/hive.dart';
 
 import 'encrypted_hive.dart';
 import 'reader_mark_style.dart';
+import 'reader_marker_type_store.dart';
 
 /// 一次新建/编辑批注时由编辑器收集的全部内容。
 @immutable
@@ -85,6 +86,7 @@ class ReaderAnnotation {
     this.markerType = '',
     this.markerLabel = '',
     this.markerColorValue = 0,
+    this.extraMarkers = const [],
     this.markStyle = ReaderMarkStyle.solid,
     this.markColorValue = 0,
   });
@@ -124,6 +126,13 @@ class ReaderAnnotation {
   final String markerLabel;
   final int markerColorValue;
 
+  /// 叠加在主标记之后的其它批注类型。
+  ///
+  /// 一条笔记允许同时挂多个类型（如「疑问」+「待查证」）。主标记仍写在
+  /// [markerLabel] / [markerColorValue] 上，保证阅读器、导出等只认单标记的
+  /// 老链路不受影响；这里只存额外的角标。
+  final List<ReaderMarkerType> extraMarkers;
+
   /// 原文标记的线型与颜色；批注默认横线（solid）。
   final ReaderMarkStyle markStyle;
   final int markColorValue;
@@ -145,6 +154,33 @@ class ReaderAnnotation {
       ? markColorValue
       : (isAnnot ? readerDefaultAnnotationColor : readerDefaultExcerptColor);
 
+  /// 全部角标：主标记在前，其余按存储顺序，按文案去重。
+  ///
+  /// 全部被拖走时返回空列表——笔记卡片不再画角标；阅读器/导出仍可用
+  /// [displayMarkerLabel] 回退到「批 / 摘」。
+  List<ReaderMarkerType> get markerBadges {
+    final seen = <String>{};
+    final out = <ReaderMarkerType>[];
+    void add(ReaderMarkerType type) {
+      final key = type.key;
+      if (key.isEmpty || !seen.add(key)) return;
+      out.add(type);
+    }
+
+    if (markerLabel.trim().isNotEmpty) {
+      add(
+        ReaderMarkerType(
+          label: displayMarkerLabel,
+          colorValue: effectiveMarkerColorValue,
+        ),
+      );
+    }
+    for (final type in extraMarkers) {
+      add(type);
+    }
+    return List.unmodifiable(out);
+  }
+
   ReaderAnnotation copyWith({
     String? thought,
     String? category,
@@ -152,6 +188,7 @@ class ReaderAnnotation {
     String? markerType,
     String? markerLabel,
     int? markerColorValue,
+    List<ReaderMarkerType>? extraMarkers,
     ReaderMarkStyle? markStyle,
     int? markColorValue,
   }) => ReaderAnnotation(
@@ -170,6 +207,7 @@ class ReaderAnnotation {
     markerType: markerType ?? this.markerType,
     markerLabel: markerLabel ?? this.markerLabel,
     markerColorValue: markerColorValue ?? this.markerColorValue,
+    extraMarkers: extraMarkers ?? this.extraMarkers,
     markStyle: markStyle ?? this.markStyle,
     markColorValue: markColorValue ?? this.markColorValue,
   );
@@ -197,6 +235,7 @@ class ReaderAnnotation {
     'markerType': markerType,
     'markerLabel': markerLabel,
     'markerColorValue': markerColorValue,
+    'extraMarkers': [for (final type in extraMarkers) type.toMap()],
     'markStyle': markStyle.storageValue,
     'markColorValue': markColorValue,
   };
@@ -234,6 +273,7 @@ class ReaderAnnotation {
     final markerType = raw['markerType'];
     final markerLabel = raw['markerLabel'];
     final markerColorValue = raw['markerColorValue'];
+    final rawExtraMarkers = raw['extraMarkers'];
     final markColorValue = raw['markColorValue'];
     return ReaderAnnotation(
       bookId: bookId,
@@ -253,6 +293,13 @@ class ReaderAnnotation {
       markerColorValue: markerColorValue is num && markerColorValue.isFinite
           ? markerColorValue.toInt()
           : 0,
+      extraMarkers: rawExtraMarkers is List
+          ? List.unmodifiable(
+              rawExtraMarkers
+                  .map(ReaderMarkerType.fromMap)
+                  .whereType<ReaderMarkerType>(),
+            )
+          : const <ReaderMarkerType>[],
       markStyle: ReaderMarkStyle.fromStorage(raw['markStyle']),
       markColorValue: markColorValue is num && markColorValue.isFinite
           ? markColorValue.toInt()
@@ -412,6 +459,59 @@ class ReaderAnnotationStore {
     onUnavailable: null,
     failWhenUnavailable: true,
   );
+
+  /// 只改多值标签，保留想法、分类、角标与原文位置。
+  Future<void> updateTags(String key, Iterable<String> tags) =>
+      _serialize((box) async {
+        final existing = ReaderAnnotation.fromMap(box.get(key));
+        if (existing == null) return;
+        final next = AnnotationDraft.normalizeTags(tags);
+        if (listEquals(next, existing.tags)) return;
+        await box.put(key, existing.copyWith(tags: next).toMap());
+        changes.value++;
+      }, onUnavailable: null, failWhenUnavailable: true);
+
+  /// 只改批注类型角标（可多个）。第一个角标写回主标记字段，
+  /// 阅读器与长图导出这类只认单标记的链路继续可用。
+  Future<void> updateMarkerTags(
+    String key,
+    Iterable<ReaderMarkerType> markers,
+  ) => _serialize((box) async {
+    final existing = ReaderAnnotation.fromMap(box.get(key));
+    if (existing == null) return;
+    final next = normalizeMarkerTypes(markers);
+    final primary = next.isEmpty ? null : next.first;
+    await box.put(
+      key,
+      existing
+          .copyWith(
+            markerType: primary == null
+                ? ''
+                : (primary.key == existing.markerLabel
+                      ? existing.markerType
+                      : AnnotationDraft.customMarkerType),
+            markerLabel: primary?.label ?? '',
+            markerColorValue: primary?.colorValue ?? 0,
+            extraMarkers: next.skip(1).toList(growable: false),
+          )
+          .toMap(),
+    );
+    changes.value++;
+  }, onUnavailable: null, failWhenUnavailable: true);
+
+  /// 按文案去重并保持传入顺序。
+  static List<ReaderMarkerType> normalizeMarkerTypes(
+    Iterable<ReaderMarkerType> markers,
+  ) {
+    final seen = <String>{};
+    final out = <ReaderMarkerType>[];
+    for (final marker in markers) {
+      final label = marker.label.trim();
+      if (label.isEmpty || !seen.add(label)) continue;
+      out.add(ReaderMarkerType(label: label, colorValue: marker.colorValue));
+    }
+    return List.unmodifiable(out);
+  }
 
   Future<void> remove(String key) => _serialize(
     (box) async {

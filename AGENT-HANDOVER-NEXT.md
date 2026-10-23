@@ -3,7 +3,7 @@
 > 更新时间：2026-10-23
 > 仓库：`/home/fy/projects/fqapp-src`（WSL2 **原生路径**，不是 `/mnt/c` 上的副本）
 > 远端：`https://github.com/fangyuzhang/qingqie-reader-app`（**私有**）
-> 分支：`master`　HEAD：以 `git log --oneline -1` 为准（本批为「UI 可访问性与首页 / 我的 交互收口」）
+> 分支：`master`　HEAD：以 `git log --oneline -1` 为准（本批为「笔记交互重构：多角标 + 拖拽标签」）
 > 版本：`1.0.129+134`　包名：`com.fqapp.fqapp`
 
 本文是**唯一有效的当前状态说明**。`AGENT-HANDOVER.md` 是早期总交接归档，里面的 HEAD、测试数字、工作树描述都已过期，只能当历史背景读。
@@ -15,13 +15,13 @@
 | 项 | 值 |
 | --- | --- |
 | 代码状态 | `master` 干净，工作区无残留改动 |
-| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1488**、跳过 **10**、失败 **0** |
+| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1501**、跳过 **10**、失败 **0** |
 | 真机 | Redmi K20 Pro，serial `b2f8e975`（adb 走 Windows 侧 exe） |
-| 基准 APK | 38,524,655 字节，SHA-256 `130b302f6aa8310974c19b090053383189d9d273692bb75182b013b70dd31041` |
-| APK 校验 | `build/apk-verification/wsl-native-v35/report.json`，全部 passed |
-| 当前批次 | UI 对比度、48dp 命中区、首页滑到底进全部、移除浮动搜索、我的页日期入口 |
+| 基准 APK | 38,459,051 字节，SHA-256 `b93ad85d7d9cddff5b36ab902f439100359e1e61c78d4c6f05e2601e47c13896`（`/mnt/d/APP/agent/apk/fqapp-v37.apk`） |
+| APK 校验 | 本批只做了安装与真机截图复核；v35 的静态校验报告仍在 `build/apk-verification/wsl-native-v35/report.json` |
+| 当前批次 | 笔记：多类型角标、类型/标签拖拽打标与换序、按书查看留在本视图 |
 
-接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1488/10/0，再动手。
+接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1501/10/0，再动手。
 
 ---
 
@@ -153,7 +153,7 @@ flutter analyze
 flutter test
 ```
 
-当前期望：`analyze` 0 问题；`test` 1488 通过 / 10 跳过 / 0 失败。
+当前期望：`analyze` 0 问题；`test` 1501 通过 / 10 跳过 / 0 失败。
 
 ### 5.2 构建 release
 
@@ -178,8 +178,8 @@ python3 scripts/verify_android_apk.py \
 
 ```bash
 ADB=/mnt/d/APP/DevTools/Android/Sdk/platform-tools/adb.exe
-cp build/app/outputs/flutter-apk/app-release.apk /mnt/d/APP/agent/apk/fqapp-v35.apk
-$ADB -s b2f8e975 install -r /mnt/d/APP/agent/apk/fqapp-v35.apk
+cp build/app/outputs/flutter-apk/app-release.apk /mnt/d/APP/agent/apk/fqapp-v37.apk
+$ADB -s b2f8e975 install -r /mnt/d/APP/agent/apk/fqapp-v37.apk
 $ADB -s b2f8e975 shell am start -n com.fqapp.fqapp/.MainActivity
 $ADB -s b2f8e975 exec-out screencap -p > /tmp/shot.png
 ```
@@ -195,6 +195,10 @@ $ADB -s b2f8e975 exec-out screencap -p > /tmp/shot.png
 - [ ] 「全部」页显示真实数量（如「古典名著」已载入 40 本），文案不再是固定 6 本。
 - [ ] 我的页日期胶囊可点，选择日期后统计范围刷新。
 - [ ] 笔记时间轴日期单行，条目不错位。
+- [ ] 笔记「全部类型」行同时列出批注类型与自由标签；点类型/标签只做切换，再点取消，没有「类型 X / 清除」二级按钮。
+- [ ] 长按类型或标签拖到笔记上可打标；把笔记上的角标拖到空白处即取消；拖到另一条笔记即移动。
+- [ ] 长按标签拖到另一个标签后面可换序，重启应用后顺序保留。
+- [ ] 「按书查看」选中一本书后停留在本视图，顶部有返回条，不自动跳回时间线。
 - [ ] 5 套阅读背景下正文与辅助文字都清晰（尤其夜间、墨水屏）。
 - [ ] 系统字号放大后，书架 chip、笔记筛选、我的页日期不溢出。
 - [ ] 正文工具栏显隐时正文不上下移动。

@@ -16,6 +16,10 @@ enum NoteTypeFilter { all, annot, excerpt }
 /// internal type id — is the stable grouping key.
 String noteMarkerKey(ReaderAnnotation note) => note.displayMarkerLabel.trim();
 
+/// 一条笔记挂了多个批注类型角标时，任一命中即算匹配。
+bool noteHasMarker(ReaderAnnotation note, String key) =>
+    note.markerBadges.any((badge) => badge.key == key.trim());
+
 /// The four independent dimensions of the notes filter.
 ///
 /// Values in [tags] are OR-ed with each other; different dimensions are
@@ -147,7 +151,7 @@ List<ReaderAnnotation> filterNoteTimeline(
           return false;
         }
         if (filters.markerKey != null &&
-            noteMarkerKey(note) != filters.markerKey) {
+            !noteHasMarker(note, filters.markerKey!)) {
           return false;
         }
         if (start != null && endExclusive != null) {

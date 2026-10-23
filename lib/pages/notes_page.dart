@@ -18,15 +18,9 @@ import '../services/reader_marker_type_store.dart';
 import '../services/reader_underline_store.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
+import '../widgets/notes/note_tag_drag.dart';
 import '../widgets/reader/reader_note_block.dart';
 import 'reader_page.dart';
-
-@immutable
-class _BookOption {
-  const _BookOption(this.id, this.title);
-  final String id;
-  final String title;
-}
 
 enum _NotesViewMode { timeline, books, marks }
 
@@ -117,6 +111,13 @@ class _NotesPageState extends State<NotesPage> {
   /// 用户自定义过的批注类型（内置四个预设不在这里）。
   List<ReaderMarkerType> _customMarkerTypes = const [];
 
+  /// 「全部类型」一行的手动顺序（`type:` / `tag:` id）。空表示还没排过。
+  List<String> _order = const [];
+
+  /// 拖拽悬停中的笔记与标签，用来画磁力虚影。
+  String? _hoverNoteKey;
+  NoteTagDrag? _hoverTag;
+
   /// 划线 / 荧光笔记录，以及按书过滤当前划线视图的选择。
   List<_MarkEntry> _marks = const [];
   String? _markBookId;
@@ -155,6 +156,7 @@ class _NotesPageState extends State<NotesPage> {
     setState(() {
       _all = entries;
       _customMarkerTypes = ReaderMarkerTypeStore.instance.types;
+      _order = ReaderMarkerTypeStore.instance.order;
       _covers = meta.covers;
       _bookTitles = meta.titles;
       _marks = _buildMarks(ranges, paragraphs, entries, meta.titles);
@@ -253,7 +255,8 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   /// 笔记里出现过的所有批注类型：内置预设 + 用户自定义 + 已落在笔记上的。
-  List<ReaderMarkerType> get _markerCatalog {
+  /// 这里保持目录顺序；展示顺序由 [_sortByOrder] 按「全部类型」排。
+  List<ReaderMarkerType> get _baseMarkerCatalog {
     final observed = <ReaderMarkerType>[];
     for (final note in _all) {
       if (!note.isAnnot) continue;
@@ -271,15 +274,95 @@ class _NotesPageState extends State<NotesPage> {
     return ReaderMarkerTypeStore.catalog([..._customMarkerTypes, ...observed]);
   }
 
+  /// 没手动排过时，先批注类型、后自由标签；排过一次就完全听用户的。
+  List<String> get _effectiveOrder {
+    if (_order.isNotEmpty) return _order;
+    return [
+      for (final type in _baseMarkerCatalog)
+        ReaderMarkerTypeStore.typeOrderId(type.key),
+      for (final tag in _tags) ReaderMarkerTypeStore.tagOrderId(tag),
+    ];
+  }
+
+  Map<String, int> get _orderRank => {
+    for (var index = 0; index < _effectiveOrder.length; index++)
+      _effectiveOrder[index]: index,
+  };
+
+  String _orderIdOf(NoteTagDrag entry) => entry.kind == NoteTagKind.marker
+      ? ReaderMarkerTypeStore.typeOrderId(entry.label)
+      : ReaderMarkerTypeStore.tagOrderId(entry.label);
+
+  /// 当前「全部类型」一行的 id 序列（按用户顺序排好）。
+  List<String> get _sortedOrderIds => _sortByOrder(
+    [
+      for (final type in _baseMarkerCatalog)
+        ReaderMarkerTypeStore.typeOrderId(type.key),
+      for (final tag in _tags) ReaderMarkerTypeStore.tagOrderId(tag),
+    ],
+    (id) => id,
+  );
+
+  /// 角标 / 类型 / 标签都按「全部类型」里的手动顺序排列，
+  /// 没排过的排后面并保持原序。
+  List<T> _sortByOrder<T>(List<T> entries, String Function(T entry) idOf) {
+    final rank = _orderRank;
+    final indexed = entries.indexed.toList();
+    indexed.sort((a, b) {
+      final left = rank[idOf(a.$2)] ?? 1 << 20;
+      final right = rank[idOf(b.$2)] ?? 1 << 20;
+      final byRank = left.compareTo(right);
+      return byRank != 0 ? byRank : a.$1.compareTo(b.$1);
+    });
+    return List.unmodifiable(indexed.map((entry) => entry.$2));
+  }
+
+  /// 「全部类型」里实际渲染的一行：批注类型 + 自由标签，统一排序。
+  List<NoteTagDrag> _paletteEntries({required bool dark}) => _sortByOrder([
+    for (final type in _baseMarkerCatalog)
+      NoteTagDrag(
+        label: type.label,
+        colorValue: type.colorValue,
+        kind: NoteTagKind.marker,
+      ),
+    for (final tag in _tags)
+      NoteTagDrag(
+        label: tag,
+        colorValue: noteTagColorValue(tag, dark: dark),
+        kind: NoteTagKind.tag,
+      ),
+  ], _orderIdOf);
+
+  /// 一条笔记上挂的所有角标：类型与标签混排，顺序跟「全部类型」一致。
+  List<NoteTagDrag> _badgesOf(ReaderAnnotation note, {required bool dark}) =>
+      _sortByOrder([
+        for (final badge in note.markerBadges)
+          NoteTagDrag(
+            label: badge.label,
+            colorValue: badge.colorValue,
+            kind: NoteTagKind.marker,
+            sourceNoteKey: note.key,
+          ),
+        for (final tag in note.tags)
+          NoteTagDrag(
+            label: tag,
+            colorValue: noteTagColorValue(tag, dark: dark),
+            kind: NoteTagKind.tag,
+            sourceNoteKey: note.key,
+          ),
+      ], _orderIdOf);
+
   List<ReaderAnnotation> get _visible {
     return filterNoteTimeline(_all, _filters, type: _type);
   }
 
-  /// 按书浏览时忽略单书筛选，但保留时间、分类、标签和批注/书摘条件。
+  /// 按书浏览：时间、分类、标签与批注/书摘条件继续生效；
+  /// 选中某本书后用它收窄到这一本。
   List<ReaderAnnotation> get _bookViewNotes {
     return filterNoteTimeline(
       _all,
       NoteTimelineFilters(
+        bookId: _filters.bookId,
         category: _filters.category,
         tags: _filters.tags,
         timePreset: _filters.timePreset,
@@ -315,17 +398,20 @@ class _NotesPageState extends State<NotesPage> {
     if (_viewMode == mode) return;
     setState(() {
       _viewMode = mode;
-      // 「按书」本身就是书籍维度；清掉单书筛选，才能看到所有书。
-      if (mode == _NotesViewMode.books && _filters.bookId != null) {
-        _filters = _filters.without(bookId: true);
-      }
+      // 视图切换一律回到全量：单书范围只属于「按书查看」里的那一层，
+      // 否则时间线会莫名只剩一本书，而顶部又没有可见的筛选提示。
+      _filters = _filters.without(bookId: true);
+      _hoverNoteKey = null;
+      _hoverTag = null;
     });
   }
 
   void _openBookNotes(_BookNotesGroup group) {
     setState(() {
       _filters = _filters.copyWith(bookId: group.id);
-      _viewMode = _NotesViewMode.timeline;
+      // 留在「按书查看」里展开这本书，不再擅自跳到时间线。
+      _hoverNoteKey = null;
+      _hoverTag = null;
     });
   }
 
@@ -338,20 +424,6 @@ class _NotesPageState extends State<NotesPage> {
     if (own.isNotEmpty) return own;
     final known = _bookTitles[bookId]?.trim() ?? '';
     return known.isEmpty ? '未知书籍' : known;
-  }
-
-  List<_BookOption> get _books {
-    final seen = <String>{};
-    final result = <_BookOption>[];
-    for (final note in _all) {
-      if (seen.add(note.bookId)) {
-        result.add(
-          _BookOption(note.bookId, _titleOf(note.bookId, note.bookTitle)),
-        );
-      }
-    }
-    result.sort((a, b) => a.title.compareTo(b.title));
-    return result;
   }
 
   List<String> get _categories {
@@ -392,6 +464,12 @@ class _NotesPageState extends State<NotesPage> {
     final groups = _viewMode == _NotesViewMode.books
         ? _bookGroups
         : const <_BookNotesGroup>[];
+    final selectedBookId = _viewMode == _NotesViewMode.books
+        ? _filters.bookId
+        : null;
+    final bookNotes = selectedBookId == null
+        ? const <ReaderAnnotation>[]
+        : _bookViewNotes;
     final marks = _viewMode == _NotesViewMode.marks
         ? _visibleMarks
         : const <_MarkEntry>[];
@@ -401,7 +479,8 @@ class _NotesPageState extends State<NotesPage> {
       _NotesViewMode.marks => const <ReaderAnnotation>[],
     };
     final hasContent = switch (_viewMode) {
-      _NotesViewMode.books => groups.isNotEmpty,
+      _NotesViewMode.books =>
+        selectedBookId == null ? groups.isNotEmpty : bookNotes.isNotEmpty,
       _NotesViewMode.marks => marks.isNotEmpty,
       _NotesViewMode.timeline => visible.isNotEmpty,
     };
@@ -425,46 +504,215 @@ class _NotesPageState extends State<NotesPage> {
         children: [
           _buildViewSwitch(palette),
           _buildQuickFilters(palette),
-          if (_filters.isActive && _viewMode != _NotesViewMode.marks)
-            _buildActiveSummary(palette),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : !hasContent
                 ? _buildEmpty(palette)
                 : switch (_viewMode) {
-                    _NotesViewMode.books => _buildBookGrid(groups),
+                    _NotesViewMode.books =>
+                      selectedBookId == null
+                          ? _buildBookGrid(groups)
+                          : _buildBookNotes(palette, selectedBookId, bookNotes),
                     _NotesViewMode.marks => _buildMarkList(palette, marks),
-                    _NotesViewMode.timeline => ListView.builder(
-                      key: const ValueKey('notes-timeline'),
-                      padding: const EdgeInsets.fromLTRB(12, 4, 16, 32),
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) {
-                        final note = visible[index];
-                        final previous = index == 0 ? null : visible[index - 1];
-                        final next = index + 1 >= visible.length
-                            ? null
-                            : visible[index + 1];
-                        return _TimelineNoteRow(
-                          key: ValueKey('note-timeline-${note.key}'),
-                          note: note,
-                          bookTitle: _titleOf(note.bookId, note.bookTitle),
-                          firstOfDay:
-                              previous == null ||
-                              !_sameDay(previous.createdAt, note.createdAt),
-                          lastOfDay:
-                              next == null ||
-                              !_sameDay(next.createdAt, note.createdAt),
-                          onOpen: _openNote,
-                          onEdit: _editNote,
-                        );
-                      },
-                    ),
+                    _NotesViewMode.timeline => _buildNoteList(palette, visible),
                   },
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildNoteList(
+    HomePalette palette,
+    List<ReaderAnnotation> notes,
+  ) => ListView.builder(
+    key: const ValueKey('notes-timeline'),
+    padding: const EdgeInsets.fromLTRB(12, 4, 16, 32),
+    itemCount: notes.length,
+    itemBuilder: (context, index) {
+      final note = notes[index];
+      final previous = index == 0 ? null : notes[index - 1];
+      final next = index + 1 >= notes.length ? null : notes[index + 1];
+      return _noteRow(
+        note,
+        palette: palette,
+        firstOfDay:
+            previous == null || !_sameDay(previous.createdAt, note.createdAt),
+        lastOfDay: next == null || !_sameDay(next.createdAt, note.createdAt),
+      );
+    },
+  );
+
+  /// 按书查看里点开一本书：留在这个视图，只把范围收窄到这一本。
+  Widget _buildBookNotes(
+    HomePalette palette,
+    String bookId,
+    List<ReaderAnnotation> notes,
+  ) => Column(
+    children: [
+      _BookScopeBar(
+        title: _titleOf(bookId, notes.isEmpty ? '' : notes.first.bookTitle),
+        count: notes.length,
+        onBack: () => setState(() {
+          _filters = _filters.without(bookId: true);
+          _hoverNoteKey = null;
+          _hoverTag = null;
+        }),
+      ),
+      Expanded(
+        child: notes.isEmpty
+            ? _buildEmpty(palette)
+            : _buildNoteList(palette, notes),
+      ),
+    ],
+  );
+
+  /// 一条时间线笔记，统一挂上「拖标签进来」的落点与磁力虚影。
+  Widget _noteRow(
+    ReaderAnnotation note, {
+    required HomePalette palette,
+    required bool firstOfDay,
+    required bool lastOfDay,
+  }) {
+    final hovering = _hoverNoteKey == note.key;
+    return DragTarget<NoteTagDrag>(
+      // 拖回自己身上也要接受：接受后是无操作，否则会被当成「丢到空白处」
+      // 把标签删掉。
+      onWillAcceptWithDetails: (details) => true,
+      onMove: (details) {
+        if (_hoverNoteKey == note.key && _hoverTag?.id == details.data.id) {
+          return;
+        }
+        setState(() {
+          _hoverNoteKey = note.key;
+          _hoverTag = details.data;
+        });
+      },
+      onLeave: (_) {
+        if (_hoverNoteKey != note.key) return;
+        setState(() {
+          _hoverNoteKey = null;
+          _hoverTag = null;
+        });
+      },
+      onAcceptWithDetails: (details) {
+        final data = details.data;
+        setState(() {
+          _hoverNoteKey = null;
+          _hoverTag = null;
+        });
+        unawaited(_applyTagDrop(note, data));
+      },
+      builder: (context, candidate, rejected) => _TimelineNoteRow(
+        key: ValueKey('note-timeline-${note.key}'),
+        note: note,
+        bookTitle: _titleOf(note.bookId, note.bookTitle),
+        firstOfDay: firstOfDay,
+        lastOfDay: lastOfDay,
+        badges: _badgesOf(note, dark: palette.dark),
+        hoverTag: hovering ? _hoverTag : null,
+        onOpen: _openNote,
+        onEdit: _editNote,
+        onDragFinished: _clearHover,
+        onRemoveTag: (tag) {
+          if (tag.kind == NoteTagKind.marker) {
+            unawaited(
+              _store.updateMarkerTags(
+                note.key,
+                note.markerBadges.where((entry) => entry.key != tag.label),
+              ),
+            );
+          } else {
+            unawaited(
+              _store.updateTags(
+                note.key,
+                note.tags.where((entry) => entry != tag.label),
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  /// 把拖进来的标签落到 [note] 上；跨笔记拖动时从来源上摘掉。
+  Future<void> _applyTagDrop(ReaderAnnotation note, NoteTagDrag data) async {
+    final fromKey = data.sourceNoteKey;
+    final source = fromKey == null || fromKey == note.key
+        ? null
+        : _all.where((entry) => entry.key == fromKey).firstOrNull;
+    if (data.kind == NoteTagKind.marker) {
+      final type = ReaderMarkerType(
+        label: data.label,
+        colorValue: data.colorValue,
+      );
+      final badges = [...note.markerBadges];
+      final exists = badges.any((badge) => badge.key == type.key);
+      // 目标已经有这个角标：整次拖动视为无操作，不能把来源上的删掉。
+      if (exists) return;
+      badges.add(type);
+      await _store.updateMarkerTags(note.key, badges);
+      if (source != null &&
+          source.markerBadges.any((badge) => badge.key == type.key)) {
+        await _store.updateMarkerTags(
+          source.key,
+          source.markerBadges.where((badge) => badge.key != type.key),
+        );
+      }
+      return;
+    }
+    if (note.tags.contains(data.label)) return;
+    await _store.updateTags(note.key, [...note.tags, data.label]);
+    if (source != null && source.tags.contains(data.label)) {
+      await _store.updateTags(
+        source.key,
+        source.tags.where((tag) => tag != data.label),
+      );
+    }
+  }
+
+  /// 「全部类型」里长按拖动换序：放到目标标签后面并持久化。
+  ///
+  /// 类型与自由标签共用一条序列，所以「把 1万 拖到 反驳 后面」也是同一条
+  /// 代码路径，不需要两套排序逻辑。
+  void _reorderTag(NoteTagDrag dragged, NoteTagDrag target) {
+    final ids = [..._sortedOrderIds];
+    final from = ids.indexOf(_orderIdOf(dragged));
+    if (from < 0) return;
+    ids.removeAt(from);
+    final to = ids.indexOf(_orderIdOf(target));
+    if (to < 0) return;
+    ids.insert(to + 1, _orderIdOf(dragged));
+    setState(() => _order = List.unmodifiable(ids));
+    unawaited(ReaderMarkerTypeStore.instance.setOrder(ids));
+  }
+
+  /// 拖拽结束（无论有没有落点）都清掉磁力虚影，避免悬停态残留。
+  void _clearHover() {
+    if (_hoverNoteKey == null && _hoverTag == null) return;
+    setState(() {
+      _hoverNoteKey = null;
+      _hoverTag = null;
+    });
+  }
+
+  /// 点类型 = 只看这一类；再点一次 = 取消。
+  /// 自由标签可多选，多个标签之间是「任一命中」。
+  void _toggleType(NoteTagDrag entry) {
+    setState(() {
+      if (entry.kind == NoteTagKind.marker) {
+        _filters = _filters.markerKey == entry.label
+            ? _filters.without(marker: true)
+            : _filters.copyWith(markerKey: entry.label);
+        return;
+      }
+      final next = {..._filters.tags};
+      if (!next.remove(entry.label)) next.add(entry.label);
+      _filters = next.isEmpty
+          ? _filters.without(tags: true)
+          : _filters.copyWith(tags: next);
+    });
   }
 
   Widget _buildViewSwitch(HomePalette palette) {
@@ -552,130 +800,85 @@ class _NotesPageState extends State<NotesPage> {
           selectedColor: palette.chipSelectedFill,
           backgroundColor: palette.chipFill,
           side: palette.chipBorder(active),
-          onSelected: (_) => setState(() => _type = type),
+          // 再点一次当前类型 = 取消选择，不再额外弹「类型 / 清除」按钮。
+          onSelected: (_) =>
+              setState(() => _type = _type == type ? NoteTypeFilter.all : type),
         ),
       );
     }
 
-    final markers = _markerCatalog;
+    final entries = _paletteEntries(dark: palette.dark);
+    final allTypes = _filters.markerKey == null && _filters.tags.isEmpty;
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      chip(NoteTypeFilter.all, '全部', _all.length),
-                      chip(NoteTypeFilter.annot, '批注', _annotCount),
-                      chip(NoteTypeFilter.excerpt, '书摘', _excerptCount),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  OutlinedButton.icon(
-                    key: const ValueKey('notes-filter-button'),
-                    onPressed: _openFilters,
-                    icon: const Icon(LucideIcons.sliders_horizontal, size: 16),
-                    label: const Text('筛选'),
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor: _filters.isActive
-                          ? palette.accentText
-                          : palette.muted,
-                      side: BorderSide(
-                        color: _filters.isActive
-                            ? palette.accentText
-                            : palette.line,
-                      ),
-                    ),
-                  ),
-                  if (_filters.activeDimensions > 0)
-                    Positioned(
-                      right: -6,
-                      top: -7,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: HomePalette.accent,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          '${_filters.activeDimensions}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ],
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                chip(NoteTypeFilter.all, '全部', _all.length),
+                chip(NoteTypeFilter.annot, '批注', _annotCount),
+                chip(NoteTypeFilter.excerpt, '书摘', _excerptCount),
+              ],
+            ),
           ),
         ),
-        // 批注类型：内置四种 + 用户自定义的，直接按类型挑，不必进筛选面板。
+        // 「全部类型」= 批注类型 + 自由标签，共用一条可长按拖动的顺序。
+        // 类型单选、标签多选；再点一次当前项即取消，不再弹「类型 / 清除」。
         SizedBox(
           // ChoiceChip 在 MaterialTapTargetSize.padded 下自带 48dp 命中区，
           // 原来的 40dp 行高既压扁了 chip，也让点击带不足 48dp。
-          height: markers.isEmpty ? 6 : 48,
-          child: markers.isEmpty
-              ? null
-              : ListView(
-                  key: const ValueKey('notes-marker-types'),
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
-                  children: [
-                    _markerTypeChip(palette, null, '全部类型'),
-                    for (final type in markers)
-                      _markerTypeChip(palette, type, type.label),
-                  ],
+          height: 48,
+          child: ListView(
+            key: const ValueKey('notes-marker-types'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  key: const ValueKey('notes-marker-all'),
+                  showCheckmark: false,
+                  selected: allTypes,
+                  label: const Text('全部类型'),
+                  labelStyle: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: allTypes ? palette.accentText : palette.muted,
+                  ),
+                  selectedColor: palette.chipSelectedFill,
+                  backgroundColor: palette.chipFill,
+                  side: palette.chipBorder(allTypes),
+                  onSelected: (_) => setState(
+                    () => _filters = _filters.without(marker: true, tags: true),
+                  ),
                 ),
+              ),
+              for (final entry in entries)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: PaletteTagChip(
+                    key: ValueKey(
+                      entry.kind == NoteTagKind.marker
+                          ? 'notes-marker-${entry.label}'
+                          : 'notes-tag-${entry.label}',
+                    ),
+                    label: entry.label,
+                    colorValue: entry.colorValue,
+                    kind: entry.kind,
+                    selected: entry.kind == NoteTagKind.marker
+                        ? _filters.markerKey == entry.label
+                        : _filters.tags.contains(entry.label),
+                    onTap: () => _toggleType(entry),
+                    onReorder: _reorderTag,
+                    onDragFinished: _clearHover,
+                  ),
+                ),
+            ],
+          ),
         ),
       ],
-    );
-  }
-
-  Widget _markerTypeChip(
-    HomePalette palette,
-    ReaderMarkerType? type,
-    String label,
-  ) {
-    final active = _filters.markerKey == type?.key;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: ChoiceChip(
-        key: ValueKey('notes-marker-${type?.key ?? 'all'}'),
-        showCheckmark: false,
-        selected: active,
-        avatar: type == null
-            ? null
-            : CircleAvatar(radius: 5, backgroundColor: Color(type.colorValue)),
-        label: Text(label),
-        labelStyle: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: active ? palette.accentText : palette.muted,
-        ),
-        selectedColor: palette.chipSelectedFill,
-        backgroundColor: palette.chipFill,
-        side: palette.chipBorder(active),
-        onSelected: (_) => setState(() {
-          _filters = type == null
-              ? _filters.without(marker: true)
-              : _filters.copyWith(markerKey: type.key);
-        }),
-      ),
     );
   }
 
@@ -809,69 +1012,6 @@ class _NotesPageState extends State<NotesPage> {
         ),
       );
 
-  Widget _buildActiveSummary(HomePalette palette) {
-    final labels = <(String, VoidCallback)>[];
-    if (_filters.bookId != null) {
-      final title = _books
-          .where((book) => book.id == _filters.bookId)
-          .map((book) => book.title)
-          .firstOrNull;
-      labels.add((
-        '书：${title ?? '未知书籍'}',
-        () => setState(() => _filters = _filters.without(bookId: true)),
-      ));
-    }
-    if (_filters.timePreset != NoteTimePreset.all) {
-      final range = _filters.resolveRange(DateTime.now());
-      labels.add((
-        '时间：${range == null ? '不限' : _rangeLabel(range)}',
-        () => setState(() => _filters = _filters.without(time: true)),
-      ));
-    }
-    if (_filters.category != null) {
-      labels.add((
-        '分类：${_filters.category == noteUncategorizedFilter ? '未分类' : _filters.category}',
-        () => setState(() => _filters = _filters.without(category: true)),
-      ));
-    }
-    if (_filters.tags.isNotEmpty) {
-      labels.add((
-        '标签：${_filters.tags.join(' / ')}',
-        () => setState(() => _filters = _filters.without(tags: true)),
-      ));
-    }
-    if (_filters.markerKey != null) {
-      labels.add((
-        '类型：${_filters.markerKey}',
-        () => setState(() => _filters = _filters.without(marker: true)),
-      ));
-    }
-    return SizedBox(
-      height: 38,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 0, 12, 4),
-        children: [
-          for (final entry in labels)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: InputChip(
-                label: Text(entry.$1),
-                onDeleted: entry.$2,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ActionChip(
-            key: const ValueKey('notes-filter-clear'),
-            label: const Text('清除'),
-            onPressed: () =>
-                setState(() => _filters = const NoteTimelineFilters()),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmpty(HomePalette palette) {
     final filtered = _filters.isActive || _type != NoteTypeFilter.all;
     final (String title, String hint, IconData icon) = switch (_viewMode) {
@@ -920,26 +1060,6 @@ class _NotesPageState extends State<NotesPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _openFilters() async {
-    final result = await showModalBottomSheet<NoteTimelineFilters>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: HomePalette.of(context).canvas,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (_) => _NoteFilterSheet(
-        initial: _filters,
-        books: _books,
-        categories: _categories,
-        tags: _tags,
-        markerTypes: _markerCatalog,
-      ),
-    );
-    if (result == null || !mounted) return;
-    setState(() => _filters = result);
   }
 
   Future<void> _editNote(ReaderAnnotation note) async {
@@ -1109,6 +1229,10 @@ class _TimelineNoteRow extends StatelessWidget {
     required this.bookTitle,
     required this.firstOfDay,
     required this.lastOfDay,
+    required this.badges,
+    required this.onRemoveTag,
+    this.hoverTag,
+    required this.onDragFinished,
     required this.onOpen,
     required this.onEdit,
   });
@@ -1119,6 +1243,13 @@ class _TimelineNoteRow extends StatelessWidget {
   final String bookTitle;
   final bool firstOfDay;
   final bool lastOfDay;
+
+  /// 类型与自由标签混排，已按「全部类型」的顺序排好；
+  /// 最多显示 3 枚，其余折成 +N。
+  final List<NoteTagDrag> badges;
+  final NoteTagDrag? hoverTag;
+  final void Function(NoteTagDrag badge) onRemoveTag;
+  final VoidCallback onDragFinished;
   final Future<void> Function(ReaderAnnotation note) onOpen;
   final Future<void> Function(ReaderAnnotation note) onEdit;
 
@@ -1202,28 +1333,62 @@ class _TimelineNoteRow extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            Container(
-                              constraints: const BoxConstraints(minWidth: 22),
-                              height: 20,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                              ),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: badgeColor,
-                                borderRadius: BorderRadius.circular(5),
-                              ),
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  note.displayMarkerLabel,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    height: 1,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 156),
+                              child: Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  for (final badge in badges.take(3))
+                                    NoteBadgeChip(
+                                      key: ValueKey(
+                                        'note-badge-${note.key}-${badge.label}',
+                                      ),
+                                      label: badge.label,
+                                      colorValue: badge.colorValue,
+                                      noteKey: note.key,
+                                      sourceKind: badge.kind,
+                                      onDragEnd: (accepted) {
+                                        onDragFinished();
+                                        if (accepted) return;
+                                        onRemoveTag(badge);
+                                      },
+                                    ),
+                                  if (badges.length > 3)
+                                    Container(
+                                      height: 20,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                      ),
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: palette.soft,
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(color: palette.line),
+                                      ),
+                                      child: Text(
+                                        '+${badges.length - 3}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          height: 1,
+                                          fontWeight: FontWeight.w700,
+                                          color: palette.muted,
+                                        ),
+                                      ),
+                                    ),
+                                  if (hoverTag != null &&
+                                      !badges.any(
+                                        (badge) =>
+                                            badge.kind == hoverTag!.kind &&
+                                            badge.label == hoverTag!.label,
+                                      ))
+                                    NoteTagGhost(
+                                      label: hoverTag!.label,
+                                      colorValue: hoverTag!.colorValue,
+                                      kind: hoverTag!.kind,
+                                    ),
+                                ],
                               ),
                             ),
                             const SizedBox(width: 7),
@@ -1322,23 +1487,16 @@ class _TimelineNoteRow extends StatelessWidget {
                             ),
                           ),
                         ],
-                        if (note.category.trim().isNotEmpty ||
-                            note.tags.isNotEmpty) ...[
+                        if (note.category.trim().isNotEmpty) ...[
                           const SizedBox(height: 8),
                           Wrap(
                             spacing: 6,
                             runSpacing: 4,
                             children: [
-                              if (note.category.trim().isNotEmpty)
-                                _MetaChip(
-                                  label: note.category,
-                                  icon: LucideIcons.folder,
-                                ),
-                              for (final tag in note.tags)
-                                _MetaChip(
-                                  label: '#$tag',
-                                  icon: LucideIcons.tag,
-                                ),
+                              _MetaChip(
+                                label: note.category,
+                                icon: LucideIcons.folder,
+                              ),
                             ],
                           ),
                         ],
@@ -1347,6 +1505,60 @@ class _TimelineNoteRow extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「按书查看」点开一本后的范围条：返回全部书籍 + 当前书名 + 条数。
+class _BookScopeBar extends StatelessWidget {
+  const _BookScopeBar({
+    required this.title,
+    required this.count,
+    required this.onBack,
+  });
+
+  final String title;
+  final int count;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 4, 16, 0),
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('notes-book-back'),
+            tooltip: '返回全部书籍',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(LucideIcons.chevron_left, size: 20),
+            color: palette.muted,
+            onPressed: onBack,
+          ),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: palette.ink,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count 条',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: palette.muted,
             ),
           ),
         ],
@@ -1601,356 +1813,6 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-class _NoteFilterSheet extends StatefulWidget {
-  const _NoteFilterSheet({
-    required this.initial,
-    required this.books,
-    required this.categories,
-    required this.tags,
-    this.markerTypes = const [],
-  });
-
-  final NoteTimelineFilters initial;
-  final List<_BookOption> books;
-  final List<String> categories;
-  final List<String> tags;
-  final List<ReaderMarkerType> markerTypes;
-
-  @override
-  State<_NoteFilterSheet> createState() => _NoteFilterSheetState();
-}
-
-class _NoteFilterSheetState extends State<_NoteFilterSheet> {
-  String? _bookId;
-  String? _category;
-  late Set<String> _tags;
-  late NoteTimePreset _timePreset;
-  DateTimeRange? _customRange;
-  String? _markerKey;
-
-  @override
-  void initState() {
-    super.initState();
-    _bookId = widget.initial.bookId;
-    _category = widget.initial.category;
-    _tags = Set.of(widget.initial.tags);
-    _timePreset = widget.initial.timePreset;
-    _customRange = widget.initial.customRange;
-    _markerKey = widget.initial.markerKey;
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(now.year, now.month, now.day),
-      initialDateRange: _customRange,
-    );
-    if (picked == null || !mounted) return;
-    setState(() {
-      _customRange = picked;
-      _timePreset = NoteTimePreset.custom;
-    });
-  }
-
-  void _apply() {
-    Navigator.of(context).pop(
-      NoteTimelineFilters(
-        bookId: _bookId,
-        category: _category,
-        tags: Set.unmodifiable(_tags),
-        timePreset: _timePreset,
-        customRange: _customRange,
-        markerKey: _markerKey,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final palette = HomePalette.of(context);
-    return SafeArea(
-      top: false,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: media.size.height * 0.88),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 38,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: palette.line,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '筛选笔记',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: palette.ink,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    key: const ValueKey('notes-filter-reset'),
-                    style: TextButton.styleFrom(foregroundColor: palette.muted),
-                    onPressed: () => setState(() {
-                      _bookId = null;
-                      _category = null;
-                      _tags.clear();
-                      _timePreset = NoteTimePreset.all;
-                      _customRange = null;
-                      _markerKey = null;
-                    }),
-                    child: const Text('重置'),
-                  ),
-                  FilledButton(
-                    key: const ValueKey('notes-filter-apply'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: HomePalette.accent,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _apply,
-                    child: const Text('应用'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              const _FilterLabel('书籍'),
-              const SizedBox(height: 6),
-              KeyedSubtree(
-                key: const ValueKey('notes-filter-book'),
-                child: DropdownButtonFormField<String?>(
-                  // Recreate the field when reset changes the value. The form
-                  // field caches its internal selection otherwise, leaving
-                  // 全部书籍 visually stuck on the previous value after 重置.
-                  key: ValueKey('notes-filter-book-${_bookId ?? 'all'}'),
-                  initialValue: _bookId,
-                  isExpanded: true,
-                  decoration: _filterDecoration(palette, '全部书籍'),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('全部书籍'),
-                    ),
-                    for (final book in widget.books)
-                      DropdownMenuItem<String?>(
-                        value: book.id,
-                        child: Text(
-                          book.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  dropdownColor: palette.surface,
-                  style: TextStyle(fontSize: 14, color: palette.ink),
-                  onChanged: (value) => setState(() => _bookId = value),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const _FilterLabel('时间'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 7,
-                runSpacing: 6,
-                children: [
-                  _timeChip('全部时间', NoteTimePreset.all),
-                  _timeChip('今天', NoteTimePreset.today),
-                  _timeChip('近 7 天', NoteTimePreset.sevenDays),
-                  _timeChip('近 30 天', NoteTimePreset.thirtyDays),
-                  ChoiceChip(
-                    key: const ValueKey('notes-filter-time-custom'),
-                    showCheckmark: false,
-                    selected: _timePreset == NoteTimePreset.custom,
-                    selectedColor: palette.chipSelectedFill,
-                    backgroundColor: palette.chipFill,
-                    side: palette.chipBorder(
-                      _timePreset == NoteTimePreset.custom,
-                    ),
-                    label: Text(
-                      _customRange == null
-                          ? '自定义日期'
-                          : _rangeLabel(_customRange!),
-                    ),
-                    onSelected: (_) => _pickCustomRange(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const _FilterLabel('分类'),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 7,
-                runSpacing: 6,
-                children: [
-                  ChoiceChip(
-                    key: const ValueKey('notes-filter-category-all'),
-                    showCheckmark: false,
-                    selected: _category == null,
-                    selectedColor: palette.chipSelectedFill,
-                    backgroundColor: palette.chipFill,
-                    side: palette.chipBorder(_category == null),
-                    label: const Text('全部分类'),
-                    onSelected: (_) => setState(() => _category = null),
-                  ),
-                  for (final category in widget.categories)
-                    ChoiceChip(
-                      key: ValueKey('notes-filter-category-$category'),
-                      showCheckmark: false,
-                      selected: _category == category,
-                      selectedColor: palette.chipSelectedFill,
-                      backgroundColor: palette.chipFill,
-                      side: palette.chipBorder(_category == category),
-                      label: Text(category),
-                      onSelected: (_) => setState(() => _category = category),
-                    ),
-                  ChoiceChip(
-                    key: const ValueKey('notes-filter-category-none'),
-                    showCheckmark: false,
-                    selected: _category == noteUncategorizedFilter,
-                    selectedColor: palette.chipSelectedFill,
-                    backgroundColor: palette.chipFill,
-                    side: palette.chipBorder(
-                      _category == noteUncategorizedFilter,
-                    ),
-                    label: const Text('未分类'),
-                    onSelected: (_) =>
-                        setState(() => _category = noteUncategorizedFilter),
-                  ),
-                ],
-              ),
-              if (widget.markerTypes.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const _FilterLabel('批注类型'),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      key: const ValueKey('notes-filter-marker-all'),
-                      showCheckmark: false,
-                      selected: _markerKey == null,
-                      selectedColor: palette.chipSelectedFill,
-                      backgroundColor: palette.chipFill,
-                      side: palette.chipBorder(_markerKey == null),
-                      label: const Text('全部类型'),
-                      onSelected: (_) => setState(() => _markerKey = null),
-                    ),
-                    for (final type in widget.markerTypes)
-                      ChoiceChip(
-                        key: ValueKey('notes-filter-marker-${type.key}'),
-                        showCheckmark: false,
-                        selected: _markerKey == type.key,
-                        selectedColor: palette.chipSelectedFill,
-                        backgroundColor: palette.chipFill,
-                        side: palette.chipBorder(_markerKey == type.key),
-                        avatar: CircleAvatar(
-                          radius: 5,
-                          backgroundColor: Color(type.colorValue),
-                        ),
-                        label: Text(type.label),
-                        onSelected: (_) =>
-                            setState(() => _markerKey = type.key),
-                      ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 16),
-              const _FilterLabel('标签（可多选，匹配任一标签）'),
-              const SizedBox(height: 6),
-              if (widget.tags.isEmpty)
-                Text(
-                  '还没有标签，编辑笔记时即可添加。',
-                  style: TextStyle(fontSize: 12, color: palette.muted),
-                )
-              else
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 6,
-                  children: [
-                    for (final tag in widget.tags)
-                      FilterChip(
-                        key: ValueKey('notes-filter-tag-$tag'),
-                        label: Text('#$tag'),
-                        selected: _tags.contains(tag),
-                        selectedColor: palette.chipSelectedFill,
-                        backgroundColor: palette.chipFill,
-                        side: palette.chipBorder(_tags.contains(tag)),
-                        onSelected: (selected) => setState(() {
-                          if (selected) {
-                            _tags.add(tag);
-                          } else {
-                            _tags.remove(tag);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _timeChip(String label, NoteTimePreset preset) {
-    final palette = HomePalette.of(context);
-    final active = _timePreset == preset;
-    return ChoiceChip(
-      key: ValueKey('notes-filter-time-${preset.name}'),
-      showCheckmark: false,
-      selected: active,
-      selectedColor: palette.chipSelectedFill,
-      backgroundColor: palette.chipFill,
-      side: palette.chipBorder(active),
-      label: Text(label),
-      onSelected: (_) => setState(() => _timePreset = preset),
-    );
-  }
-}
-
-class _FilterLabel extends StatelessWidget {
-  const _FilterLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: TextStyle(
-      fontSize: 12.5,
-      fontWeight: FontWeight.w700,
-      color: HomePalette.of(context).muted,
-    ),
-  );
-}
-
-InputDecoration _filterDecoration(HomePalette palette, String hint) =>
-    InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: palette.muted, fontSize: 13.5),
-      filled: true,
-      fillColor: palette.soft,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: palette.line, width: 0.6),
-      ),
-    );
-
 bool _sameDay(int leftMs, int rightMs) {
   if (leftMs <= 0 || rightMs <= 0) return leftMs == rightMs;
   final left = DateTime.fromMillisecondsSinceEpoch(leftMs);
@@ -1973,15 +1835,4 @@ String _timestampLabel(int milliseconds) {
   final date = DateTime.fromMillisecondsSinceEpoch(milliseconds);
   return '${date.year}-${_two(date.month)}-${_two(date.day)} '
       '${_two(date.hour)}:${_two(date.minute)}';
-}
-
-String _rangeLabel(DateTimeRange range) {
-  String date(DateTime value) =>
-      '${value.year}.${_two(value.month)}.${_two(value.day)}';
-  if (range.start.year == range.end.year &&
-      range.start.month == range.end.month &&
-      range.start.day == range.end.day) {
-    return date(range.start);
-  }
-  return '${date(range.start)} - ${date(range.end)}';
 }
