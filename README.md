@@ -162,8 +162,8 @@ python3 scripts/verify_android_apk.py \
 
 - 版本号在 `pubspec.yaml` 的 `version:` 一处维护（当前 `1.0.129+134`）。
 - `master` 是唯一开发分支；每个批次一条独立提交，记录同步写进 `QINGQIE-CHANGES.md`。
-- 基准版本 `baseline-1.0.129-20261023` 已打 tag 并附基准 APK。
-- 当前基准 APK：38,524,655 字节，SHA-256 `130b302f6aa8310974c19b090053383189d9d273692bb75182b013b70dd31041`。
+- 基准：tag `baseline-1.0.129-20261023`（提交 `0bea552`），附 38,524,657 字节基准 APK。
+- 当前 `master`：tag `v35-20261023`（提交 `e78f93a`），APK 38,524,655 字节，SHA-256 `130b302f6aa8310974c19b090053383189d9d273692bb75182b013b70dd31041`。
 
 ## 已知限制
 
