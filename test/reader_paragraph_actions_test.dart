@@ -309,10 +309,10 @@ void main() {
     expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
 
     // Pull the end handle into the next paragraph: the selection grows past
-    // its paragraph, and the bar reopens without 从本段听 (a dragged range
-    // cannot anchor it).
+    // its paragraph; 从本段开始听书 stays available so the action set does not
+    // change between a paragraph long press and a dragged range.
     await _dragEndHandleIntoNextParagraph(tester);
-    expect(find.byKey(const ValueKey('reader-action-listen')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-action-copy')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('reader-action-copy')));
@@ -582,7 +582,7 @@ void main() {
     await _longPressParagraph(tester, 0);
     expect(find.byKey(const ValueKey('reader-action-copy')), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
-    expect(find.text('从本段听'), findsOneWidget);
+    expect(find.text('从本段开始听书'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('reader-action-underline')),
       findsOneWidget,
@@ -875,9 +875,9 @@ void main() {
 
     await gesture.up();
     await tester.pumpAndSettle();
-    // A dragged range: the bar reopens without 从本段听.
+    // A dragged range keeps the same action set, 从本段开始听书 included.
     expect(find.byKey(const ValueKey('reader-action-copy')), findsOneWidget);
-    expect(find.byKey(const ValueKey('reader-action-listen')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
   });
 
   // 官方 TTMarkingHelper 的 MOVE 分支: after a long press the finger keeps
@@ -907,7 +907,7 @@ void main() {
     await tester.pumpAndSettle();
     // The bar reopens at the finger for the dragged range.
     expect(find.byKey(const ValueKey('reader-action-copy')), findsOneWidget);
-    expect(find.byKey(const ValueKey('reader-action-listen')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
   });
 
   // 官方 ke5.a.a 的 SelectTextByRange 分支: long-pressing text that already
@@ -939,7 +939,7 @@ void main() {
 
     expect(_painterFor(tester, '前十八年')!.selectionRange, const (0, 8));
     expect(find.text('删除划线'), findsOneWidget);
-    expect(find.byKey(const ValueKey('reader-action-listen')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-action-listen')), findsOneWidget);
   });
 
   // A range record that spans exactly one paragraph (a whole-paragraph drag)

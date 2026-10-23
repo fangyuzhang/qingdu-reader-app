@@ -59,7 +59,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('下载'));
+        // 整本下载按钮已改成 AppBar 上的图标按钮（tooltip 下载全本）。
+        await tester.tap(find.byKey(const Key('detail_download_button')));
         await tester.pumpAndSettle();
         // The detail page downloads: no sheet, no range to choose.
         expect(find.byType(ChapterCacheSheet), findsNothing);

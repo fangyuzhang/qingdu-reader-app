@@ -33,9 +33,10 @@ enum ReaderParagraphAction {
 /// selection toolbar (a sibling surface, `com/dragon/read/ui/paragraph/i.java`)
 /// offers 复制 / 划线 / 查询 / 写笔记 / 错字反馈. The account- and capability-gated
 /// items need endpoints the backend does not have, so this bar shows only the
-/// actions it can actually perform: a whole-paragraph selection (long press)
-/// gets 从本段听 when enabled, plus 复制 / 划线; a dragged character range gets
-/// 复制 / 划线. Local-only reading hides the listening item.
+/// actions it can actually perform: 从本段开始听书 when listening is available,
+/// plus 复制 / 划线 / 批注. The same set stays visible for a paragraph long
+/// press and a dragged character range, so the bar never changes shape
+/// mid-drag. Local-only reading hides the listening item.
 ///
 /// Note: 官方长按工具的版式与颜色取自反编译 m.java / wt.xml / wr.xml，见
 /// .agents/notes/implemented/feature/2026-09-18-reader-paragraph-actions.md
@@ -78,9 +79,9 @@ class ReaderParagraphMenu extends StatelessWidget {
   final bool underlined;
   final bool isDark;
 
-  /// True for a whole-paragraph selection (long press): the bar keeps
-  /// 从本段听. A dragged character range drops it — the official selection
-  /// toolbar has no listen item either.
+  /// True for a whole-paragraph selection (long press). Kept for the underline
+  /// label (取消划线 vs 删除划线); the listen item is driven by [showListening]
+  /// so it stays present for dragged ranges too.
   final bool paragraphScoped;
   final bool showListening;
 

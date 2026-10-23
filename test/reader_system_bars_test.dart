@@ -42,7 +42,20 @@ void main() {
       .map((call) => call.arguments['enabled'] as bool)
       .toList();
 
-  testWidgets('状态栏常显：阅读器全程不再请求沉浸模式', (tester) async {
+  testWidgets('工具栏收起时沉浸，展开时恢复系统栏', (tester) async {
+    final chromeCalls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      chromeCalls.add(call);
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    String? lastUiMode() => chromeCalls
+        .where((call) => call.method == 'SystemChrome.setEnabledSystemUIMode')
+        .map((call) => call.arguments as String)
+        .lastOrNull;
+
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       MaterialApp(navigatorKey: navigator, home: const Scaffold()),
@@ -51,58 +64,72 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => _reader()),
     );
     await tester.pumpAndSettle();
-    // 【青茄修复·状态栏常显】进正文不再隐藏系统状态栏（电量/信号/时间
-    // 全程可见），也就没有了「正文整体上移→下移」的两跳。
-    expect(immersiveRequests(), isNotEmpty);
-    expect(immersiveRequests(), everyElement(isFalse));
+    // 【青茄·沉浸式系统栏】进正文默认收起工具栏：状态栏与手势条隐藏。
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
     final viewport = tester.getRect(_surface);
     final layout = tester
         .widget<ReaderPagedView>(find.byType(ReaderPagedView))
         .layout;
-    for (var i = 0; i < 2; i++) {
-      await tester.tapAt(viewport.center);
-      await tester.pumpAndSettle();
-      expect(tester.getRect(_surface), viewport);
-      expect(
-        tester.widget<ReaderPagedView>(find.byType(ReaderPagedView)).layout,
-        same(layout),
-      );
-    }
-    expect(immersiveRequests(), everyElement(isFalse));
 
+    // 点中间展开工具栏：恢复 edge-to-edge，并显式让原生会话还原系统栏。
+    await tester.tapAt(viewport.center);
+    await tester.pumpAndSettle();
+    expect(lastUiMode(), 'SystemUiMode.edgeToEdge');
+    expect(immersiveRequests().lastOrNull, isFalse);
+    // 系统栏显隐不改变正文视口与排版（安全区已冻结）。
+    expect(tester.getRect(_surface), viewport);
+    expect(
+      tester.widget<ReaderPagedView>(find.byType(ReaderPagedView)).layout,
+      same(layout),
+    );
+
+    // 再点一次收起工具栏：重新沉浸。
+    await tester.tapAt(viewport.center);
+    await tester.pumpAndSettle();
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
+
+    // 切后台只暂停阅读会话，恢复后仍是沉浸态。
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
     expect(calls.any((call) => call.method == 'suspend'), isTrue);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    expect(immersiveRequests().last, isFalse);
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
 
+    // 被其他页面盖住：系统栏恢复；返回后重新沉浸。
     navigator.currentState!.push(
       MaterialPageRoute<void>(
         builder: (_) => const Scaffold(body: Text('Other page')),
       ),
     );
     await tester.pumpAndSettle();
-    expect(immersiveRequests().last, isFalse);
-    calls.clear();
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
-    expect(immersiveRequests(), isNot(contains(true)));
+    expect(lastUiMode(), 'SystemUiMode.edgeToEdge');
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
-    expect(immersiveRequests().last, isFalse);
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
+
+    // 离开阅读页必须把系统栏还给其他页面。
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(calls.any((call) => call.method == 'stop'), isTrue);
-    final count = immersiveRequests().length;
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
-    expect(immersiveRequests(), hasLength(count));
+    expect(lastUiMode(), 'SystemUiMode.edgeToEdge');
+    expect(immersiveRequests(), isNot(contains(true)));
   });
 
-  testWidgets('段评弹层不再切换系统栏（状态栏常显）', (tester) async {
+  testWidgets('段评弹层打开时恢复系统栏，关闭后重新沉浸', (tester) async {
+    final chromeCalls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      chromeCalls.add(call);
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    String? lastUiMode() => chromeCalls
+        .where((call) => call.method == 'SystemChrome.setEnabledSystemUIMode')
+        .map((call) => call.arguments as String)
+        .lastOrNull;
+
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       MaterialApp(navigatorKey: navigator, home: const Scaffold()),
@@ -111,20 +138,22 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => _readerWithIdeas()),
     );
     await tester.pumpAndSettle();
-    expect(immersiveRequests(), isNot(contains(true)));
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
 
     // Open the ideas sheet via the paragraph bubble.
     await tester.tap(find.text('42'));
     await tester.pumpAndSettle();
     expect(find.text('这段太真实了'), findsOneWidget);
-    // The sheet pushes a route; system bars stay visible either way.
+    // 弹层压到栈顶：系统栏先恢复，弹层不会被状态栏切掉。
+    expect(lastUiMode(), 'SystemUiMode.edgeToEdge');
+    expect(immersiveRequests().lastOrNull, isFalse);
     expect(immersiveRequests(), isNot(contains(true)));
 
-    // Close the sheet; still no immersive request (the #57 flash is gone
-    // together with immersive mode).
+    // Close the sheet; the reader becomes current again and re-enters immersive.
     navigator.currentState!.pop();
     await tester.pumpAndSettle();
     expect(find.text('这段太真实了'), findsNothing);
+    expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
     expect(immersiveRequests(), isNot(contains(true)));
     expect(tester.takeException(), isNull);
   });
@@ -275,7 +304,8 @@ void main() {
         final opened = tester.getRect(_surface);
         expect(opened.top, greaterThanOrEqualTo(viewport.top));
         expect(opened.size, viewport.size);
-        await tester.tap(find.byTooltip('收起阅读菜单'));
+        // 工具栏右上角已改为「加入书架」，用再次点击正文收起菜单。
+        await tester.tapAt(viewport.center);
         await tester.pumpAndSettle();
         expect(tester.getRect(_surface), viewport);
         expect(tester.takeException(), isNull);

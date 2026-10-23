@@ -23,7 +23,8 @@ class ReaderTextSelection {
   final int end;
 
   /// True when the selection still covers exactly one paragraph — the state a
-  /// long press creates. The action bar offers 从本段听 only here.
+  /// long press creates. Used to pick the underline label; the listen action
+  /// is offered for both paragraph and range selections.
   final bool isWholeParagraph;
 
   const ReaderTextSelection({

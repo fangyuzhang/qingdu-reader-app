@@ -60,8 +60,16 @@ void main() {
     final note = withNote.blocks[noteIndex];
     expect(note.inlineNote!.id, 'k1');
     expect(note.isBody, isFalse);
-    // 紧跟被标注段落
-    expect(withNote.blocks[noteIndex - 1].text, plain.blocks[1].text);
+    // 批注块紧跟在被标注的那一行之后：前一块是本段的行首到该行行尾，
+    // 后一块从该行之后继续，两段拼起来仍是原文。
+    final beforeNote = withNote.blocks[noteIndex - 1];
+    expect(beforeNote.isBody, isTrue);
+    expect(beforeNote.text, isNotEmpty);
+    expect(plain.blocks[1].text.startsWith(beforeNote.text), isTrue);
+    expect(
+      withNote.blocks[noteIndex + 1].text,
+      plain.blocks[1].text.substring(beforeNote.text.length),
+    );
     // 高度为实测值，且占至少一行
     expect(note.height, greaterThan(20));
     expect(note.noteLines, greaterThanOrEqualTo(1));
@@ -81,11 +89,14 @@ void main() {
         ),
       ],
     );
-    // 批注块 start 与下一段区间相邻，定位必须仍落在正文段落上
-    final hit = withNote.blockAtOffset(anchor.start + 5);
+    // 批注块 start 与正文切片相邻，定位必须仍落在正文块上，且字符与原文一致
+    final offset = anchor.start + 5;
+    final hit = withNote.blockAtOffset(offset);
     expect(hit, isNotNull);
     expect(hit!.isNote, isFalse);
-    expect(hit.text, anchor.text);
+    expect(hit.start <= offset, isTrue);
+    expect(offset < hit.end, isTrue);
+    expect(hit.text[offset - hit.start], anchor.text[offset - anchor.start]);
   });
 
   test('分页把批注块整块放下，不跨页切断', () {
