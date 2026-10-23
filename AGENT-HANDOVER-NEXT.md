@@ -1,9 +1,35 @@
 # 交接文档：我的页「阅读热力图 / 每日记录」合并（含代码精简）
 
-> 生成时间：2026-10-23
+> 生成时间：2026-10-23　最后更新：2026-10-23（HEAD `a603dce`）
 > 仓库：`/home/fy/projects/fqapp-src`（WSL2 原生路径，**不是** `/mnt/c` 上的副本）
-> 分支：`master`　HEAD：`9d20ecb`（工作区干净）
+> 分支：`master`　HEAD：`a603dce`（工作区干净，无 remote，本地提交即全部）
 > 上一份总交接文档：`AGENT-HANDOVER.md`（历史版本，可作整体功能背景；其中「工作区脏、288 个改动未提交」的说法已过期）
+
+> ⚠️ **本文正文（第 1~10 节）是「我的页热力图合并」那一轮的执行记录，该轮任务已全部完成并提交。**
+> 现在的代码状态看下面这段快照，不要照正文重新开工。
+
+## 现状快照（2026-10-23，HEAD `a603dce`）
+
+已完成并提交的批次（`git log --oneline -6`）：
+
+| 提交 | 内容 |
+|---|---|
+| `a603dce` | 我的页去掉「我的笔记」卡与「书友」栏，设置只保留右上角入口 |
+| `cb5f035` | 正文状态行页数与百分比留两个数字的空档；结算时长增加 120 秒空档上限 |
+| `9685d5e` | 我的页笔记入口去重、概览卡天数指标并一行、封面收敛为 `BookThumb` |
+| `0f6bb2e` | 字数口径 v2：时长估算 + 本章封顶，迁移旧虚高数据 |
+| `7154dc0` | 每日阅读只列到今天、时长列等比缩放 |
+| `f877f8b` | 移除无引用的 hive / hive_flutter |
+
+当前关键口径（避免误改）：
+
+- **字数** = 停留秒数 × 5（≈300 字/分），并按本章正文字数封顶；单次结算最多认 120 秒（`kMaxReadingGapSeconds`）。入口：`lib/services/reading_stats_store.dart`（`ReadingStatsStore`、`estimateReadCharacters`、`migrateToTimeEstimate`）、`lib/pages/reader_page.dart`（`_settleReadTime` / `_accumulateReadCharacters` / `_resetChapterChars`）。
+- **阅读时长**同样受 120 秒空档上限约束；切后台立即结算并暂停会话。
+- **我的页** = `lib/pages/mine_page.dart`（AppBar：日夜切换 + 设置；body 是 `StatsPage(header: ...)`），header 只剩「章节缓存 / 关于我们」两格 + 「阅读与视听统计」标题。
+- **封面**统一走 `lib/widgets/book_thumb.dart` 的 `BookThumb`（小尺寸列表封面）。
+- 测试基线：`flutter test` 通过 1497 项、失败 15 条（`comprehensive_ui_loading_test` / `reader_annotation_test` / `reader_paragraph_actions_test` / `reader_system_bars_test`），与基线 `9d20ecb` 一致，**不是**本轮引入。
+
+备份（2026-10-23）：`C:\Users\zjh30\Desktop\fqapp-src-20261023.bundle`（`git clone` 可完整恢复）与 `fqapp-src-源码-20261023.tar.gz`（源码快照，不含 build/.dart_tool/rust target）。
 
 ---
 
