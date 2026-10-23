@@ -179,7 +179,12 @@ class _CoverTile extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    StoryCover(item: item, cacheWidth: 320),
+                    // 与书架 `_ShelfCover` 的 tag 对齐（都取 item.id）：
+                    // 书架 → 详情页的封面连续飞行，不出现「闪一下换页」。
+                    Hero(
+                      tag: 'book-cover-${item.id}',
+                      child: StoryCover(item: item, cacheWidth: 320),
+                    ),
                     Positioned(
                       left: 0,
                       top: 0,
@@ -235,18 +240,16 @@ class _OriginBadge extends StatelessWidget {
         color: HomePalette.accent.withValues(alpha: palette.dark ? 0.18 : 0.10),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: HomePalette.accent.withValues(alpha: palette.dark ? 0.32 : 0.22),
+          color: HomePalette.accent.withValues(
+            alpha: palette.dark ? 0.32 : 0.22,
+          ),
           width: 0.6,
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            LucideIcons.sparkles,
-            size: 11,
-            color: palette.accentText,
-          ),
+          Icon(LucideIcons.sparkles, size: 11, color: palette.accentText),
           const SizedBox(width: 4),
           Text(
             '原创',

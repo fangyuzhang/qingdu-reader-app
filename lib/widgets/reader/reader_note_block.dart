@@ -7,6 +7,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import '../../services/reader_annotation_store.dart';
 import '../../services/reader_mark_style.dart';
 import '../../services/reader_marker_type_store.dart';
+import '../app_dialog.dart';
 import 'reader_chapter_layout.dart';
 
 /// 行内批注块：紧跟被标注段落下方，独占一行或多行。
@@ -176,7 +177,7 @@ class _ReaderNoteBlockState extends State<ReaderNoteBlock> {
 
   Future<void> _confirmDelete() async {
     final note = widget.note;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(note.isExcerpt ? '删除这条书摘？' : '删除这条批注？'),
@@ -840,7 +841,7 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
           key: ValueKey('$keyPrefix-custom'),
           borderRadius: BorderRadius.circular(20),
           onTap: () async {
-            final picked = await showDialog<int>(
+            final picked = await showAppDialog<int>(
               context: context,
               builder: (_) => _MarkerColorPickerDialog(initialValue: selected),
             );

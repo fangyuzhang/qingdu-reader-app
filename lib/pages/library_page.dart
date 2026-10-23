@@ -20,6 +20,7 @@ import '../services/imported_book_store.dart';
 import '../services/library_store.dart';
 import '../services/media_history_store.dart';
 import '../services/shelf_store.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/bookshelf_card.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/shelf/shelf_design.dart';
@@ -91,6 +92,7 @@ class _LibraryPageState extends State<LibraryPage> {
   String _group = 'all';
   BookshelfLayout _layout = BookshelfLayout.grid;
   int _layoutGeneration = 0;
+  bool _heroEnabled = true;
   bool _editing = false;
   bool _importingBook = false;
   final Set<String> _selected = {};
@@ -258,10 +260,19 @@ class _LibraryPageState extends State<LibraryPage> {
   Future<void> _setLayout(BookshelfLayout layout) async {
     if (layout == _layout) return;
     final generation = ++_layoutGeneration;
+    final transition = _motionDuration(context, 220);
     setState(() {
+      // AnimatedSwitcher keeps both layouts alive during the cross-fade. Both
+      // carry the same per-book Hero tag, so a route push in that window would
+      // trip Hero's duplicate-tag assertion. Disable flights until it ends.
+      _heroEnabled = false;
       _layout = layout;
       // 版式切换后入场动画重播一次（新视图首屏），滚动回看仍不重放。
       _entered.clear();
+    });
+    Future<void>.delayed(transition, () {
+      if (!mounted || generation != _layoutGeneration) return;
+      setState(() => _heroEnabled = true);
     });
     try {
       final preferences = await SharedPreferences.getInstance();
@@ -531,7 +542,7 @@ class _LibraryPageState extends State<LibraryPage> {
         if (_selected.contains(entry.selectionKey)) entry,
     ];
     if (selected.isEmpty) return;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除历史记录'),
@@ -579,7 +590,7 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _confirmClear() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清空历史'),
@@ -881,19 +892,22 @@ class _LibraryPageState extends State<LibraryPage> {
       BookshelfLayout.list => _list(entries),
     };
     // 版式切换：fade+scale 220ms（无障碍关闭动画时瞬时）。
-    return AnimatedSwitcher(
-      duration: _motionDuration(context, 220),
-      switchInCurve: Curves.easeOutCubic,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: ScaleTransition(
-          scale: Tween(begin: 0.96, end: 1.0).animate(animation),
-          child: child,
+    return HeroMode(
+      enabled: _heroEnabled,
+      child: AnimatedSwitcher(
+        duration: _motionDuration(context, 220),
+        switchInCurve: Curves.easeOutCubic,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween(begin: 0.96, end: 1.0).animate(animation),
+            child: child,
+          ),
         ),
-      ),
-      child: KeyedSubtree(
-        key: ValueKey('shelf-content-${_layout.name}'),
-        child: body,
+        child: KeyedSubtree(
+          key: ValueKey('shelf-content-${_layout.name}'),
+          child: body,
+        ),
       ),
     );
   }
@@ -922,7 +936,7 @@ class _LibraryPageState extends State<LibraryPage> {
           final entry = entries[index];
           return HomeEntrance(
             index: index,
-            animate: index < 6 && _entered.add(index),
+            animate: index < 10 && _entered.add(index),
             child: BookshelfGridCard(
               key: ValueKey('shelf-grid-${entry.selectionKey}'),
               item: entry.item,
@@ -963,7 +977,7 @@ class _LibraryPageState extends State<LibraryPage> {
           final entry = entries[index];
           return HomeEntrance(
             index: index,
-            animate: index < 6 && _entered.add(index),
+            animate: index < 10 && _entered.add(index),
             child: BookshelfDoubleCard(
               key: ValueKey('shelf-double-${entry.selectionKey}'),
               item: entry.item,
@@ -997,7 +1011,7 @@ class _LibraryPageState extends State<LibraryPage> {
         final entry = entries[index];
         return HomeEntrance(
           index: index,
-          animate: index < 6 && _entered.add(index),
+          animate: index < 10 && _entered.add(index),
           child: BookshelfListCard(
             key: ValueKey('shelf-list-${entry.selectionKey}'),
             item: entry.item,

@@ -959,3 +959,37 @@ flutter test             # 1954 passed / 10 skipped
 - Release APK：38,524,599 字节，SHA-256 `32abc721675f235304f2e3248cd2ef27ae4ecb059d0653effaab42d28322a7c7`（`/mnt/d/APP/agent/apk/fqapp-v39.apk`，版本 1.0.130+135）。
 - 真机（Redmi K20 Pro `b2f8e975`）：同时选中「反驳 + 疑问」两枚类型保持选中态；长按「反驳」右拖，途中「疑问 / 待查证」依次左移、空位跟到插入点且整行不平移，松手后顺序变为「疑问 / 待查证 / 反驳」并持久化；把角标 `#A` 拖回本条笔记时，原位出现半透明 `#A` + 强调色吸附环、卡片描边高亮。
 
+---
+
+# 四十、v40 批次：UI 交互动画与弹窗节奏
+
+## 40.1 书架选中态与 Hero
+
+- 封面选中态的光晕、18% 强调色蒙层、2dp 描边改为 140ms 可打断的隐式动画；进度角标 120ms 淡出，不再一帧消失。
+- 多选框本身、勾选缩放（0.55 → 1，140ms `easeOutBack`）与勾号淡入（90ms）分离，选中/取消不会闪断。
+- 书架三档版式的封面与书籍详情页共用 `Hero(tag: 'book-cover-${item.id}')`，点书时封面连续飞行；版式切换的 220ms 交叉淡入期间临时关闭 Hero，避免新旧两棵树同名 tag 冲突。
+- 书架/双列/列表首屏入场改为真错峰：每项延后 40ms（最多 5 档），260ms `easeOutCubic` 走完；使用 `FadeTransition + SlideTransition`，卡片包 `RepaintBoundary`，动画中不做 `Opacity` 重建。
+
+## 40.2 面板、弹窗与主题
+
+- 阅读排版面板：180ms 进场 / 140ms 退场；墨水屏为 0。
+- 新增 `lib/widgets/app_dialog.dart`：全应用 13 处 `showDialog` 统一改为 180ms 淡入 + 轻微上滑，继承调用处的 Theme / MediaQuery / Directionality；墨水屏与系统“减少动画”时瞬时切换。
+- `MaterialApp.themeAnimationDuration` 为 220ms（墨水屏 0）；`HomePalette` 改为读取当前已插值的 ThemeData 颜色，首页、书架、笔记、我的等自定义纸面/文字/线条随全局日夜切换一起渐变，不再是中点闪断。
+
+## 40.3 翻页手感
+
+- PageView 点按/程序翻页 220ms → 280ms，保持 `easeOutCubic`；章节边界的覆盖/平移过渡同步到 280ms，仿真卷页维持 300ms 线性跟手。
+- 没有给现有 PageView 再包 `AnimatedSwitcher`：会叠加第二套位移、破坏拖拽与卷页手势，现有分页与覆盖层已经是柔和过渡。
+
+## 40.4 验证
+
+- `flutter analyze`：0 问题。
+- 全量 `flutter test`：**1507 通过 / 10 跳过 / 0 失败**。
+- Release APK：**38,459,043 字节**，SHA-256 `57972b2305c91d2222a2b2d3ed7363af5586a26837cf70a7f25a8e84d5ec1680`（`/mnt/d/APP/agent/apk/fqapp-ui-animation.apk`，版本 1.0.131+136）。
+- 真机（Redmi K20 Pro `b2f8e975`）：首页/书架启动与首屏错峰正常；书架选中态蒙层、描边、勾选弹性可见；录屏抽帧确认书架 → 详情页封面飞行无异常；新包安装后前台运行正常。
+
+## 40.5 边界
+
+- 仓库没有独立“书源详情”页面，任务中的该项无可改目标；书单/详情页沿用现有转场。
+- 其余未单独指定时长的 `showModalBottomSheet` 仍使用 Material 默认位移；本批只定制了任务点名的阅读设置面板。
+

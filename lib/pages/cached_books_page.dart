@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/book_txt_export.dart';
 import '../services/chapter_cache_store.dart';
 import '../services/library_store.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
 import 'local_book_detail_page.dart';
@@ -82,7 +83,7 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
   }
 
   Future<void> _clear([CachedBook? book]) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(book == null ? '清空全部章节缓存' : '删除这本书的缓存'),

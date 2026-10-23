@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/reader_tap_zones.dart';
+import '../app_dialog.dart';
 
 /// 点击区域设置编辑器：全屏半透明弹窗里的 3x3 九宫格，布局参考 Legado 的
 /// “点击区域设置”（每格显示当前动作，点格换动作），实现为 fqapp 自己的代码。
@@ -10,7 +11,7 @@ Future<List<ReaderTapZoneAction>?> showReaderTapZoneEditor({
   required BuildContext context,
   required List<ReaderTapZoneAction> initialZones,
 }) {
-  return showDialog<List<ReaderTapZoneAction>>(
+  return showAppDialog<List<ReaderTapZoneAction>>(
     context: context,
     barrierColor: Colors.black54,
     barrierDismissible: true,

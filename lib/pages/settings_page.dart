@@ -10,6 +10,7 @@ import '../services/app_theme.dart';
 import '../services/audio_preferences.dart';
 import '../services/backend_service.dart';
 import '../services/library_store.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
@@ -188,7 +189,7 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _showThemeModeDialog(BuildContext context) async {
-    final selected = await showDialog<ThemeMode>(
+    final selected = await showAppDialog<ThemeMode>(
       context: context,
       builder: (c) => SimpleDialog(
         title: const Text('深色模式'),
@@ -304,7 +305,7 @@ class SettingsPage extends StatelessWidget {
     String message,
     Future<void> Function() action,
   ) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: Text(title),

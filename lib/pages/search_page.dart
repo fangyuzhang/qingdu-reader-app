@@ -11,6 +11,7 @@ import '../services/api_client.dart';
 import '../services/backend_transport.dart';
 import '../services/search_history_store.dart';
 import '../services/user_facing_error.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/media_card.dart';
 import '../widgets/search/search_discovery.dart';
@@ -283,7 +284,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _confirmClearHistory() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清空搜索历史'),

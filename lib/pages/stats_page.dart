@@ -8,6 +8,7 @@ import '../services/library_store.dart';
 import '../services/media_history_store.dart';
 import '../services/reading_report.dart';
 import '../services/reading_stats_store.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/book_thumb.dart';
 import '../widgets/home/home_design.dart';
 import 'detail_page.dart';
@@ -178,7 +179,7 @@ class _StatsPageState extends State<StatsPage> {
 
   void _showRank() {
     final rank = _rankItems;
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (c) => SimpleDialog(
         title: const Text('阅读排行'),

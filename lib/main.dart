@@ -156,6 +156,13 @@ class _FqAppState extends State<FqApp> {
               theme: _theme(Brightness.light, eink: eink),
               darkTheme: _theme(Brightness.dark, eink: eink),
               themeMode: effectiveMode,
+              // 日间/夜间/跟随系统切换时整棵树的 ColorScheme 做 220ms 插值，
+              // 背景、文字、图标一起渐变，而不是一帧闪白/闪黑。
+              // 墨水屏下保持瞬时切换（插值会留残影）。
+              themeAnimationDuration: eink
+                  ? Duration.zero
+                  : const Duration(milliseconds: 220),
+              themeAnimationCurve: Curves.easeOutCubic,
               home: const AppBootstrap(child: RootShell()),
             );
           },

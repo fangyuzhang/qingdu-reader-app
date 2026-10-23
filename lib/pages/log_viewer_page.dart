@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../services/app_log.dart';
 import '../services/book_txt_export.dart';
 import '../services/share_service.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/logs/log_entry_card.dart';
 import '../widgets/logs/log_filter_sheet.dart';
 
@@ -487,7 +488,7 @@ class _LogViewerPageState extends State<LogViewerPage>
   );
 
   Future<void> _confirmClear() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清空当前视图'),

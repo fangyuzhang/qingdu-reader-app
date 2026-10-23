@@ -37,41 +37,83 @@ class _ShelfCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
     final fallback = _DefaultCover(item: item);
+    // 选中态全部走隐式动画：蒙层、描边、光晕、角标淡出、勾选框弹入，
+    // 勾选/取消都不再是闪断。光晕画在封面自己的装饰里，不占布局尺寸，
+    // 因此宫格/双列/列表三档的排版都不会因为选中而位移。
     return SizedBox(
       key: const Key('bookshelf-cover'),
       width: width,
       height: height,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(radius),
-            child: ColoredBox(
-              color: palette.soft,
-              child: _ShelfCoverImage(
-                item: item,
-                fallback: fallback,
-                width: width,
-                height: height,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: HomePalette.accent.withValues(alpha: 0.30),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: ColoredBox(
+                color: palette.soft,
+                child: Hero(
+                  // 书架 → 详情页共用同一个 tag（两侧都取 item.id），
+                  // 只在封面图本体上飞，描边/蒙层留在书架上淡出。
+                  tag: 'book-cover-${item.id}',
+                  child: _ShelfCoverImage(
+                    item: item,
+                    fallback: fallback,
+                    width: width,
+                    height: height,
+                  ),
+                ),
               ),
             ),
-          ),
-          // 选中态：accent 18% 蒙层 + 2dp accent 描边（沿用既有视觉）。
-          if (selected)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: HomePalette.accent.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(radius),
-                border: Border.all(color: HomePalette.accent, width: 2),
+            IgnorePointer(
+              // 选中态：accent 18% 蒙层 + 2dp accent 描边（沿用既有视觉）。
+              // 常驻在树里，颜色与描边透明度做插值，取消选中也能淡出。
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                curve: Curves.easeOutCubic,
+                decoration: BoxDecoration(
+                  color: HomePalette.accent.withValues(
+                    alpha: selected ? 0.18 : 0,
+                  ),
+                  borderRadius: BorderRadius.circular(radius),
+                  border: Border.all(
+                    color: HomePalette.accent.withValues(
+                      alpha: selected ? 1 : 0,
+                    ),
+                    width: 2,
+                  ),
+                ),
               ),
             ),
-          if (badgeText != null && !selected)
-            Positioned(
-              top: ShelfTokens.spaceXS,
-              right: ShelfTokens.spaceXS,
-              child: _ProgressBadge(text: badgeText!),
-            ),
-        ],
+            if (badgeText != null)
+              Positioned(
+                top: ShelfTokens.spaceXS,
+                right: ShelfTokens.spaceXS,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 120),
+                    curve: Curves.easeOutCubic,
+                    opacity: selected ? 0 : 1,
+                    child: _ProgressBadge(text: badgeText!),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -132,7 +174,9 @@ class _SelectionBox extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox.square(
       dimension: 22,
-      child: DecoratedBox(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           // 白勾压在 accent(#2FA98C) 上只有 2.93:1；accentStrong 是 4.25:1。
@@ -144,9 +188,19 @@ class _SelectionBox extends StatelessWidget {
             width: 1.5,
           ),
         ),
-        child: selected
-            ? const Icon(Icons.check, size: 14, color: Colors.white)
-            : null,
+        // 勾用「缩放 + 淡入」弹出来，取消时反向收回；两者都是可打断的
+        // 隐式动画，连点不会排队。
+        child: AnimatedScale(
+          scale: selected ? 1 : 0.55,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutBack,
+          child: AnimatedOpacity(
+            opacity: selected ? 1 : 0,
+            duration: const Duration(milliseconds: 90),
+            curve: Curves.easeOutCubic,
+            child: const Icon(Icons.check, size: 14, color: Colors.white),
+          ),
+        ),
       ),
     );
   }

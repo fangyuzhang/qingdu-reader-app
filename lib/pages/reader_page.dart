@@ -30,6 +30,7 @@ import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
 import '../services/shelf_store.dart';
 import '../services/system_tts.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/chapter_cache_sheet.dart';
 import '../widgets/reader/reader_appearance_sheet.dart';
 import '../widgets/reader/reader_bubble.dart';
@@ -1560,7 +1561,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     ReadingCapsuleHost.instance.setDialogOpen(true);
     final String? action;
     try {
-      action = await showDialog<String>(
+      action = await showAppDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
@@ -2552,9 +2553,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       // 真正进入该章（或整章加载）时会按完整数据重排。
       paragraphBubbles: const {},
       underlinedParagraphs: const {},
-      inlineNotes: [
-        for (final note in annotations) _inlineNoteOf(note),
-      ],
+      inlineNotes: [for (final note in annotations) _inlineNoteOf(note)],
     );
     return _ScrollSegment(
       chapter: chapter,
@@ -3363,6 +3362,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      // 排版面板统一 180ms 进场 / 140ms 退场（默认 250ms 略拖沓），
+      // 墨水屏保持瞬时以免留残影。
+      sheetAnimationStyle: einkModeNotifier.value
+          ? const AnimationStyle(
+              duration: Duration.zero,
+              reverseDuration: Duration.zero,
+            )
+          : const AnimationStyle(
+              duration: Duration(milliseconds: 180),
+              reverseDuration: Duration(milliseconds: 140),
+            ),
       builder: (context) => ReaderAppearanceSheet(
         initialValue: _preferences,
         einkOverride: einkModeNotifier.value,

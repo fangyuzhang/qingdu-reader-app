@@ -15,36 +15,49 @@ class HomePalette {
   /// 仍为品牌橙（93 处直接引用），本轮不全量替换，见收尾未验项。
   final bool eink;
 
-  const HomePalette(this.dark, {this.eink = false});
+  final Color canvas;
+  final Color surface;
+  final Color ink;
+  final Color muted;
+  final Color soft;
+  final Color line;
 
-  factory HomePalette.of(BuildContext context) => HomePalette(
-    Theme.of(context).brightness == Brightness.dark,
-    eink: einkModeNotifier.value,
-  );
+  const HomePalette._({
+    required this.dark,
+    required this.eink,
+    required this.canvas,
+    required this.surface,
+    required this.ink,
+    required this.muted,
+    required this.soft,
+    required this.line,
+  });
 
-  Color get canvas => eink
-      ? Colors.white
-      : (dark ? const Color(0xFF0F1413) : const Color(0xFFFAFBF6));
-  Color get surface =>
-      eink ? Colors.white : (dark ? const Color(0xFF171E1C) : Colors.white);
-  Color get ink => eink
-      ? Colors.black
-      : (dark ? const Color(0xFFF1F5F2) : const Color(0xFF212824));
+  /// Reads the *current* theme colours instead of switching between two
+  /// hand-written palettes on `brightness`. MaterialApp interpolates ThemeData
+  /// for 220ms; taking the interpolated values here makes custom surfaces fade
+  /// along with it instead of flashing white/black at the midpoint.
+  factory HomePalette.of(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return HomePalette._(
+      dark: theme.brightness == Brightness.dark,
+      eink: einkModeNotifier.value,
+      canvas: theme.scaffoldBackgroundColor,
+      surface: scheme.surface,
+      ink: scheme.onSurface,
+      muted: scheme.onSurfaceVariant,
+      soft: scheme.surfaceContainer,
+      line: scheme.outlineVariant,
+    );
+  }
+
   // 浅色 muted(#6C7A73) 在 canvas(#FAFBF6) 上只有 4.33:1，副标题/计数这类
   // 11–12sp 小字不达 4.5:1；#5E6B64 提到 5.37:1，仍比正文轻一档。
-  Color get muted => eink
-      ? Colors.black
-      : (dark ? const Color(0xFF98A5A0) : const Color(0xFF5E6B64));
   // accentStrong(#1F8A72) 作小字前景只有 4.25:1；#176B58 在 canvas 上 6.16:1、
   // 在 soft 上 5.69:1。填充仍用 accent，不改变品牌色的视觉重量。
   Color get accentText =>
       eink ? Colors.black : (dark ? accent : const Color(0xFF176B58));
-  Color get soft => eink
-      ? Colors.white
-      : (dark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC));
-  Color get line => eink
-      ? Colors.black
-      : (dark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1));
 
   // 筛选 chip 的统一配色，取自听书页的音色卡：未选是比底色更暗的一层，
   // 选中抬成 surface 并加一圈主色描边，视线自然落在当前选择上。
@@ -132,11 +145,12 @@ class _HomePressableState extends State<HomePressable>
 
 /// Fades and lifts a newly arrived child into place.
 ///
-/// The fade costs an [Opacity] layer for as long as it runs, and a sliver
-/// disposes the children that leave its cache extent, so a child that is
-/// re-mounted by scrolling back up the feed must opt out ([animate] false) or
-/// every scroll past the first screenful replays a layer per card.
-class HomeEntrance extends StatelessWidget {
+/// [FadeTransition] and [SlideTransition] animate compositor-friendly layers;
+/// the child is passed through unchanged and wrapped in a [RepaintBoundary], so
+/// the card itself is not rebuilt on every animation tick. A sliver disposes
+/// children outside its cache extent, so a card remounted by scrolling back up
+/// must opt out ([animate] false) to avoid replaying the entrance.
+class HomeEntrance extends StatefulWidget {
   final int index;
   final bool animate;
   final Widget child;
@@ -149,19 +163,77 @@ class HomeEntrance extends StatelessWidget {
   });
 
   @override
+  State<HomeEntrance> createState() => _HomeEntranceState();
+}
+
+class _HomeEntranceState extends State<HomeEntrance>
+    with SingleTickerProviderStateMixin {
+  static const _staggerMs = 40;
+  static const _riseMs = 260;
+
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _offset;
+  late bool _playing;
+
+  @override
+  void initState() {
+    super.initState();
+    final delayMs = widget.index.clamp(0, 5) * _staggerMs;
+    final totalMs = delayMs + _riseMs;
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: totalMs),
+    );
+    final eased = CurvedAnimation(
+      parent: _controller,
+      curve: Interval(delayMs / totalMs, 1, curve: Curves.easeOutCubic),
+    );
+    _opacity = Tween<double>(begin: 0.5, end: 1).animate(eased);
+    _offset = Tween<Offset>(
+      begin: const Offset(0, 0.05),
+      end: Offset.zero,
+    ).animate(eased);
+    _playing = widget.animate;
+    if (_playing) _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(HomeEntrance oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_playing && widget.animate) {
+      _playing = true;
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_playing) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating && !_controller.isCompleted) {
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!animate || MediaQuery.disableAnimationsOf(context)) return child;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 380 + index.clamp(0, 5) * 45),
-      curve: Curves.easeOutCubic,
-      child: child,
-      builder: (context, value, child) => Opacity(
-        opacity: 0.5 + value * 0.5,
-        child: Transform.translate(
-          offset: Offset(0, 18 * (1 - value)),
-          child: child,
-        ),
+    if (!_playing || MediaQuery.disableAnimationsOf(context)) {
+      return widget.child;
+    }
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(
+        position: _offset,
+        child: RepaintBoundary(child: widget.child),
       ),
     );
   }
