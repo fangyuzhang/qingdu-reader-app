@@ -31,6 +31,19 @@ String reportDayKey(DateTime day) => '${day.year}-${day.month}-${day.day}';
 DateTime reportDay(DateTime value) =>
     DateTime(value.year, value.month, value.day);
 
+/// 「今天 / 昨天 / 周一」这类相对标签；正常日期一律返回周几。
+///
+/// 「每日阅读」列表和原先「我的」页的每日记录共用这一份文案逻辑，
+/// 避免两处各写一遍日期判断。
+String reportDayLabel(DateTime day, {DateTime? now}) {
+  final today = reportDay(now ?? DateTime.now());
+  final target = reportDay(day);
+  if (target == today) return '今天';
+  if (target == today.subtract(const Duration(days: 1))) return '昨天';
+  const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  return weekdays[target.weekday - 1];
+}
+
 /// 闭区间的日期范围（按天）。
 class ReportRange {
   const ReportRange(this.start, this.end);
@@ -263,6 +276,27 @@ class ReadingReport {
       if ((dayMinutes[reportDayKey(day)] ?? 0) > 0) days++;
     }
     return days;
+  }
+
+  /// 范围内逐日的阅读时长，按日期正序。
+  ///
+  /// [includeEmpty] 为 false 时只返回有记录的天，适合年/总这类跨度很大的
+  /// 档位（一年 365 行没人看）；周档传 true，让用户看到完整 7 天。
+  List<({DateTime day, double minutes})> dailyIn(
+    ReportRange range, {
+    bool includeEmpty = false,
+  }) {
+    final out = <({DateTime day, double minutes})>[];
+    for (
+      var day = range.start;
+      !day.isAfter(range.end);
+      day = day.add(const Duration(days: 1))
+    ) {
+      final minutes = dayMinutes[reportDayKey(day)] ?? 0;
+      if (!includeEmpty && minutes <= 0) continue;
+      out.add((day: day, minutes: minutes));
+    }
+    return out;
   }
 
   /// 范围内读过的书（按时长从多到少）。

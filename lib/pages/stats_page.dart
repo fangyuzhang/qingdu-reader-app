@@ -10,6 +10,7 @@ import '../services/library_store.dart';
 import '../services/poster_cache.dart';
 import '../services/media_history_store.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/reading_report.dart';
 import '../services/reading_stats_store.dart';
 import '../widgets/home/home_design.dart';
 import 'notes_page.dart';
@@ -17,8 +18,8 @@ import 'detail_page.dart';
 import 'reading_report_page.dart';
 
 /// Reading statistics page modeled after the legado ReadRecordFragment:
-/// overview cards, a 16-week heatmap, recent books, daily records, recent
-/// covers and a reading rank.
+/// overview cards, a 16-week heatmap, recent books and a reading rank.
+/// 「哪天读了多久」的逐日明细已并入阅读报告页的「每日阅读」模块。
 ///
 /// New sessions use measured reading/playback time. Old history entries that
 /// predate tracking retain a small fallback estimate.
@@ -54,36 +55,18 @@ class _StatsPageState extends State<StatsPage> {
   bool _visible = false;
   bool _storeDirty = true;
 
+  /// 日聚合与阅读报告共用一套实现（`buildBookDayMinutes` + `sumDayMinutes`）：
+  /// 真实秒数累加，老记录按每本 10 分钟估算，口径只此一处。
   Map<String, double> _computeDayMinutes(
     List<Map<String, dynamic>> history,
     Map<String, Map<String, double>> readTimeMap,
-  ) {
-    final map = <String, double>{};
-    void add(String day, double minutes) =>
-        map[day] = (map[day] ?? 0) + minutes;
-    // Real recorded reading time (seconds → minutes).
-    for (final days in readTimeMap.values) {
-      days.forEach((day, secs) => add(day, secs / 60));
-    }
-    // Fallback estimates for books without real data yet, so older history
-    // still shows up during the transition. Drops out once real data exists.
-    final withRealData = readTimeMap.keys.toSet();
-    for (final entry in history) {
-      final id = historyStatisticsId(entry);
-      if (withRealData.contains(id)) continue;
-      final day = _dayKey(
-        DateTime.fromMillisecondsSinceEpoch(
-          (entry['time'] as num?)?.toInt() ?? 0,
-        ),
-      );
-      add(day, _flatBookMinutes);
-    }
-    return map;
-  }
+  ) => sumDayMinutes(
+    buildBookDayMinutes(history: history, readTimeSeconds: readTimeMap),
+  );
 
   double get _totalMinutes => _dayMinutes.values.fold(0, (a, b) => a + b);
 
-  double _todayMinutes() => _dayMinutes[_dayKey(_selected)] ?? 0;
+  double _todayMinutes() => _dayMinutes[reportDayKey(_selected)] ?? 0;
 
   double _monthMinutes() {
     return sumMinutesForMonth(_dayMinutes, _selected);
@@ -336,7 +319,7 @@ class _StatsPageState extends State<StatsPage> {
           const SizedBox(height: 12),
           _Card(
             title: '阅读热力图',
-            subtitle: '最近 16 周 · 点击查看详细报告',
+            subtitle: '最近 16 周 · 点击查看每日阅读',
             key: const ValueKey('stats-heatmap-card'),
             onTap: () => Navigator.push(
               context,
@@ -360,14 +343,6 @@ class _StatsPageState extends State<StatsPage> {
             readTimeMap: _readTimeMap,
             onTap: _openHistory,
           ),
-          const SizedBox(height: 12),
-          _DailyRecordsCard(
-            dayMinutes: _dayMinutes,
-            selected: _selected,
-            hasStats: _hasStats,
-          ),
-          const SizedBox(height: 12),
-          _RecentCoversCard(history: _history, onTap: _openHistory),
           const SizedBox(height: 12),
           _RankCard(items: _rankItems.take(5).toList(), onMore: _showRank),
         ],
@@ -411,7 +386,7 @@ class _StatsPageState extends State<StatsPage> {
       for (final date in readingHeatmapDates(_selected))
         _HeatCell(
           date,
-          date.isAfter(_selected) ? 0 : dayMinutes[_dayKey(date)] ?? 0,
+          date.isAfter(_selected) ? 0 : dayMinutes[reportDayKey(date)] ?? 0,
         ),
     ];
   }
@@ -461,8 +436,6 @@ Map<String, dynamic> _historyForStatisticsId(String id, [String? storedKind]) {
 }
 
 // ---------- shared helpers ----------
-
-String _dayKey(DateTime d) => '${d.year}-${d.month}-${d.day}';
 
 /// Sixteen calendar weeks, with Monday in the first row of every column.
 List<DateTime> readingHeatmapDates(DateTime selected) {
@@ -520,16 +493,6 @@ String _formatDuring(double minutes) {
     if (mins > 0) '$mins分钟',
   ];
   return parts.join();
-}
-
-String _daySubtitle(DateTime date) {
-  final today = DateTime.now();
-  final d = DateTime(date.year, date.month, date.day);
-  final t = DateTime(today.year, today.month, today.day);
-  if (d == t) return '今天';
-  if (d == t.subtract(const Duration(days: 1))) return '昨天';
-  const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-  return weekdays[date.weekday - 1];
 }
 
 // ---------- card shell ----------
@@ -1052,133 +1015,6 @@ class _RecentBooksCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ---------- daily records ----------
-
-class _DailyRecordsCard extends StatelessWidget {
-  final Map<String, double> dayMinutes;
-  final DateTime selected;
-  final bool hasStats;
-
-  const _DailyRecordsCard({
-    required this.dayMinutes,
-    required this.selected,
-    required this.hasStats,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final rows = <(DateTime, double)>[];
-    for (var i = 13; i >= 0; i--) {
-      final date = selected.subtract(Duration(days: i));
-      rows.add((date, dayMinutes[_dayKey(date)] ?? 0));
-    }
-    final scheme = Theme.of(context).colorScheme;
-    return _Card(
-      title: '每日记录',
-      child: hasStats
-          ? Column(
-              children: [
-                for (var i = 0; i < rows.length; i++) ...[
-                  if (i > 0) const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${rows[i].$1.month}月${rows[i].$1.day}日',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                        Text(
-                          _daySubtitle(rows[i].$1),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          rows[i].$2 > 0 ? _formatDuring(rows[i].$2) : '--',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            )
-          : const _EmptyHint('暂无每日统计'),
-    );
-  }
-}
-
-// ---------- recent covers ----------
-
-class _RecentCoversCard extends StatelessWidget {
-  final List<Map<String, dynamic>> history;
-  final void Function(Map<String, dynamic>) onTap;
-
-  const _RecentCoversCard({required this.history, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = history.take(5).toList();
-    return _Card(
-      title: '最近封面',
-      child: items.isEmpty
-          ? const _EmptyHint('暂无最近阅读')
-          : SizedBox(
-              height: 110,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 10),
-                itemBuilder: (context, i) {
-                  final entry = items[i];
-                  final url = entry['cover']?.toString() ?? '';
-                  final scheme = Theme.of(context).colorScheme;
-                  return GestureDetector(
-                    onTap: () => onTap(entry),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: url.isEmpty
-                          ? Container(
-                              width: 74,
-                              height: 110,
-                              color: scheme.surfaceContainerHighest,
-                              child: Icon(
-                                LucideIcons.book_open,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            )
-                          : CachedNetworkImage(
-                              cacheManager: PosterCache.instance,
-                              imageUrl: url,
-                              width: 74,
-                              height: 110,
-                              fit: BoxFit.cover,
-                              memCacheWidth: 222,
-                              memCacheHeight: 330,
-                              errorWidget: (_, _, _) => Container(
-                                width: 74,
-                                height: 110,
-                                color: scheme.surfaceContainerHighest,
-                                child: Icon(
-                                  LucideIcons.book_open,
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                    ),
-                  );
-                },
-              ),
-            ),
     );
   }
 }

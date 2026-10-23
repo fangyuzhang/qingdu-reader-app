@@ -251,4 +251,45 @@ void main() {
       expect(bookDays['book-1'], {'2026-10-1': 10});
     });
   });
+
+  group('每日列表', () {
+    test('includeEmpty 为 true 时补齐 0 分钟的天', () {
+      final report = buildReport();
+      final days = report.dailyIn(
+        reportWeekRange(DateTime(2026, 10, 21)),
+        includeEmpty: true,
+      );
+      expect(days, hasLength(7));
+      expect(days.first.day, DateTime(2026, 10, 19));
+      expect(days.first.minutes, 45);
+      expect(days[1].minutes, 60);
+      expect(days[2].minutes, 0);
+    });
+
+    test('includeEmpty 为 false 时只保留有记录的天', () {
+      final report = buildReport();
+      final days = report.dailyIn(
+        reportWeekRange(DateTime(2026, 10, 21)),
+        includeEmpty: false,
+      );
+      expect(days.map((d) => reportDayKey(d.day)), ['2026-10-19', '2026-10-20']);
+      expect(days.map((d) => d.minutes), [45, 60]);
+    });
+
+    test('空范围返回空列表', () {
+      final report = buildReport();
+      final days = report.dailyIn(
+        ReportRange(DateTime(2020, 1, 1), DateTime(2020, 1, 3)),
+      );
+      expect(days, isEmpty);
+    });
+
+    test('日期标签：今天 / 昨天 / 周几', () {
+      final now = DateTime(2026, 10, 21, 15);
+      expect(reportDayLabel(DateTime(2026, 10, 21), now: now), '今天');
+      expect(reportDayLabel(DateTime(2026, 10, 20), now: now), '昨天');
+      expect(reportDayLabel(DateTime(2026, 10, 19), now: now), '周一');
+      expect(reportDayLabel(DateTime(2026, 10, 25), now: now), '周日');
+    });
+  });
 }

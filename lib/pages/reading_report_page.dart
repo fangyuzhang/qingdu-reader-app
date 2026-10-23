@@ -51,6 +51,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
   /// -1 表示「自动选中最长的那根柱子」。
   int _selectedBar = -1;
   bool _bookExpanded = false;
+  bool _dailyExpanded = false;
 
   late final Listenable _historyChanges;
   late final Listenable _readTimeChanges;
@@ -187,6 +188,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       _anchor = reportDay(DateTime.now());
       _selectedBar = -1;
       _bookExpanded = false;
+      _dailyExpanded = false;
     });
   }
 
@@ -455,6 +457,17 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                     pillText: _pillText(_bars(report)),
                     onSelect: (index) => setState(() => _selectedBar = index),
                     onPickDate: _pickDate,
+                  ),
+                  const SizedBox(height: 12),
+                  _DailyReadingCard(
+                    days: report.dailyIn(
+                      _range,
+                      includeEmpty: _scope == ReportScope.week,
+                    ),
+                    totalMinutes: _minutes(report),
+                    expanded: _dailyExpanded,
+                    onToggle: () =>
+                        setState(() => _dailyExpanded = !_dailyExpanded),
                   ),
                   const SizedBox(height: 12),
                   _TopBookCard(
@@ -1043,6 +1056,193 @@ class _ChallengeCard extends StatelessWidget {
 }
 
 // ---------------- 柱状图 ----------------
+
+// ---------------- 每日阅读 ----------------
+
+/// 按天列出阅读时长，是「我的」页原「每日记录」卡片的唯一实现。
+///
+/// 口径与热力图、柱状图完全一致（都来自 `ReadingReport.dayMinutes`），
+/// 只是把「哪天读了多久」摊开成可读的列表：周档补齐 0 分钟的天，让一周
+/// 七天的节奏看得出来；年 / 总档只列出真正读过的日子，免得刷出三百行空白。
+class _DailyReadingCard extends StatelessWidget {
+  const _DailyReadingCard({
+    required this.days,
+    required this.totalMinutes,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final List<({DateTime day, double minutes})> days;
+  final double totalMinutes;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  /// 折叠时最多显示的条数，再长就交给「展开全部」。
+  static const _collapsedRows = 14;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    // 最近的一天放最上面：折叠时看到的一定是最近的记录。
+    final sorted = [...days]..sort((a, b) => b.day.compareTo(a.day));
+    final visible = expanded || sorted.length <= _collapsedRows
+        ? sorted
+        : sorted.take(_collapsedRows).toList();
+    final peak = sorted.fold<double>(
+      0,
+      (best, row) => math.max(best, row.minutes),
+    );
+
+    return Container(
+      key: const ValueKey('reading-report-daily'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: palette.line, width: 0.6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '每日阅读',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: palette.ink,
+                  ),
+                ),
+              ),
+              if (totalMinutes > 0)
+                Text(
+                  '共 ${formatReadingDuration(totalMinutes)}',
+                  style: TextStyle(fontSize: 11.5, color: palette.muted),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (sorted.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                '这段时间还没有阅读记录',
+                style: TextStyle(fontSize: 12, color: palette.muted),
+              ),
+            )
+          else ...[
+            for (final row in visible)
+              _DailyReadingRow(
+                key: ValueKey('reading-report-daily-row-${reportDayKey(row.day)}'),
+                row: row,
+                peak: peak,
+                palette: palette,
+              ),
+            if (sorted.length > _collapsedRows)
+              Align(
+                alignment: Alignment.center,
+                child: TextButton(
+                  key: const ValueKey('reading-report-daily-toggle'),
+                  onPressed: onToggle,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    foregroundColor: palette.accentText,
+                  ),
+                  child: Text(
+                    expanded ? '收起' : '展开全部（共 ${sorted.length} 天）',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 每日阅读的一行：日期 + 相对条 + 时长。时长条以区间内最高的一天为满格。
+class _DailyReadingRow extends StatelessWidget {
+  const _DailyReadingRow({
+    super.key,
+    required this.row,
+    required this.peak,
+    required this.palette,
+  });
+
+  final ({DateTime day, double minutes}) row;
+  final double peak;
+  final HomePalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    final minutes = row.minutes;
+    final active = minutes > 0;
+    final ratio = peak <= 0 ? 0.0 : (minutes / peak).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 104,
+            child: Text(
+              '${row.day.month}月${row.day.day}日 ${reportDayLabel(row.day)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: active ? palette.ink : palette.muted,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SizedBox(
+                height: 6,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: ColoredBox(color: palette.line),
+                      ),
+                      if (active)
+                        SizedBox(
+                          width: constraints.maxWidth * ratio,
+                          height: 6,
+                          child: ColoredBox(color: palette.accentText),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 66,
+            child: Text(
+              active ? formatReadingDuration(minutes) : '--',
+              textAlign: TextAlign.right,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                color: active ? palette.ink : palette.muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _ChartCard extends StatelessWidget {
   const _ChartCard({

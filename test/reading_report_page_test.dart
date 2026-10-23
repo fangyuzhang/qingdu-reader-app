@@ -85,6 +85,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('每日阅读：周档七天齐全，阅历档不出现', (tester) async {
+    await seed(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('reading-report-daily')),
+      200,
+    );
+    expect(find.text('每日阅读'), findsOneWidget);
+    // 周档补齐 0 分钟的天，所以正好 7 行（哪怕只读了其中两天）。
+    final rows = find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('reading-report-daily-row-');
+    });
+    expect(rows, findsNWidgets(7));
+
+    // 档位切换在列表顶部，先滚回去再点「阅历」。
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('reading-report-scope-timeline')),
+      -200,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('reading-report-scope-timeline')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('每日阅读'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('月档切成读过/读完/阅读天数/笔记四宫格', (tester) async {
     await seed(tester);
     await tester.pumpWidget(app());
