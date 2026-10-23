@@ -617,3 +617,20 @@ flutter test             # 1954 passed / 10 skipped
   - 上下滑动、章节中段：反复开/关工具栏，正文行坐标完全一致（offset=0），状态栏与手势条只在工具栏出现时显示。
   - 左右翻页：同样反复开/关，正文零位移。
   - 章首：展开工具栏后首行「版权信息」落在工具栏下沿（实测工具栏 272px，首行 299px），不再被遮；关掉后整页回到原像素位置。
+
+# 二十九、v29 批次：我的页「每日记录」并入阅读报告 + 代码精简
+
+- 版本：`1.0.129 (134)` 覆盖安装；已提交。
+- 问题：我的页「阅读热力图」与「每日记录」功能重复；前者点进去是阅读报告，后者只在首页列 14 天，同一份日聚合被写了三遍（热力图 / 每日记录 / 报告页各遍历一次）。
+- 收敛方案：
+  - 服务层新增 `ReadingReport.dailyIn(range, {includeEmpty})` 与 `reportDayLabel()`（`lib/services/reading_report.dart`），逐日明细与「今天/昨天/周几」文案只此一份。
+  - 报告页新增「每日阅读」卡片（`_DailyReadingCard`）：按天列出时长 + 相对进度条，默认 14 行、超出可展开；周档补齐 0 分钟的天，年/总档只列有记录的日子；「阅历」档不出现。
+  - 我的页删除 `_DailyRecordsCard`、`_RecentCoversCard`（与「最近阅读」同数据重复）、`_daySubtitle`；热力图卡片副标题改为「最近 16 周 · 点击查看每日阅读」。
+  - `_computeDayMinutes` 改为复用 `buildBookDayMinutes + sumDayMinutes`；`_dayKey` 统一为 `reportDayKey`。
+- 代码精简：
+  - 删除无人 import 的 `lib/services/comic_page_layout.dart`、`lib/services/playback_issue.dart`。
+  - 删除全项目零引用的旧首页组件：`ambient_backdrop.dart`、`home_feed_states.dart`、`home_hero.dart`、`home_resume_card.dart`（共 769 行）。
+  - 移除 pubspec 中已无任何 `package:hive` 引用的 `hive` / `hive_flutter`（代码统一走 `hive_ce`）。
+  - 保留待确认项：`DetailExtras`、`ReaderSelectionEntry`、`HomeMediaCard` 等「只在自家文件内使用」的公开声明，是否降为私有涉及公开 API，未动。
+- 测试：`flutter analyze` 无问题；新增 5 条用例（`dailyIn` 三种口径 + 日期标签 + 报告页「每日阅读」7 行）；全量 `flutter test` 通过数 1485 → 1490，失败 15 条与基线 `9d20ecb` 完全一致（阅读器系统栏/批注/段评等既有问题，与本次无关）。
+- APK：签名、对齐校验通过；SHA-256 `54681cbd27c6512848a64412637a872bde58f5984b1c60b323523a2ff41b5128`；38,524,657 字节；真机 `lastUpdateTime=2026-10-23 15:23:23`。
