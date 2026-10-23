@@ -73,6 +73,38 @@ ThemeMode themeModeFromName(String? name) {
   }
 }
 
+/// 墨水屏纯黑白配色。
+///
+/// 全局主题（`AppTheme`）与阅读页正文主题（`ReaderThemePreset.theme`）取同一份，
+/// 避免同一组颜色抄两遍、改一处漏一处。
+const einkColorScheme = ColorScheme(
+  brightness: Brightness.light,
+  primary: Colors.black,
+  onPrimary: Colors.white,
+  primaryContainer: Colors.white,
+  onPrimaryContainer: Colors.black,
+  secondary: Colors.black,
+  onSecondary: Colors.white,
+  secondaryContainer: Colors.white,
+  onSecondaryContainer: Colors.black,
+  tertiary: Colors.black,
+  onTertiary: Colors.white,
+  surface: Colors.white,
+  onSurface: Colors.black,
+  surfaceContainerLowest: Colors.white,
+  surfaceContainerLow: Colors.white,
+  surfaceContainer: Colors.white,
+  surfaceContainerHigh: Colors.white,
+  surfaceContainerHighest: Colors.white,
+  onSurfaceVariant: Colors.black,
+  outline: Colors.black,
+  outlineVariant: Colors.black,
+  error: Colors.black,
+  onError: Colors.white,
+  errorContainer: Colors.white,
+  onErrorContainer: Colors.black,
+);
+
 /// Unified design system and theme factory for fqapp.
 class AppTheme {
   static const Color accent = Color(0xFF2FA98C);
@@ -87,33 +119,7 @@ class AppTheme {
   /// Dark mode is intentionally not honoured here: inverted e-ink pages
   /// ghost badly and the issue asks for #FFFFFF surface / #000000 text.
   static ThemeData _createEinkTheme() {
-    const scheme = ColorScheme(
-      brightness: Brightness.light,
-      primary: Colors.black,
-      onPrimary: Colors.white,
-      primaryContainer: Colors.white,
-      onPrimaryContainer: Colors.black,
-      secondary: Colors.black,
-      onSecondary: Colors.white,
-      secondaryContainer: Colors.white,
-      onSecondaryContainer: Colors.black,
-      tertiary: Colors.black,
-      onTertiary: Colors.white,
-      surface: Colors.white,
-      onSurface: Colors.black,
-      surfaceContainerLowest: Colors.white,
-      surfaceContainerLow: Colors.white,
-      surfaceContainer: Colors.white,
-      surfaceContainerHigh: Colors.white,
-      surfaceContainerHighest: Colors.white,
-      onSurfaceVariant: Colors.black,
-      outline: Colors.black,
-      outlineVariant: Colors.black,
-      error: Colors.black,
-      onError: Colors.white,
-      errorContainer: Colors.white,
-      onErrorContainer: Colors.black,
-    );
+    const scheme = einkColorScheme;
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
@@ -211,21 +217,21 @@ class AppTheme {
     );
   }
 
-  static ThemeData createTheme(
-    Brightness brightness, {
-    bool einkMode = false,
-  }) {
+  static ThemeData createTheme(Brightness brightness, {bool einkMode = false}) {
     if (einkMode) return _createEinkTheme();
     final isDark = brightness == Brightness.dark;
     final primary = isDark ? accentDark : accent;
     final canvas = isDark ? const Color(0xFF0F1413) : const Color(0xFFFAFBF6);
     final surface = isDark ? const Color(0xFF171E1C) : Colors.white;
-    final surfaceContainerLow =
-        isDark ? const Color(0xFF141B19) : const Color(0xFFF4F7F1);
-    final surfaceContainer =
-        isDark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC);
-    final surfaceContainerHigh =
-        isDark ? const Color(0xFF232D2A) : const Color(0xFFE6EDE4);
+    final surfaceContainerLow = isDark
+        ? const Color(0xFF141B19)
+        : const Color(0xFFF4F7F1);
+    final surfaceContainer = isDark
+        ? const Color(0xFF1B2421)
+        : const Color(0xFFEEF3EC);
+    final surfaceContainerHigh = isDark
+        ? const Color(0xFF232D2A)
+        : const Color(0xFFE6EDE4);
     final ink = isDark ? const Color(0xFFF1F5F2) : const Color(0xFF212824);
     final muted = isDark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73);
     final line = isDark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1);
@@ -234,16 +240,20 @@ class AppTheme {
       brightness: brightness,
       primary: primary,
       onPrimary: Colors.white,
-      primaryContainer:
-          isDark ? const Color(0xFF123B30) : const Color(0xFFD9F2E8),
-      onPrimaryContainer:
-          isDark ? const Color(0xFFB8EEDC) : const Color(0xFF00382B),
+      primaryContainer: isDark
+          ? const Color(0xFF123B30)
+          : const Color(0xFFD9F2E8),
+      onPrimaryContainer: isDark
+          ? const Color(0xFFB8EEDC)
+          : const Color(0xFF00382B),
       secondary: isDark ? const Color(0xFFFF8A6B) : const Color(0xFFE2603F),
       onSecondary: Colors.white,
-      secondaryContainer:
-          isDark ? const Color(0xFF3B1E14) : const Color(0xFFFFE6DE),
-      onSecondaryContainer:
-          isDark ? const Color(0xFFFFD9CC) : const Color(0xFF3F1509),
+      secondaryContainer: isDark
+          ? const Color(0xFF3B1E14)
+          : const Color(0xFFFFE6DE),
+      onSecondaryContainer: isDark
+          ? const Color(0xFFFFD9CC)
+          : const Color(0xFF3F1509),
       tertiary: isDark ? const Color(0xFF7DB3EC) : const Color(0xFF4A90D9),
       onTertiary: Colors.white,
       surface: surface,
@@ -252,17 +262,20 @@ class AppTheme {
       surfaceContainerLow: surfaceContainerLow,
       surfaceContainer: surfaceContainer,
       surfaceContainerHigh: surfaceContainerHigh,
-      surfaceContainerHighest:
-          isDark ? const Color(0xFF2E3A36) : const Color(0xFFDDE6DA),
+      surfaceContainerHighest: isDark
+          ? const Color(0xFF2E3A36)
+          : const Color(0xFFDDE6DA),
       onSurfaceVariant: muted,
       outline: isDark ? const Color(0xFF6F7D77) : const Color(0xFF97A39C),
       outlineVariant: line,
       error: isDark ? const Color(0xFFFFB4AB) : const Color(0xFFBA1A1A),
       onError: isDark ? const Color(0xFF690005) : Colors.white,
-      errorContainer:
-          isDark ? const Color(0xFF93000A) : const Color(0xFFFFDAD6),
-      onErrorContainer:
-          isDark ? const Color(0xFFFFDAD6) : const Color(0xFF410002),
+      errorContainer: isDark
+          ? const Color(0xFF93000A)
+          : const Color(0xFFFFDAD6),
+      onErrorContainer: isDark
+          ? const Color(0xFFFFDAD6)
+          : const Color(0xFF410002),
     );
 
     return ThemeData(
@@ -306,11 +319,7 @@ class AppTheme {
           fontWeight: FontWeight.w600,
           color: ink,
         ),
-        contentTextStyle: TextStyle(
-          fontSize: 14,
-          color: muted,
-          height: 1.4,
-        ),
+        contentTextStyle: TextStyle(fontSize: 14, color: muted, height: 1.4),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: surface,
@@ -322,11 +331,7 @@ class AppTheme {
         dragHandleColor: line,
         dragHandleSize: const Size(36, 4),
       ),
-      dividerTheme: DividerThemeData(
-        color: line,
-        thickness: 0.6,
-        space: 1,
-      ),
+      dividerTheme: DividerThemeData(color: line, thickness: 0.6, space: 1),
       listTileTheme: ListTileThemeData(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
         dense: false,
@@ -335,16 +340,14 @@ class AppTheme {
           fontWeight: FontWeight.w500,
           color: ink,
         ),
-        subtitleTextStyle: TextStyle(
-          fontSize: 12.5,
-          color: muted,
-        ),
+        subtitleTextStyle: TextStyle(fontSize: 12.5, color: muted),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        backgroundColor:
-            isDark ? const Color(0xFF2C2C30) : const Color(0xFF2C2825),
+        backgroundColor: isDark
+            ? const Color(0xFF2C2C30)
+            : const Color(0xFF2C2825),
         contentTextStyle: const TextStyle(fontSize: 13, color: Colors.white),
       ),
     );

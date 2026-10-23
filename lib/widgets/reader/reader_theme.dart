@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/app_theme.dart';
 import '../../services/reader_preferences.dart';
 
 extension ReaderThemeColors on ReaderThemePreset {
@@ -55,8 +56,7 @@ extension ReaderThemeColors on ReaderThemePreset {
   /// The wash behind a text selection. 官方 markingConfig.b()(ReaderViewLayout
   /// 的 ie5.a 实现)= un4.j.C(theme, 0.16f) —— 强调色 @ 16%,C 会整体重设
   /// alpha,所以夜间也是 16% 橙。
-  Color get selectionWashColor =>
-      selectionAccentColor.withValues(alpha: 0.16);
+  Color get selectionWashColor => selectionAccentColor.withValues(alpha: 0.16);
 
   /// 控点实色(un4.j.t):夜间降到 60% 的橙,其余主题用强调色原色。
   Color get selectionHandleColor =>
@@ -92,6 +92,7 @@ extension ReaderThemeColors on ReaderThemePreset {
     if (isEink) return Colors.black;
     return textColor.withValues(alpha: 0.09);
   }
+
   /// 排版面板表面 = 阅读页背景本身(官方 bottombar/t.java 直接把面板根
   /// View 设为 readerConfig.getBackgroundColor(),面板与页面同色);chip/
   /// 控件底色另走 fieldColor(官方是白色 5% 叠加,x4 色表)。
@@ -117,33 +118,7 @@ extension ReaderThemeColors on ReaderThemePreset {
     // 墨水屏不走 fromSeed：HCT 色调推导会产生大量灰阶，在墨水屏上被量化
     // 成抖动/残影。直接给纯黑白 ColorScheme。
     final scheme = isEink
-        ? const ColorScheme(
-            brightness: Brightness.light,
-            primary: Colors.black,
-            onPrimary: Colors.white,
-            primaryContainer: Colors.white,
-            onPrimaryContainer: Colors.black,
-            secondary: Colors.black,
-            onSecondary: Colors.white,
-            secondaryContainer: Colors.white,
-            onSecondaryContainer: Colors.black,
-            tertiary: Colors.black,
-            onTertiary: Colors.white,
-            surface: Colors.white,
-            onSurface: Colors.black,
-            surfaceContainerLowest: Colors.white,
-            surfaceContainerLow: Colors.white,
-            surfaceContainer: Colors.white,
-            surfaceContainerHigh: Colors.white,
-            surfaceContainerHighest: Colors.white,
-            onSurfaceVariant: Colors.black,
-            outline: Colors.black,
-            outlineVariant: Colors.black,
-            error: Colors.black,
-            onError: Colors.white,
-            errorContainer: Colors.white,
-            onErrorContainer: Colors.black,
-          )
+        ? einkColorScheme
         : ColorScheme.fromSeed(
             seedColor: accentColor,
             brightness: isDark ? Brightness.dark : Brightness.light,
