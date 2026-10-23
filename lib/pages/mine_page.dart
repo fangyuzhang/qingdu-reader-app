@@ -7,11 +7,13 @@ import '../services/app_theme.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
-import 'notes_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 
 /// 个人中心（我的）页：顶部书友卡片 + 快捷入口（章节缓存/设置/关于）
+///
+/// 笔记不再放这里：底部导航本来就是笔记主入口，统计页还有一张带数量的
+/// 笔记卡，三处并排只会让人不知道点哪个。
 /// + 嵌入式阅读与视听统计。
 class MinePage extends StatelessWidget {
   const MinePage({super.key});
@@ -38,7 +40,10 @@ class MinePage extends StatelessWidget {
             builder: (context, mode, _) {
               final dark = einkModeNotifier.value
                   ? false
-                  : themeModeIsDark(mode, MediaQuery.platformBrightnessOf(context));
+                  : themeModeIsDark(
+                      mode,
+                      MediaQuery.platformBrightnessOf(context),
+                    );
               return IconButton(
                 icon: Icon(dark ? LucideIcons.sun : LucideIcons.moon),
                 tooltip: dark ? '切换到亮色' : '切换到深色',
@@ -168,17 +173,6 @@ class MinePage extends StatelessWidget {
         // 【青茄重构·新增】快捷入口：笔记（批注/书摘） + 缓存 + 设置 + 关于
         Row(
           children: [
-            _buildShortcutTile(
-              context: context,
-              icon: LucideIcons.pen_line,
-              label: '笔记',
-              palette: palette,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NotesPage()),
-              ),
-            ),
-            const SizedBox(width: 8),
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.bookmark,

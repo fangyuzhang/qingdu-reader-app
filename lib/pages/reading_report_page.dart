@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../services/library_store.dart';
 import '../services/media_history_store.dart';
-import '../services/poster_cache.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_report.dart';
 import '../services/reading_stats_store.dart';
 import '../services/shelf_store.dart';
+import '../widgets/book_thumb.dart';
 import '../widgets/home/home_design.dart';
 import 'notes_page.dart';
 import '../services/reading_report_exporter.dart';
@@ -1143,7 +1142,9 @@ class _DailyReadingCard extends StatelessWidget {
           else ...[
             for (final row in visible)
               _DailyReadingRow(
-                key: ValueKey('reading-report-daily-row-${reportDayKey(row.day)}'),
+                key: ValueKey(
+                  'reading-report-daily-row-${reportDayKey(row.day)}',
+                ),
                 row: row,
                 peak: peak,
                 palette: palette,
@@ -1216,9 +1217,7 @@ class _DailyReadingRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(3),
                   child: Stack(
                     children: [
-                      Positioned.fill(
-                        child: ColoredBox(color: palette.line),
-                      ),
+                      Positioned.fill(child: ColoredBox(color: palette.line)),
                       if (active)
                         SizedBox(
                           width: constraints.maxWidth * ratio,
@@ -1616,7 +1615,14 @@ class _TopBookCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _BookCover(url: top.book.cover, palette: palette),
+                BookThumb(
+                  url: top.book.cover,
+                  width: 46,
+                  height: 62,
+                  iconSize: 18,
+                  backgroundColor: palette.soft,
+                  iconColor: palette.muted,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1705,42 +1711,6 @@ class _TopBookCard extends StatelessWidget {
             ],
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _BookCover extends StatelessWidget {
-  const _BookCover({required this.url, required this.palette});
-
-  final String url;
-  final HomePalette palette;
-
-  @override
-  Widget build(BuildContext context) {
-    const width = 46.0;
-    const height = 62.0;
-    final fallback = Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: palette.soft,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Icon(LucideIcons.book_open, size: 18, color: palette.muted),
-    );
-    if (url.isEmpty) return fallback;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: CachedNetworkImage(
-        cacheManager: PosterCache.instance,
-        imageUrl: url,
-        width: width,
-        height: height,
-        fit: BoxFit.cover,
-        memCacheWidth: 138,
-        memCacheHeight: 186,
-        errorWidget: (_, _, _) => fallback,
       ),
     );
   }

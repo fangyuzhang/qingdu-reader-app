@@ -6,6 +6,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/pages/detail_page.dart';
+import 'package:fqapp/pages/mine_page.dart';
 import 'package:fqapp/pages/stats_page.dart';
 import 'package:fqapp/services/library_store.dart';
 
@@ -132,6 +133,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<TextButton>(showAll).onPressed, isNull);
     expect(find.text('orphan-video'), findsNothing);
+  });
+
+  testWidgets('概览卡把天数类指标并成一行', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: StatsPage())),
+    );
+    await tester.pumpAndSettle();
+    for (final label in ['今日', '本月', '总计', '累计字数']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    // 天数类指标不再各占一格，合并为宫格下方的一行。
+    expect(find.text('活跃天数'), findsNothing);
+    expect(find.textContaining('活跃 0 天'), findsOneWidget);
+    expect(find.textContaining('连续打卡 0 天'), findsOneWidget);
+  });
+
+  testWidgets('我的页不再重复放笔记快捷入口', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+    await tester.pumpWidget(const MaterialApp(home: MinePage()));
+    await tester.pumpAndSettle();
+    // 快捷栏里不再有「笔记」，只留底部导航 + 统计页的「我的笔记」卡。
+    expect(find.text('笔记'), findsNothing);
+    expect(find.text('章节缓存'), findsOneWidget);
+    expect(find.text('我的笔记'), findsOneWidget);
   });
 }
 

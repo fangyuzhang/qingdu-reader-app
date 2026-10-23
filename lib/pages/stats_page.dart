@@ -2,16 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import '../models/media_item.dart';
 import '../services/app_theme.dart';
 import '../services/library_store.dart';
-import '../services/poster_cache.dart';
 import '../services/media_history_store.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_report.dart';
 import '../services/reading_stats_store.dart';
+import '../widgets/book_thumb.dart';
 import '../widgets/home/home_design.dart';
 import 'notes_page.dart';
 import 'detail_page.dart';
@@ -693,67 +692,99 @@ class _OverviewCard extends StatelessWidget {
       ('今日', today > 0 ? _formatDuring(today) : '--'),
       ('本月', month > 0 ? _formatDuring(month) : '--'),
       ('总计', _formatDuring(total)),
-      ('活跃天数', '$activeDays 天'),
-      // 【青茄重构·新增】字数与打卡：产品要求的两个核心指标。
+      // 【青茄重构·新增】字数折算按阅读时长估算，见 ReadingStatsStore。
       ('累计字数', totalChars > 0 ? formatCharacterCount(totalChars) : '--'),
-      ('连续打卡', streakDays > 0 ? '$streakDays 天' : '--'),
     ];
     final palette = HomePalette.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     return _Card(
-      child: GridView(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          mainAxisExtent: scaler.scale(20) * 1.2 + scaler.scale(12) * 1.2 + 24,
-        ),
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final (label, value) in stats)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: palette.line.withValues(
-                  alpha: palette.dark ? 0.45 : 0.55,
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // 指标数字随宽度缩放而不是截断：「3 小时 17 分」这类值
-                  // 在窄屏/大字号下很容易被省略号吃掉关键分钟数。
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 19,
-                        height: 1.2,
-                        fontWeight: FontWeight.w700,
-                        color: palette.ink,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.2,
-                      color: palette.muted,
-                    ),
-                  ),
-                ],
-              ),
+          GridView(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              mainAxisExtent:
+                  scaler.scale(20) * 1.2 + scaler.scale(12) * 1.2 + 24,
             ),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (final (label, value) in stats)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: palette.line.withValues(
+                      alpha: palette.dark ? 0.45 : 0.55,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // 指标数字随宽度缩放而不是截断：「3 小时 17 分」这类值
+                      // 在窄屏/大字号下很容易被省略号吃掉关键分钟数。
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          value,
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 19,
+                            height: 1.2,
+                            fontWeight: FontWeight.w700,
+                            color: palette.ink,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.2,
+                          color: palette.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _daysLine(palette, activeDays, streakDays),
         ],
       ),
+    );
+  }
+
+  /// 活跃天数与连续打卡同属「读了几天」这一类，合成一行放在宫格下面：
+  /// 它们混在时长/字数里各占一格时，六个数字主次不分，反而看不出重点。
+  Widget _daysLine(HomePalette palette, int activeDays, int streakDays) {
+    final style = TextStyle(fontSize: 12, color: palette.muted);
+    Widget item(IconData icon, String text) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: palette.muted),
+        const SizedBox(width: 4),
+        Text(text, style: style),
+      ],
+    );
+    return Wrap(
+      spacing: 14,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        item(LucideIcons.calendar_days, '活跃 $activeDays 天'),
+        item(LucideIcons.flame, '连续打卡 $streakDays 天'),
+      ],
     );
   }
 }
@@ -945,7 +976,7 @@ class _RecentBooksCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            _cover(context, entry['cover']?.toString() ?? '', 40, 52),
+            BookThumb(url: entry['cover']?.toString() ?? ''),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -975,44 +1006,6 @@ class _RecentBooksCard extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _cover(BuildContext context, String url, double w, double h) {
-    final scheme = Theme.of(context).colorScheme;
-    if (url.isEmpty) {
-      return Container(
-        width: w,
-        height: h,
-        color: scheme.surfaceContainerHighest,
-        child: Icon(
-          LucideIcons.book_open,
-          color: scheme.onSurfaceVariant,
-          size: 20,
-        ),
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: CachedNetworkImage(
-        cacheManager: PosterCache.instance,
-        imageUrl: url,
-        width: w,
-        height: h,
-        fit: BoxFit.cover,
-        memCacheWidth: 160,
-        memCacheHeight: 208,
-        errorWidget: (_, _, _) => Container(
-          width: w,
-          height: h,
-          color: scheme.surfaceContainerHighest,
-          child: Icon(
-            LucideIcons.book_open,
-            color: scheme.onSurfaceVariant,
-            size: 20,
-          ),
         ),
       ),
     );
