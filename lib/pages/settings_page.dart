@@ -165,7 +165,8 @@ class SettingsPage extends StatelessWidget {
         children: [
           Text(
             _modeLabel(mode),
-            style: TextStyle(color: Theme.of(context).colorScheme.outline),
+            // outline 是描边色（#97A39C 在浅底上只有 2.5:1），不能当文字用。
+            style: TextStyle(color: HomePalette.of(context).muted),
           ),
           const SizedBox(width: 4),
           const Icon(LucideIcons.chevron_right, size: 18),
@@ -426,7 +427,9 @@ class _ServiceStatusRowState extends State<_ServiceStatusRow> {
     return ListTile(
       leading: Icon(
         healthy ? LucideIcons.circle_check : LucideIcons.circle_alert,
-        color: healthy ? Colors.green : Colors.red,
+        // 语义色统一取 ColorScheme：写死 green/red 在深色与墨水屏模式下
+        // 既刺眼也和其他状态色不一致；图标仍保留，不只靠颜色传信息。
+        color: healthy ? theme.colorScheme.primary : theme.colorScheme.error,
       ),
       title: Text('服务状态', style: theme.textTheme.titleMedium),
       subtitle: Text(

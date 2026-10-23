@@ -40,7 +40,8 @@ class CoverTagChip extends StatelessWidget {
         label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Colors.white, fontSize: 9, height: 1.2),
+        // 封面类型/角标是真实信息，不能低于 Material 3 的 11sp 小标签档。
+        style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.2),
       ),
     );
   }

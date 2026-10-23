@@ -244,7 +244,7 @@ class HomeMediaCard extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 9,
+                                    fontSize: 11,
                                     height: 1.2,
                                   ),
                                 ),

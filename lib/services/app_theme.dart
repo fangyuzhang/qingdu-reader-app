@@ -36,13 +36,12 @@ class _NoPageTransitionBuilder extends PageTransitionsBuilder {
 
 /// Resolves [mode] against the current platform brightness. `system` follows the
 /// device setting; everything else answers for itself.
-bool themeModeIsDark(ThemeMode mode, Brightness platformBrightness) => switch (
-  mode
-) {
-  ThemeMode.dark => true,
-  ThemeMode.light => false,
-  ThemeMode.system => platformBrightness == Brightness.dark,
-};
+bool themeModeIsDark(ThemeMode mode, Brightness platformBrightness) =>
+    switch (mode) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => platformBrightness == Brightness.dark,
+    };
 
 /// Writes the global theme mode and persists it, so the reader's night button
 /// and the settings / 我的 switches all drive the same preference.
@@ -227,7 +226,10 @@ class AppTheme {
         ? const Color(0xFF232D2A)
         : const Color(0xFFE6EDE4);
     final ink = isDark ? const Color(0xFFF1F5F2) : const Color(0xFF212824);
-    final muted = isDark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73);
+    // 浅色 #6C7A73 在 canvas(#FAFBF6) 上只有 4.33:1，ListTile 副标题
+    // (12.5sp) 与 onSurfaceVariant 图标都压线；与 HomePalette.muted 统一
+    // 到 #5E6B64(5.37:1)。
+    final muted = isDark ? const Color(0xFF98A5A0) : const Color(0xFF5E6B64);
     final line = isDark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1);
 
     final scheme = ColorScheme(

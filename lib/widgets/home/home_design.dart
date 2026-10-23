@@ -30,10 +30,15 @@ class HomePalette {
   Color get ink => eink
       ? Colors.black
       : (dark ? const Color(0xFFF1F5F2) : const Color(0xFF212824));
+  // 浅色 muted(#6C7A73) 在 canvas(#FAFBF6) 上只有 4.33:1，副标题/计数这类
+  // 11–12sp 小字不达 4.5:1；#5E6B64 提到 5.37:1，仍比正文轻一档。
   Color get muted => eink
       ? Colors.black
-      : (dark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73));
-  Color get accentText => eink ? Colors.black : (dark ? accent : accentStrong);
+      : (dark ? const Color(0xFF98A5A0) : const Color(0xFF5E6B64));
+  // accentStrong(#1F8A72) 作小字前景只有 4.25:1；#176B58 在 canvas 上 6.16:1、
+  // 在 soft 上 5.69:1。填充仍用 accent，不改变品牌色的视觉重量。
+  Color get accentText =>
+      eink ? Colors.black : (dark ? accent : const Color(0xFF176B58));
   Color get soft => eink
       ? Colors.white
       : (dark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC));

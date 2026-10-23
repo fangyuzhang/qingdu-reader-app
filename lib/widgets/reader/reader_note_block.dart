@@ -232,7 +232,7 @@ class _NoteIcon extends StatelessWidget {
         child: SizedBox(
           width: 16,
           height: 16,
-          child: Icon(icon, size: 16, color: const Color(0xFFB0A08A)),
+          child: Icon(icon, size: 16, color: const Color(0xFF8A7657)),
         ),
       ),
     );
@@ -768,7 +768,7 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
     hintStyle: const TextStyle(
       fontSize: 13,
       height: 1.45,
-      color: Color(0xFFA29483),
+      color: Color(0xFF7A6F60),
     ),
     filled: true,
     fillColor: Colors.white,

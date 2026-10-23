@@ -769,10 +769,11 @@ class _LibraryPageState extends State<LibraryPage> {
       (ShelfStatus.done, '读完'),
     ];
     return Padding(
+      // chip 自身已含上下留白（48dp 命中区里只画 27dp 胶囊），这里不再
+      // 额外加底距，避免把书架内容往下推。
       padding: const EdgeInsets.only(
         left: ShelfTokens.screenPadding,
         right: ShelfTokens.screenPadding,
-        bottom: ShelfTokens.spaceS,
       ),
       child: Row(
         children: [
@@ -818,7 +819,7 @@ class _LibraryPageState extends State<LibraryPage> {
     return Padding(
       padding: const EdgeInsets.only(
         top: ShelfTokens.spaceXS,
-        bottom: ShelfTokens.spaceS,
+        bottom: ShelfTokens.spaceXS,
         left: ShelfTokens.screenPadding,
         right: ShelfTokens.screenPadding,
       ),
@@ -1203,27 +1204,34 @@ class _GroupChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? palette.soft : Colors.transparent,
-          borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
-          border: Border.all(
-            color: selected
-                ? HomePalette.accent.withValues(alpha: 0.45)
-                : palette.line,
-            width: 0.6,
-          ),
-        ),
-        child: Text(
-          '$label $count',
-          style: TextStyle(
-            fontSize: ShelfTokens.subtitle,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            color: selected ? palette.accentText : palette.muted,
+    // 视觉高度保持 27dp 的小胶囊，但整块命中区撑到 48dp：分组 chip 是书架
+    // 最高频的筛选入口，27dp 的点击带在单手上容易点空。
+    return SizedBox(
+      height: 48,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+            decoration: BoxDecoration(
+              color: selected ? palette.soft : Colors.transparent,
+              borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
+              border: Border.all(
+                color: selected
+                    ? HomePalette.accent.withValues(alpha: 0.45)
+                    : palette.line,
+                width: 0.6,
+              ),
+            ),
+            child: Text(
+              '$label $count',
+              style: TextStyle(
+                fontSize: ShelfTokens.subtitle,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected ? palette.accentText : palette.muted,
+              ),
+            ),
           ),
         ),
       ),
@@ -1405,37 +1413,42 @@ class _TabButton extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
+      // 文字 + 指示条只有 ~35dp；外面补到 48dp 命中区，视觉尺寸不变。
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: selected ? 18 : 15,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  letterSpacing: -0.3,
-                  color: selected ? palette.ink : palette.muted,
+        child: SizedBox(
+          height: 48,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: selected ? 18 : 15,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    letterSpacing: -0.3,
+                    color: selected ? palette.ink : palette.muted,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 5),
-              // 指示条宽度动画；高度恒定保持行高一致。
-              AnimatedContainer(
-                duration: _motionDuration(context, 220),
-                curve: Curves.easeOutCubic,
-                width: selected ? 26 : 0,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: selected ? HomePalette.accent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
+                const SizedBox(height: 5),
+                // 指示条宽度动画；高度恒定保持行高一致。
+                AnimatedContainer(
+                  duration: _motionDuration(context, 220),
+                  curve: Curves.easeOutCubic,
+                  width: selected ? 26 : 0,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: selected ? HomePalette.accent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1466,7 +1479,9 @@ class _IconAction extends StatelessWidget {
         style: IconButton.styleFrom(
           foregroundColor: color,
           padding: const EdgeInsets.all(8),
-          minimumSize: const Size(38, 38),
+          // 显式写 48：默认 tap target 会补到这个尺寸，但样式表里 38 容易
+          // 被后续改动误读成真实命中区。
+          minimumSize: const Size(48, 48),
         ),
         icon: Icon(icon, size: 21),
       ),
@@ -1488,8 +1503,8 @@ class _LayoutSegments extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 三个图标段各占 40×48dp：图标本身仍是 17dp，命中区不再只有 34×30。
     return Container(
-      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: palette.soft,
         borderRadius: BorderRadius.circular(ShelfTokens.radiusButton),
@@ -1506,8 +1521,8 @@ class _LayoutSegments extends StatelessWidget {
                 onTap: () => onChanged(layout),
                 borderRadius: BorderRadius.circular(9),
                 child: Container(
-                  width: 34,
-                  height: 30,
+                  width: 40,
+                  height: 48,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: layout == current

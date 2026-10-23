@@ -61,13 +61,14 @@ class ReaderStatusBar extends StatelessWidget {
     // 看不出来；连续切换时高度已经稳定，所以只有第一次跳。
     // 因此行高按 compact / listeningPill 固定预留，内容只做单行省略，
     // 是否分页、是否有电池都不能改变整体高度。
-    final lineHeight = MediaQuery.textScalerOf(context).scale(10) * 1.4;
+    final lineHeight = MediaQuery.textScalerOf(context).scale(11) * 1.4;
     final chapterLineHeight = lineHeight + 4;
     final bottomPadding = listeningPill ? 54.0 : 10.0;
     return DefaultTextStyle(
       style: Theme.of(context).textTheme.bodySmall!.copyWith(
         color: preset.mutedTextColor,
-        fontSize: 10,
+        // Material 3 的 labelSmall 是 11sp；10sp 页码在 1x 屏上已经偏小。
+        fontSize: 11,
         height: 1.4,
       ),
       maxLines: 1,

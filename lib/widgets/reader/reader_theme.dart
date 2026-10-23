@@ -37,11 +37,16 @@ extension ReaderThemeColors on ReaderThemePreset {
     ReaderThemePreset.eyeCare => const Color(0xFF4F6F52),
     ReaderThemePreset.dark => const Color(0xFFE9AD82),
     ReaderThemePreset.eink => Colors.black,
-    _ => const Color(0xFF9B6743),
+    // #9B6743 在纸张底(#F3E4C2)只有 3.78:1，低于小字号 4.5:1；
+    // 压深到 #8A5B39 后米白/青绿/纸张分别为 5.49 / 4.97 / 4.59:1。
+    _ => const Color(0xFF8A5B39),
   };
 
+  /// 辅助文字（状态栏页码、章节行、工具栏说明）。60% 在米白/青绿/纸张
+  /// 三套浅底只有 4.01 / 3.64 / 3.08:1，低于小字号 4.5:1；80% 提到
+  /// 7.51 / 6.47 / 5.02:1，仍明显弱于正文，层次不受影响。
   Color get mutedTextColor =>
-      isEink ? Colors.black : textColor.withValues(alpha: 0.6);
+      isEink ? Colors.black : textColor.withValues(alpha: 0.8);
 
   /// 官方每个阅读主题一个选区强调色(un4.j.t / ReaderCommonColor.getHighlightColor
   /// 的 b4e-b4i 资源表):light #FA6725、parchment(纸) #CC8114、eyeCare(绿)

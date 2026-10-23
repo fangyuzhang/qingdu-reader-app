@@ -89,24 +89,28 @@ class _ProgressBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 26),
+      constraints: const BoxConstraints(minWidth: 30),
       child: DecoratedBox(
         decoration: BoxDecoration(
+          // 白字要压在实色上：原来的 accent(#2FA98C) 只有 2.93:1，深青
+          // (#176B58)+深珊瑚(#B23A28) 两端分别 6.4 / 5.95:1。
           gradient: const LinearGradient(
-            colors: [HomePalette.accent, Color(0xFFE4432E)],
+            colors: [Color(0xFF176B58), Color(0xFFB23A28)],
           ),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           child: Text(
             text,
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.clip,
+            // 9sp 低于 Material 3 最小的 11sp 标签档，封面角标本身就是
+            // 真实进度信息，不能靠缩小字号塞进封面。
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 9,
+              fontSize: 11,
               height: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -131,11 +135,12 @@ class _SelectionBox extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
+          // 白勾压在 accent(#2FA98C) 上只有 2.93:1；accentStrong 是 4.25:1。
           color: selected
-              ? HomePalette.accent
+              ? HomePalette.accentStrong
               : Colors.black.withValues(alpha: 0.18),
           border: Border.all(
-            color: selected ? HomePalette.accent : border,
+            color: selected ? HomePalette.accentStrong : border,
             width: 1.5,
           ),
         ),
@@ -904,10 +909,13 @@ class BookshelfListCard extends StatelessWidget {
                               progressText!,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              // 进度是这一行最重要的副信息，用字重 + 更深
+                              // 的 ink 压过作者/时间，避免两行同权重。
                               style: TextStyle(
                                 fontSize: ShelfTokens.subtitle,
+                                fontWeight: FontWeight.w500,
                                 height: ShelfTokens.subtitleLineHeight,
-                                color: palette.muted,
+                                color: palette.ink.withValues(alpha: 0.82),
                               ),
                             ),
                           ),

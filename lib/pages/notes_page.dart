@@ -626,13 +626,15 @@ class _NotesPageState extends State<NotesPage> {
         ),
         // 批注类型：内置四种 + 用户自定义的，直接按类型挑，不必进筛选面板。
         SizedBox(
-          height: markers.isEmpty ? 6 : 40,
+          // ChoiceChip 在 MaterialTapTargetSize.padded 下自带 48dp 命中区，
+          // 原来的 40dp 行高既压扁了 chip，也让点击带不足 48dp。
+          height: markers.isEmpty ? 6 : 48,
           child: markers.isEmpty
               ? null
               : ListView(
                   key: const ValueKey('notes-marker-types'),
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(16, 6, 12, 2),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
                   children: [
                     _markerTypeChip(palette, null, '全部类型'),
                     for (final type in markers)
@@ -1134,13 +1136,13 @@ class _TimelineNoteRow extends StatelessWidget {
               clipBehavior: Clip.none,
               children: [
                 Positioned(
-                  left: 40,
+                  left: 44,
                   top: firstOfDay ? 18 : 0,
                   bottom: lastOfDay ? 20 : 0,
                   child: Container(width: 1.5, color: palette.line),
                 ),
                 Positioned(
-                  left: 35.5,
+                  left: 39.5,
                   top: 8,
                   child: Container(
                     width: 10,
@@ -1156,15 +1158,24 @@ class _TimelineNoteRow extends StatelessWidget {
                   Positioned(
                     left: 0,
                     top: 1,
-                    width: 30,
-                    child: Text(
-                      _dayLabel(note.createdAt),
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        color: palette.muted,
-                        fontSize: 10,
-                        height: 1.3,
-                        fontWeight: FontWeight.w600,
+                    width: 38,
+                    // 日期是 10sp 的固定 5 字符，系统字号放大后会从
+                    // 「10/21」折成「10/2 + 1」。这里保单行并允许整体
+                    // 等比缩小，宁可小一点也不让日期断成两行。
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _dayLabel(note.createdAt),
+                        maxLines: 1,
+                        softWrap: false,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: palette.muted,
+                          fontSize: 10,
+                          height: 1.3,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
