@@ -10,6 +10,7 @@ ReaderAnnotation note({
   String category = '',
   List<String> tags = const [],
   String type = ReaderAnnotation.kTypeAnnot,
+  String markerLabel = '',
 }) => ReaderAnnotation(
   bookId: bookId,
   chapterId: 'chapter-$bookId',
@@ -22,11 +23,34 @@ ReaderAnnotation note({
   bookTitle: 'book-$bookId',
   category: category,
   tags: tags,
+  markerType: markerLabel.isEmpty ? '' : 'custom',
+  markerLabel: markerLabel,
 );
 
 void main() {
   DateTime local(int year, int month, int day, [int hour = 12]) =>
       DateTime(year, month, day, hour);
+
+  test('multiple marker types are OR-ed, and AND-ed with tags', () {
+    final notes = [
+      note(bookId: 'a', createdAt: 1, markerLabel: '疑问', tags: const ['x']),
+      note(bookId: 'a', createdAt: 2, markerLabel: '反驳', tags: const ['x']),
+      note(bookId: 'a', createdAt: 3, markerLabel: '感悟', tags: const ['x']),
+      note(bookId: 'a', createdAt: 4, markerLabel: '疑问'),
+    ];
+
+    final both = filterNoteTimeline(
+      notes,
+      const NoteTimelineFilters(markerKeys: {'疑问', '反驳'}, tags: {'x'}),
+    );
+    expect(both.map((entry) => entry.createdAt), unorderedEquals([1, 2]));
+
+    final single = filterNoteTimeline(
+      notes,
+      const NoteTimelineFilters(markerKeys: {'感悟'}),
+    );
+    expect(single.map((entry) => entry.createdAt), [3]);
+  });
 
   test('book, time, category and tags are AND-ed; tags are OR-ed', () {
     final notes = [

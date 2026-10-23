@@ -33,7 +33,7 @@ class NoteTimelineFilters {
     this.tags = const {},
     this.timePreset = NoteTimePreset.all,
     this.customRange,
-    this.markerKey,
+    this.markerKeys = const {},
   });
 
   final String? bookId;
@@ -42,8 +42,9 @@ class NoteTimelineFilters {
   final NoteTimePreset timePreset;
   final DateTimeRange? customRange;
 
-  /// Marker/badge identity, see [noteMarkerKey].
-  final String? markerKey;
+  /// Marker/badge identities, see [noteMarkerKey]. Multiple selected types
+  /// are OR-ed; an empty set means "任何类型".
+  final Set<String> markerKeys;
 
   /// Copy with selected dimensions replaced; `null` keeps the current value.
   /// Clearing a dimension goes through [without] so no sentinel is needed.
@@ -53,14 +54,14 @@ class NoteTimelineFilters {
     Set<String>? tags,
     NoteTimePreset? timePreset,
     DateTimeRange? customRange,
-    String? markerKey,
+    Set<String>? markerKeys,
   }) => NoteTimelineFilters(
     bookId: bookId ?? this.bookId,
     category: category ?? this.category,
     tags: tags ?? this.tags,
     timePreset: timePreset ?? this.timePreset,
     customRange: customRange ?? this.customRange,
-    markerKey: markerKey ?? this.markerKey,
+    markerKeys: markerKeys ?? this.markerKeys,
   );
 
   /// Drops the named dimensions, keeping the rest.
@@ -76,7 +77,7 @@ class NoteTimelineFilters {
     tags: tags ? const {} : this.tags,
     timePreset: time ? NoteTimePreset.all : timePreset,
     customRange: time ? null : customRange,
-    markerKey: marker ? null : markerKey,
+    markerKeys: marker ? const {} : markerKeys,
   );
 
   bool get isActive =>
@@ -84,14 +85,14 @@ class NoteTimelineFilters {
       category != null ||
       tags.isNotEmpty ||
       timePreset != NoteTimePreset.all ||
-      markerKey != null;
+      markerKeys.isNotEmpty;
 
   int get activeDimensions =>
       (bookId == null ? 0 : 1) +
       (category == null ? 0 : 1) +
       (tags.isEmpty ? 0 : 1) +
       (timePreset == NoteTimePreset.all ? 0 : 1) +
-      (markerKey == null ? 0 : 1);
+      (markerKeys.isEmpty ? 0 : 1);
 
   DateTimeRange? resolveRange(DateTime now) {
     final today = DateTime(now.year, now.month, now.day);
@@ -150,8 +151,8 @@ List<ReaderAnnotation> filterNoteTimeline(
         if (filters.tags.isNotEmpty && !note.tags.any(filters.tags.contains)) {
           return false;
         }
-        if (filters.markerKey != null &&
-            !noteHasMarker(note, filters.markerKey!)) {
+        if (filters.markerKeys.isNotEmpty &&
+            !filters.markerKeys.any((key) => noteHasMarker(note, key))) {
           return false;
         }
         if (start != null && endExclusive != null) {

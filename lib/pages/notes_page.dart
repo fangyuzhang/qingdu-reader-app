@@ -118,6 +118,21 @@ class _NotesPageState extends State<NotesPage> {
   String? _hoverNoteKey;
   NoteTagDrag? _hoverTag;
 
+  /// 顶部「全部类型」的拖动排序状态：正在拖的标签、起止插入位置，以及按下时各标签的中心（用固定坐标算插入点，
+  /// 避免标签被挤动后坐标变化导致来回抖）。
+  NoteTagDrag? _paletteDrag;
+  int _paletteFrom = 0;
+  int _paletteTo = 0;
+  bool _paletteInRow = false;
+  List<double> _paletteCenters = const [];
+
+  /// 拿起瞬间各枚标签在行内的左边界与宽度（含右侧 6dp 间距），
+  /// 用来算出「挤位后」的精确位置，避免不同宽度的标签互相压住。
+  List<_PaletteSlot> _paletteSlots = const [];
+  final GlobalKey _paletteRowKey = GlobalKey();
+  final Map<String, GlobalKey> _paletteChipKeys = {};
+  final Map<String, int> _rebornTokens = {};
+
   /// 划线 / 荧光笔记录，以及按书过滤当前划线视图的选择。
   List<_MarkEntry> _marks = const [];
   String? _markBookId;
@@ -294,14 +309,11 @@ class _NotesPageState extends State<NotesPage> {
       : ReaderMarkerTypeStore.tagOrderId(entry.label);
 
   /// 当前「全部类型」一行的 id 序列（按用户顺序排好）。
-  List<String> get _sortedOrderIds => _sortByOrder(
-    [
-      for (final type in _baseMarkerCatalog)
-        ReaderMarkerTypeStore.typeOrderId(type.key),
-      for (final tag in _tags) ReaderMarkerTypeStore.tagOrderId(tag),
-    ],
-    (id) => id,
-  );
+  List<String> get _sortedOrderIds => _sortByOrder([
+    for (final type in _baseMarkerCatalog)
+      ReaderMarkerTypeStore.typeOrderId(type.key),
+    for (final tag in _tags) ReaderMarkerTypeStore.tagOrderId(tag),
+  ], (id) => id);
 
   /// 角标 / 类型 / 标签都按「全部类型」里的手动顺序排列，
   /// 没排过的排后面并保持原序。
@@ -367,6 +379,7 @@ class _NotesPageState extends State<NotesPage> {
         tags: _filters.tags,
         timePreset: _filters.timePreset,
         customRange: _filters.customRange,
+        markerKeys: _filters.markerKeys,
       ),
       type: _type,
     );
@@ -612,6 +625,7 @@ class _NotesPageState extends State<NotesPage> {
         lastOfDay: lastOfDay,
         badges: _badgesOf(note, dark: palette.dark),
         hoverTag: hovering ? _hoverTag : null,
+        hovered: hovering,
         onOpen: _openNote,
         onEdit: _editNote,
         onDragFinished: _clearHover,
@@ -672,18 +686,122 @@ class _NotesPageState extends State<NotesPage> {
     }
   }
 
-  /// 「全部类型」里长按拖动换序：放到目标标签后面并持久化。
-  ///
-  /// 类型与自由标签共用一条序列，所以「把 1万 拖到 反驳 后面」也是同一条
-  /// 代码路径，不需要两套排序逻辑。
-  void _reorderTag(NoteTagDrag dragged, NoteTagDrag target) {
+  /// 拿起「全部类型」里的标签：记下原位与所有其他标签的中心。
+  void _paletteDragStarted(NoteTagDrag dragged, Size size) {
+    final entries = _paletteEntries(
+      dark: Theme.of(context).brightness == Brightness.dark,
+    );
+    final from = entries.indexWhere((entry) => entry.id == dragged.id);
+    final centers = <double>[];
+    final slots = <_PaletteSlot>[];
+    double? origin;
+    for (var index = 0; index < entries.length; index++) {
+      final box = _paletteChipKeys[entries[index].id]?.currentContext
+          ?.findRenderObject();
+      if (box is RenderBox && box.hasSize) {
+        final global = box.localToGlobal(Offset.zero);
+        origin ??= global.dx;
+        slots.add(_PaletteSlot(global.dx - origin, box.size.width));
+        if (index != from) {
+          centers.add(box.localToGlobal(box.size.center(Offset.zero)).dx);
+        }
+      } else {
+        slots.add(const _PaletteSlot(0, 0));
+        if (index != from) centers.add(0);
+      }
+    }
+    setState(() {
+      _paletteDrag = dragged;
+      _paletteFrom = from < 0 ? 0 : from;
+      _paletteTo = _paletteFrom;
+      _paletteInRow = true;
+      _paletteCenters = centers;
+      _paletteSlots = slots;
+      _hoverNoteKey = null;
+      _hoverTag = null;
+    });
+  }
+
+  /// 拖动中：只在指针回到这一行时计算插入位置；离开就回到原位空位。
+  void _paletteDragUpdated(Offset globalPosition) {
+    if (_paletteDrag == null) return;
+    final box = _paletteRowKey.currentContext?.findRenderObject();
+    final rect = box is RenderBox && box.hasSize
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    final inRow =
+        rect != null &&
+        globalPosition.dy >= rect.top - 32 &&
+        globalPosition.dy <= rect.bottom + 32;
+    var to = _paletteFrom;
+    if (inRow) {
+      to = 0;
+      for (final center in _paletteCenters) {
+        if (globalPosition.dx > center) to++;
+      }
+    }
+    if (inRow == _paletteInRow && to == _paletteTo) return;
+    setState(() {
+      _paletteInRow = inRow;
+      _paletteTo = to;
+    });
+  }
+
+  /// 每一枚标签该横向让开多少：空位本身也一起挪到插入点，
+  /// 中间被跨过的标签按各自宽度反向补齐，形成「挤进去」的效果。
+  double _paletteShiftFor(int index) {
+    if (_paletteDrag == null || !_paletteInRow) return 0;
+    if (_paletteFrom == _paletteTo) return 0;
+    final slots = _paletteSlots;
+    if (index < 0 || index >= slots.length) return 0;
+    if (slots.any((slot) => slot.width <= 0)) return 0;
+    final target = _paletteTargetLefts(slots);
+    return target[index] - slots[index].left;
+  }
+
+  /// 按「去掉被拖的那枚、再插到 [_paletteTo]」重算一遍行内左边界。
+  List<double> _paletteTargetLefts(List<_PaletteSlot> slots) {
+    final order = <int>[
+      for (var index = 0; index < slots.length; index++)
+        if (index != _paletteFrom) index,
+    ];
+    order.insert(_paletteTo.clamp(0, order.length), _paletteFrom);
+    final lefts = List<double>.filled(slots.length, 0);
+    var cursor = 0.0;
+    for (final index in order) {
+      lefts[index] = cursor;
+      cursor += slots[index].width;
+    }
+    return lefts;
+  }
+
+  /// 松手：在行内就按插入点落位，并让这枚标签弹性重生。
+  void _paletteDragFinished() {
+    final dragged = _paletteDrag;
+    if (dragged == null) {
+      _clearHover();
+      return;
+    }
+    if (_paletteInRow) _commitPaletteReorder(dragged, _paletteTo);
+    setState(() {
+      _rebornTokens[dragged.id] = (_rebornTokens[dragged.id] ?? 0) + 1;
+      _paletteDrag = null;
+      _paletteInRow = false;
+      _paletteCenters = const [];
+    });
+    _clearHover();
+  }
+
+  /// 把 [dragged] 插到「去掉自己之后」的第 [to] 位并持久化。
+  void _commitPaletteReorder(NoteTagDrag dragged, int to) {
     final ids = [..._sortedOrderIds];
-    final from = ids.indexOf(_orderIdOf(dragged));
+    final id = _orderIdOf(dragged);
+    final from = ids.indexOf(id);
     if (from < 0) return;
     ids.removeAt(from);
-    final to = ids.indexOf(_orderIdOf(target));
-    if (to < 0) return;
-    ids.insert(to + 1, _orderIdOf(dragged));
+    final target = to.clamp(0, ids.length);
+    if (target == from) return;
+    ids.insert(target, id);
     setState(() => _order = List.unmodifiable(ids));
     unawaited(ReaderMarkerTypeStore.instance.setOrder(ids));
   }
@@ -697,14 +815,15 @@ class _NotesPageState extends State<NotesPage> {
     });
   }
 
-  /// 点类型 = 只看这一类；再点一次 = 取消。
-  /// 自由标签可多选，多个标签之间是「任一命中」。
+  /// 类型与自由标签都支持多选：同一维度内「任一命中」，再点一次取消。
   void _toggleType(NoteTagDrag entry) {
     setState(() {
       if (entry.kind == NoteTagKind.marker) {
-        _filters = _filters.markerKey == entry.label
+        final next = {..._filters.markerKeys};
+        if (!next.remove(entry.label)) next.add(entry.label);
+        _filters = next.isEmpty
             ? _filters.without(marker: true)
-            : _filters.copyWith(markerKey: entry.label);
+            : _filters.copyWith(markerKeys: next);
         return;
       }
       final next = {..._filters.tags};
@@ -808,7 +927,7 @@ class _NotesPageState extends State<NotesPage> {
     }
 
     final entries = _paletteEntries(dark: palette.dark);
-    final allTypes = _filters.markerKey == null && _filters.tags.isEmpty;
+    final allTypes = _filters.markerKeys.isEmpty && _filters.tags.isEmpty;
     return Column(
       children: [
         Padding(
@@ -830,52 +949,75 @@ class _NotesPageState extends State<NotesPage> {
           // ChoiceChip 在 MaterialTapTargetSize.padded 下自带 48dp 命中区，
           // 原来的 40dp 行高既压扁了 chip，也让点击带不足 48dp。
           height: 48,
-          child: ListView(
-            key: const ValueKey('notes-marker-types'),
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
-                  key: const ValueKey('notes-marker-all'),
-                  showCheckmark: false,
-                  selected: allTypes,
-                  label: const Text('全部类型'),
-                  labelStyle: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: allTypes ? palette.accentText : palette.muted,
-                  ),
-                  selectedColor: palette.chipSelectedFill,
-                  backgroundColor: palette.chipFill,
-                  side: palette.chipBorder(allTypes),
-                  onSelected: (_) => setState(
-                    () => _filters = _filters.without(marker: true, tags: true),
-                  ),
-                ),
-              ),
-              for (final entry in entries)
+          child: KeyedSubtree(
+            key: _paletteRowKey,
+            child: ListView(
+              key: const ValueKey('notes-marker-types'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+              children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
-                  child: PaletteTagChip(
-                    key: ValueKey(
-                      entry.kind == NoteTagKind.marker
-                          ? 'notes-marker-${entry.label}'
-                          : 'notes-tag-${entry.label}',
+                  child: ChoiceChip(
+                    key: const ValueKey('notes-marker-all'),
+                    showCheckmark: false,
+                    selected: allTypes,
+                    label: const Text('全部类型'),
+                    labelStyle: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: allTypes ? palette.accentText : palette.muted,
                     ),
-                    label: entry.label,
-                    colorValue: entry.colorValue,
-                    kind: entry.kind,
-                    selected: entry.kind == NoteTagKind.marker
-                        ? _filters.markerKey == entry.label
-                        : _filters.tags.contains(entry.label),
-                    onTap: () => _toggleType(entry),
-                    onReorder: _reorderTag,
-                    onDragFinished: _clearHover,
+                    selectedColor: palette.chipSelectedFill,
+                    backgroundColor: palette.chipFill,
+                    side: palette.chipBorder(allTypes),
+                    onSelected: (_) => setState(
+                      () =>
+                          _filters = _filters.without(marker: true, tags: true),
+                    ),
                   ),
                 ),
-            ],
+                for (var index = 0; index < entries.length; index++)
+                  KeyedSubtree(
+                    key: _paletteChipKeys.putIfAbsent(
+                      entries[index].id,
+                      () => GlobalKey(debugLabel: entries[index].id),
+                    ),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      transform: Matrix4.translationValues(
+                        _paletteShiftFor(index),
+                        0,
+                        0,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: PaletteTagChip(
+                          key: ValueKey(
+                            entries[index].kind == NoteTagKind.marker
+                                ? 'notes-marker-${entries[index].label}'
+                                : 'notes-tag-${entries[index].label}',
+                          ),
+                          label: entries[index].label,
+                          colorValue: entries[index].colorValue,
+                          kind: entries[index].kind,
+                          selected: entries[index].kind == NoteTagKind.marker
+                              ? _filters.markerKeys.contains(
+                                  entries[index].label,
+                                )
+                              : _filters.tags.contains(entries[index].label),
+                          onTap: () => _toggleType(entries[index]),
+                          onDragStarted: _paletteDragStarted,
+                          onDragUpdate: _paletteDragUpdated,
+                          onDragFinished: _paletteDragFinished,
+                          rebornToken: _rebornTokens[entries[index].id] ?? 0,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ],
@@ -1232,6 +1374,7 @@ class _TimelineNoteRow extends StatelessWidget {
     required this.badges,
     required this.onRemoveTag,
     this.hoverTag,
+    this.hovered = false,
     required this.onDragFinished,
     required this.onOpen,
     required this.onEdit,
@@ -1244,10 +1387,10 @@ class _TimelineNoteRow extends StatelessWidget {
   final bool firstOfDay;
   final bool lastOfDay;
 
-  /// 类型与自由标签混排，已按「全部类型」的顺序排好；
-  /// 最多显示 3 枚，其余折成 +N。
+  /// 类型与自由标签混排，已按「全部类型」的顺序排好，全部展示。
   final List<NoteTagDrag> badges;
   final NoteTagDrag? hoverTag;
+  final bool hovered;
   final void Function(NoteTagDrag badge) onRemoveTag;
   final VoidCallback onDragFinished;
   final Future<void> Function(ReaderAnnotation note) onOpen;
@@ -1316,11 +1459,23 @@ class _TimelineNoteRow extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
                 decoration: BoxDecoration(
                   color: palette.surface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: palette.line, width: 0.5),
+                  border: Border.all(
+                    color: hovered ? palette.accentText : palette.line,
+                    width: hovered ? 1.2 : 0.5,
+                  ),
+                  boxShadow: hovered
+                      ? [
+                          BoxShadow(
+                            color: HomePalette.accent.withValues(alpha: 0.18),
+                            blurRadius: 10,
+                          ),
+                        ]
+                      : null,
                 ),
                 child: InkWell(
                   key: ValueKey('note-card-${note.key}'),
@@ -1331,76 +1486,26 @@ class _TimelineNoteRow extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // 书名固定在标题行，标签另起一行：标签增删、换序、
+                        // 拖动都不会再推着书名或别的标签上下跑。
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 156),
-                              child: Wrap(
-                                spacing: 4,
-                                runSpacing: 4,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  for (final badge in badges.take(3))
-                                    NoteBadgeChip(
-                                      key: ValueKey(
-                                        'note-badge-${note.key}-${badge.label}',
-                                      ),
-                                      label: badge.label,
-                                      colorValue: badge.colorValue,
-                                      noteKey: note.key,
-                                      sourceKind: badge.kind,
-                                      onDragEnd: (accepted) {
-                                        onDragFinished();
-                                        if (accepted) return;
-                                        onRemoveTag(badge);
-                                      },
-                                    ),
-                                  if (badges.length > 3)
-                                    Container(
-                                      height: 20,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 5,
-                                      ),
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color: palette.soft,
-                                        borderRadius: BorderRadius.circular(5),
-                                        border: Border.all(color: palette.line),
-                                      ),
-                                      child: Text(
-                                        '+${badges.length - 3}',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          height: 1,
-                                          fontWeight: FontWeight.w700,
-                                          color: palette.muted,
-                                        ),
-                                      ),
-                                    ),
-                                  if (hoverTag != null &&
-                                      !badges.any(
-                                        (badge) =>
-                                            badge.kind == hoverTag!.kind &&
-                                            badge.label == hoverTag!.label,
-                                      ))
-                                    NoteTagGhost(
-                                      label: hoverTag!.label,
-                                      colorValue: hoverTag!.colorValue,
-                                      kind: hoverTag!.kind,
-                                    ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 7),
                             Expanded(
-                              child: Text(
-                                bookTitle.isEmpty ? '未知书籍' : bookTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: palette.muted,
+                              child: SizedBox(
+                                height: 22,
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    bookTitle.isEmpty ? '未知书籍' : bookTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: palette.muted,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1452,6 +1557,53 @@ class _TimelineNoteRow extends StatelessWidget {
                             ],
                           ],
                         ),
+                        if (badges.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              for (final badge in badges)
+                                NoteBadgeChip(
+                                  key: ValueKey(
+                                    'note-badge-${note.key}-${badge.label}',
+                                  ),
+                                  label: badge.label,
+                                  colorValue: badge.colorValue,
+                                  noteKey: note.key,
+                                  sourceKind: badge.kind,
+                                  // 拖回本条笔记自己时，对应的角标亮一圈：
+                                  // 这就是「已命中这里」的吸附提示。
+                                  highlighted:
+                                      hoverTag != null &&
+                                      hoverTag!.kind == badge.kind &&
+                                      hoverTag!.label == badge.label,
+                                  onDragEnd: (accepted) {
+                                    onDragFinished();
+                                    if (accepted) return;
+                                    onRemoveTag(badge);
+                                  },
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (hoverTag != null &&
+                            !badges.any(
+                              (badge) =>
+                                  badge.kind == hoverTag!.kind &&
+                                  badge.label == hoverTag!.label,
+                            )) ...[
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: NoteTagGhost(
+                              label: hoverTag!.label,
+                              colorValue: hoverTag!.colorValue,
+                              kind: hoverTag!.kind,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Container(
                           width: double.infinity,
@@ -1811,6 +1963,14 @@ class _MetaChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 「全部类型」一行里一枚标签的静态几何：相对首枚的左边界 + 宽度。
+class _PaletteSlot {
+  const _PaletteSlot(this.left, this.width);
+
+  final double left;
+  final double width;
 }
 
 bool _sameDay(int leftMs, int rightMs) {

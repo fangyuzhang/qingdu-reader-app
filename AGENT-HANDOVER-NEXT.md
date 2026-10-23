@@ -15,13 +15,13 @@
 | 项 | 值 |
 | --- | --- |
 | 代码状态 | `master` 干净，工作区无残留改动 |
-| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1501**、跳过 **10**、失败 **0** |
+| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1507**、跳过 **10**、失败 **0** |
 | 真机 | Redmi K20 Pro，serial `b2f8e975`（adb 走 Windows 侧 exe） |
-| 基准 APK | 38,459,051 字节，SHA-256 `b93ad85d7d9cddff5b36ab902f439100359e1e61c78d4c6f05e2601e47c13896`（`/mnt/d/APP/agent/apk/fqapp-v37.apk`） |
+| 基准 APK | 38,524,599 字节，SHA-256 `32abc721675f235304f2e3248cd2ef27ae4ecb059d0653effaab42d28322a7c7`（`/mnt/d/APP/agent/apk/fqapp-v39.apk`，版本 1.0.130+135） |
 | APK 校验 | 本批只做了安装与真机截图复核；v35 的静态校验报告仍在 `build/apk-verification/wsl-native-v35/report.json` |
-| 当前批次 | 笔记：多类型角标、类型/标签拖拽打标与换序、按书查看留在本视图 |
+| 当前批次 | 笔记：书名固定 + 标签独立一行、类型/标签多选筛选、手机式挤位排序、拖回自身卡片的吸附提示 |
 
-接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1501/10/0，再动手。
+接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1507/10/0，再动手。
 
 ---
 
@@ -153,7 +153,7 @@ flutter analyze
 flutter test
 ```
 
-当前期望：`analyze` 0 问题；`test` 1501 通过 / 10 跳过 / 0 失败。
+当前期望：`analyze` 0 问题；`test` 1507 通过 / 10 跳过 / 0 失败。
 
 ### 5.2 构建 release
 

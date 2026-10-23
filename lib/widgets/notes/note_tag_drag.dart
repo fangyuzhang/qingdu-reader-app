@@ -57,12 +57,9 @@ class NoteTagDrag {
 
 /// 顶部「全部类型」里的一枚可拖动标签。
 ///
-/// 交互：
-/// * 轻点 = 筛选 / 再点一次取消（由 [onTap] 处理）；
-/// * 长按 = 拿起，反馈层弹性放大 12%；
-/// * 拿起后原位置留一个虚线空位（[childWhenDragging]）；
-/// * 松手后原位弹性重生（0.55 → 1，elasticOut）；
-/// * 拖到另一枚标签上 = 调整顺序（[onReorder]）。
+/// 轻点 = 筛选 / 再点一次取消（由 [onTap] 处理）；长按 = 拿起，反馈层
+/// 弹性放大 12%。拿起后原位留一个等大的空位，由页面负责「挤开」式排序；
+/// 松手后按 [rebornToken] 弹性重生（0.55 → 1，elasticOut）。
 class PaletteTagChip extends StatefulWidget {
   const PaletteTagChip({
     super.key,
@@ -71,8 +68,10 @@ class PaletteTagChip extends StatefulWidget {
     required this.kind,
     required this.selected,
     required this.onTap,
-    required this.onReorder,
+    this.onDragStarted,
+    this.onDragUpdate,
     this.onDragFinished,
+    this.rebornToken = 0,
   });
 
   final String label;
@@ -81,11 +80,17 @@ class PaletteTagChip extends StatefulWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  /// 把 [dragged] 放到当前标签后面（类型与自由标签共用一条顺序）。
-  final void Function(NoteTagDrag dragged, NoteTagDrag target) onReorder;
+  /// 拿起时把标签尺寸交给页面，页面据此在排序时让出等宽的空位。
+  final void Function(NoteTagDrag data, Size size)? onDragStarted;
 
-  /// 松手后通知页面清掉磁力虚影，避免悬停态残留。
+  /// 拖动中的全局坐标，页面用它判断插入位置。
+  final void Function(Offset globalPosition)? onDragUpdate;
+
+  /// 松手后通知页面收尾（排序落位 / 清磁力虚影）。
   final VoidCallback? onDragFinished;
+
+  /// 每次从拖动里回来 +1，触发一次弹性重生。
+  final int rebornToken;
 
   @override
   State<PaletteTagChip> createState() => _PaletteTagChipState();
@@ -93,89 +98,71 @@ class PaletteTagChip extends StatefulWidget {
 
 class _PaletteTagChipState extends State<PaletteTagChip> {
   bool _dragging = false;
-  int _reborn = 0;
+
+  NoteTagDrag get _data => NoteTagDrag(
+    label: widget.label,
+    colorValue: widget.colorValue,
+    kind: widget.kind,
+  );
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return DragTarget<NoteTagDrag>(
-      onWillAcceptWithDetails: (details) {
-        final data = details.data;
-        // 类型与自由标签共用一条顺序，允许跨类型拖动（如把「1万」
-        // 拖到「反驳」后面），只排除拖回自己。
-        return data.fromPalette && data.label != widget.label;
+    return LongPressDraggable<NoteTagDrag>(
+      data: _data,
+      feedback: _feedback(),
+      childWhenDragging: _hole(palette),
+      onDragStarted: () {
+        setState(() => _dragging = true);
+        widget.onDragStarted?.call(_data, context.size ?? Size.zero);
       },
-      onAcceptWithDetails: (details) => widget.onReorder(
-        details.data,
-        NoteTagDrag(
-          label: widget.label,
-          colorValue: widget.colorValue,
-          kind: widget.kind,
-        ),
-      ),
-      builder: (context, candidate, rejected) {
-        final hovering = candidate.isNotEmpty;
-        return LongPressDraggable<NoteTagDrag>(
-          data: NoteTagDrag(
-            label: widget.label,
-            colorValue: widget.colorValue,
-            kind: widget.kind,
-          ),
-          feedback: _feedback(),
-          childWhenDragging: _hole(palette),
-          onDragStarted: () => setState(() => _dragging = true),
-          onDragEnd: (_) {
-            setState(() {
-              _dragging = false;
-              _reborn++;
-            });
-            widget.onDragFinished?.call();
-          },
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onTap,
-            child: SizedBox(
-              height: 48,
-              child: Center(
-                child: TweenAnimationBuilder<double>(
-                  key: ValueKey('palette-tag-reborn-${widget.label}-$_reborn'),
-                  tween: Tween(begin: _reborn == 0 ? 1 : 0.55, end: 1),
-                  duration: const Duration(milliseconds: 420),
-                  curve: Curves.elasticOut,
-                  builder: (context, scale, child) =>
-                      Transform.scale(scale: scale, child: child),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 140),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: widget.selected
-                          ? palette.chipSelectedFill
-                          : palette.chipFill,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: hovering
-                            ? HomePalette.accent
-                            : (widget.selected
-                                  ? palette.accentText
-                                  : palette.line),
-                        width: hovering ? 1.4 : 1,
-                      ),
-                    ),
-                    child: _chipBody(
-                      palette,
-                      selected: widget.selected,
-                      showHandle: _dragging,
-                    ),
+      onDragUpdate: (details) =>
+          widget.onDragUpdate?.call(details.globalPosition),
+      onDragEnd: (_) {
+        setState(() => _dragging = false);
+        widget.onDragFinished?.call();
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: SizedBox(
+          height: 48,
+          child: Center(
+            child: TweenAnimationBuilder<double>(
+              key: ValueKey(
+                'palette-tag-reborn-${widget.label}-${widget.rebornToken}',
+              ),
+              tween: Tween(begin: widget.rebornToken == 0 ? 1 : 0.55, end: 1),
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.elasticOut,
+              builder: (context, scale, child) =>
+                  Transform.scale(scale: scale, child: child),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: widget.selected
+                      ? palette.chipSelectedFill
+                      : palette.chipFill,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: widget.selected ? palette.accentText : palette.line,
+                    width: 1,
                   ),
+                ),
+                child: _chipBody(
+                  palette,
+                  selected: widget.selected,
+                  showHandle: _dragging,
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -277,6 +264,7 @@ class NoteBadgeChip extends StatelessWidget {
     required this.noteKey,
     this.sourceKind = NoteTagKind.marker,
     this.onDragEnd,
+    this.highlighted = false,
   });
 
   final String label;
@@ -284,12 +272,15 @@ class NoteBadgeChip extends StatelessWidget {
   final String noteKey;
   final NoteTagKind sourceKind;
 
+  /// 拖动中的标签正落在这枚角标上（含拖回自己这张卡片）：
+  /// 用一圈描边 + 轻微放大给出吸附反馈，且不改变布局尺寸。
+  final bool highlighted;
+
   /// 松手回调：`accepted == false` 表示没落在任何笔记上，调用方据此删标签。
   final void Function(bool accepted)? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
     final isMarker = sourceKind == NoteTagKind.marker;
     final chip = Container(
       constraints: const BoxConstraints(minWidth: 22),
@@ -325,6 +316,45 @@ class NoteBadgeChip extends StatelessWidget {
         ],
       ),
     );
+    // 吸附环画在 Stack 的定位层里，不参与布局：角标尺寸不变，
+    // 所以拖动时 Wrap 不会重新折行、其他标签也不会上下跳。
+    Widget withHalo(Widget child) => Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(
+          left: -3,
+          top: -3,
+          right: -3,
+          bottom: -3,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: HomePalette.accent, width: 1.4),
+                boxShadow: [
+                  BoxShadow(
+                    color: HomePalette.accent.withValues(alpha: 0.25),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+    final body = AnimatedScale(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
+      scale: highlighted ? 1.08 : 1,
+      child: highlighted ? withHalo(chip) : chip,
+    );
+    // 拖动中本体被隐藏；只有「拖回自己这张卡片」时才留一个半透明
+    // 角标 + 吸附环，明确告诉用户松手会落回这里（且不改变尺寸）。
+    final placeholder = highlighted
+        ? Opacity(opacity: 0.5, child: withHalo(chip))
+        : Opacity(opacity: 0, child: chip);
     return LongPressDraggable<NoteTagDrag>(
       data: NoteTagDrag(
         label: label,
@@ -336,29 +366,13 @@ class NoteBadgeChip extends StatelessWidget {
         scale: 1.18,
         child: Material(color: Colors.transparent, child: chip),
       ),
-      childWhenDragging: _BadgeHole(palette: palette, isMarker: isMarker),
+      // 空位必须和原角标一样大：换成别的占位符会让 Wrap 重新折行，
+      // 周围的标签就会上下跳。
+      childWhenDragging: placeholder,
       onDragEnd: (details) => onDragEnd?.call(details.wasAccepted),
-      child: chip,
+      child: body,
     );
   }
-}
-
-class _BadgeHole extends StatelessWidget {
-  const _BadgeHole({required this.palette, required this.isMarker});
-
-  final HomePalette palette;
-  final bool isMarker;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: isMarker ? 20 : 22,
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-    decoration: BoxDecoration(
-      color: palette.soft.withValues(alpha: 0.5),
-      borderRadius: BorderRadius.circular(isMarker ? 5 : 11),
-      border: Border.all(color: palette.line),
-    ),
-  );
 }
 
 /// 磁力落点提示：拖到卡片上方时出现的虚影角标。

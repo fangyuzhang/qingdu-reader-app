@@ -7,6 +7,7 @@ import 'package:fqapp/services/reader_mark_style.dart';
 import 'package:fqapp/services/reader_marker_type_store.dart';
 import 'package:fqapp/services/reader_underline_store.dart';
 import 'package:fqapp/widgets/home/home_media_card.dart';
+import 'package:fqapp/widgets/notes/note_tag_drag.dart';
 
 class _NotesMemoryStore extends ReaderAnnotationStore {
   _NotesMemoryStore(this.notes);
@@ -120,6 +121,73 @@ void main() {
     expect(find.text('金句内容'), findsOneWidget);
   });
 
+  testWidgets('批注类型也支持多选，同时选中多个类型取并集', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '疑问句', markerLabel: '疑问', createdAt: 3),
+      _note(bookId: 'a', text: '反驳句', markerLabel: '反驳', createdAt: 2),
+      _note(bookId: 'b', text: '金句内容', markerLabel: '金句', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('notes-marker-疑问')));
+    await tester.pumpAndSettle();
+    expect(find.text('疑问句'), findsOneWidget);
+    expect(find.text('反驳句'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('notes-marker-反驳')));
+    await tester.pumpAndSettle();
+    expect(find.text('疑问句'), findsOneWidget);
+    expect(find.text('反驳句'), findsOneWidget);
+    expect(find.text('金句内容'), findsNothing);
+
+    // 再点已选中的类型 = 只取消它，另一个仍然生效。
+    await tester.tap(find.byKey(const ValueKey('notes-marker-疑问')));
+    await tester.pumpAndSettle();
+    expect(find.text('疑问句'), findsNothing);
+    expect(find.text('反驳句'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('notes-marker-反驳')));
+    await tester.pumpAndSettle();
+    expect(find.text('疑问句'), findsOneWidget);
+    expect(find.text('金句内容'), findsOneWidget);
+  });
+
+  testWidgets('书名固定在标题行，新增角标不会推动书名', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '一句话', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final title = find.text('书 a');
+    final before = tester.getTopLeft(title).dy;
+
+    final palette = find.byKey(const ValueKey('notes-marker-反驳'));
+    final card = find.byKey(ValueKey('note-card-${store.notes.first.key}'));
+    final gesture = await tester.startGesture(tester.getCenter(palette));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(card));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(store.notes.first.markerBadges.length, 2);
+    expect(tester.getTopLeft(title).dy, before);
+  });
+
   testWidgets('一条笔记可以同时挂多个批注角标', (tester) async {
     final store = _NotesMemoryStore([
       _note(
@@ -225,7 +293,10 @@ void main() {
 
     final gesture = await tester.startGesture(tester.getCenter(from));
     await tester.pump(const Duration(milliseconds: 700));
-    await gesture.moveTo(tester.getCenter(to));
+    // 排序按「插到哪个缝里」计算：落在目标右边缘之外，才是排到它后面。
+    await gesture.moveTo(
+      Offset(tester.getTopRight(to).dx + 6, tester.getCenter(to).dy),
+    );
     await tester.pump(const Duration(milliseconds: 200));
     await gesture.up();
     await tester.pumpAndSettle();
@@ -278,6 +349,50 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('notes-marker-all')));
     await tester.pumpAndSettle();
     expect(find.text('没标签的句子'), findsOneWidget);
+  });
+
+  testWidgets('自由标签也支持多选，取并集后再点取消', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(
+        bookId: 'a',
+        text: '只有 A',
+        markerLabel: '疑问',
+        tags: const ['A'],
+        createdAt: 3,
+      ),
+      _note(
+        bookId: 'a',
+        text: '只有 B',
+        markerLabel: '疑问',
+        tags: const ['B'],
+        createdAt: 2,
+      ),
+      _note(bookId: 'b', text: '没有标签', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('notes-tag-A')));
+    await tester.pumpAndSettle();
+    expect(find.text('只有 A'), findsOneWidget);
+    expect(find.text('只有 B'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('notes-tag-B')));
+    await tester.pumpAndSettle();
+    expect(find.text('只有 A'), findsOneWidget);
+    expect(find.text('只有 B'), findsOneWidget);
+    expect(find.text('没有标签'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('notes-tag-A')));
+    await tester.pumpAndSettle();
+    expect(find.text('只有 A'), findsNothing);
+    expect(find.text('只有 B'), findsOneWidget);
   });
 
   testWidgets('长按标签拖到笔记上可打标签（同一目标可挂多个）', (tester) async {
@@ -373,7 +488,9 @@ void main() {
     final to = find.byKey(const ValueKey('notes-marker-反驳'));
     final gesture = await tester.startGesture(tester.getCenter(from));
     await tester.pump(const Duration(milliseconds: 700));
-    await gesture.moveTo(tester.getCenter(to));
+    await gesture.moveTo(
+      Offset(tester.getTopRight(to).dx + 6, tester.getCenter(to).dy),
+    );
     await tester.pump(const Duration(milliseconds: 200));
     await gesture.up();
     await tester.pumpAndSettle();
@@ -500,6 +617,76 @@ void main() {
     expect(find.byKey(const ValueKey('notes-books')), findsOneWidget);
     expect(find.byType(StoryCover), findsNWidgets(2));
     expect(find.byKey(const ValueKey('notes-book-a')), findsOneWidget);
+  });
+
+  testWidgets('把角标拖回同一张笔记：角标亮起吸附高亮，且不会把标签删掉', (tester) async {
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '拖回自己', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final noteKey = store.notes.first.key;
+    final badge = find.byKey(ValueKey('note-badge-$noteKey-疑问'));
+    final card = find.byKey(ValueKey('note-card-$noteKey'));
+    final gesture = await tester.startGesture(tester.getCenter(badge));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(card));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      tester.widget<NoteBadgeChip>(badge).highlighted,
+      isTrue,
+      reason: '拖回自己时应把对应角标标成吸附态',
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Opacity && widget.opacity > 0,
+        description: '拖动中原位留下半透明角标作为吸附提示',
+      ),
+      findsWidgets,
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(store.notes.first.markerBadges.length, 1);
+  });
+
+  testWidgets('拖动排序时其他标签只横向让位，纵向位置保持不变', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '挤位', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final from = find.byKey(const ValueKey('notes-marker-疑问'));
+    final anchor = find.byKey(const ValueKey('notes-marker-感悟'));
+    final shifted = find.byKey(const ValueKey('notes-marker-反驳'));
+    final before = tester.getTopLeft(shifted);
+
+    final gesture = await tester.startGesture(tester.getCenter(from));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(
+      Offset(tester.getTopRight(anchor).dx + 6, tester.getCenter(anchor).dy),
+    );
+    await tester.pumpAndSettle();
+
+    final during = tester.getTopLeft(shifted);
+    expect(during.dy, closeTo(before.dy, 0.01));
+    expect(during.dx, lessThan(before.dx - 4));
+
+    await gesture.up();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('划线视图没有记录时给出可读的空态', (tester) async {
