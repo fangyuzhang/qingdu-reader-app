@@ -725,3 +725,35 @@ flutter test             # 1954 passed / 10 skipped
   - 「我的」页顶部无书友卡，两格快捷入口（章节缓存 / 关于我们）居中铺满；
   - 热力图下方直接是「最近阅读」，没有「我的笔记」卡；
   - 右上角只有 日夜切换 + 设置 两个按钮，点设置正常进入设置页。
+
+# 三十四、v33 批次：代码精简（行为等价，不改接口）
+
+- 版本：`1.0.129 (134)` 覆盖安装；本批只做死代码与重复消除，不改 UI、数据口径和任何公开签名。
+- 总规模：8 个提交，27 个文件，+298 / −2829（净 −2531 行）。
+- 一、死文件（`910d2fb`）：删除 `lib/pages/listen_mode_page.dart`、`lib/services/book_open_preferences.dart`、`lib/services/player_load_diagnostics.dart`、`lib/widgets/home/home_spotlight.dart`、`lib/widgets/home/home_tab_bar.dart` 及 4 个只测它们的用例；依据是 lib + test 全项目零 import、零符号引用。
+- 二、主题配色去重（`edd02ab`）：墨水屏 `ColorScheme` 抽成 `app_theme.dart` 的 `einkColorScheme`，`reader_theme.dart` 改为直接引用，删掉第二份 26 行配色表。
+- 三、短剧遗留组件（`69b72b9`）：删除 `detail_sections.dart` 的 `DetailCastRow` 与 3 个只服务它的私有组件（−161 行），全项目已无调用。
+- 四、书名清洗去重（`c9fa73d`）：`splitTitleAndAuthor` 的两份 44 行副本收敛到 `lib/services/book_title_cleaner.dart`；`imported_book_store.dart` 用 `export` 保持原导入路径可用，调用方不用改。
+- 五、听书菜单去重（`cddee4b`）：有声书字幕与系统朗读的「从本句听」弹层逐行相同，抽成 `_confirmListenFromHere`；两条路径原有的 `mounted` 检查差异按原样保留。
+- 六、批注 / 设置页结构（`44e1bc3`）：
+  - `reader_page.dart` 两处 13 行 `ReaderInlineNote` 构造抽成 `_inlineNoteOf`；
+  - 设置首页与分类页的 Scaffold + AppBar + 卡片 + 分隔线抽成 `SettingsScaffold`（`children` 由页面提供），两页各少一层 `for/if` 嵌套，渲染树与原来一致；
+  - `BookComment.relativeTime` 删掉 `seconds < 0` 分支——它与紧随其后的 `seconds < 60` 都返回「刚刚」，属冗余判断；
+  - 删除零引用的 `appSeedColor`（实际用色在各处已有独立常量）。
+- 七、死成员（`4d00667` / `31a9a67`）：
+  - 删除无人 import 的 `lib/services/player_preferences.dart`（57 行，播放偏好已迁到 `audio_preferences.dart`）；
+  - 删除 `FanqieHistoryImportService.loginAndFetch`（67 行，导入页只走 `pickFile`）、`EpisodeSource.withVariant`、`ShelfDesign.labelControl`、`BookDetail.hasMeta`；
+  - `ReadingCapsuleHost` 的 `_readers` 计数与 `readerActive` 无人读取（胶囊已改为常驻完整形态），一并移除；`enterReader / exitReader` 的通知行为保持不变。
+- 明确跳过（行为不等价或属产品决策）：
+  - `chapter_text_formatter.dart` 与 `imported_book_store.dart` 的块标签集合差一个 `pre`，不合并；
+  - 各 model 里的 `_int`：一份带 `isFinite` 保护、一份带 `fallback` 参数，语义不同，不合并；
+  - `book_comment.dart` / `playlet_comment.dart` 的 payload 解包相似但字段与后续分支不同，不合并；
+  - `detail_snapshot_cache` / `chapter_cache_store` 的 `Chapter` 解析：后者少 4 个字段，不合并；
+  - `ApiClient` 的 `playlet*` / `rankBoard` / `commentsByIds` / `shareShortUrl` / `channelTabs` 等零调用方法：属于保留的后端能力面，标记「待确认」，本轮不删；
+  - 各 model 里的 `_string` 逐字相同（7 份），合并需要给 7 个文件加共享 import，净行数几乎不变，按「低收益」暂不合并；
+  - 两个导出器的渐变画布 8 行重复：宽高与底色常量各自私有，抽公共层收益低于耦合成本，未动。
+- 验证：
+  - `flutter analyze` 全项目 0 问题；
+  - 全量 `flutter test`：通过 1470、跳过 10、失败 15，失败集合与本轮开工前基线完全一致（`comprehensive_ui_loading`×3、`reader_annotation`×2、`reader_paragraph_actions`×5、`reader_system_bars`×5），无新增失败；
+  - APK：签名 / zipalign / ABI / 16 KiB 对齐校验通过；SHA-256 `c3a7abc81dfd16c2127e3a7eac91d4cfe5e382ed1c967b5f5ccd24134d2a7801`，38,524,656 字节；
+  - 真机（Redmi K20 Pro `b2f8e975`）覆盖安装并启动，首页、书架、笔记、我的均正常渲染。
