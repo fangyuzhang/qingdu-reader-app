@@ -794,3 +794,4 @@ flutter test             # 1954 passed / 10 skipped
   - `fqapp-src-1.0.129-20261023.bundle`：含全部提交与标签的 git bundle；
   - `fqapp-src-1.0.129-20261023.tar.gz`：HEAD 源码快照；
   - `qingqie-1.0.129-release.apk`：基准安装包。
+- GitHub 远端：`https://github.com/fangyuzhang/qingqie-reader-app`（私有），`master` 已同步，标签与 Release `baseline-1.0.129-20261023` 附基准 APK；旧仓库 `fangyuzhang/qingqie-reader` 未改动。
