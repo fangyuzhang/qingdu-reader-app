@@ -1,10 +1,10 @@
 # 青茄阅读 · 当前状态交接（AGENT-HANDOVER-NEXT）
 
-> 更新时间：2026-10-23
+> 更新时间：2026-10-24
 > 仓库：`/home/fy/projects/fqapp-src`（WSL2 **原生路径**，不是 `/mnt/c` 上的副本）
 > 远端：`https://github.com/fangyuzhang/qingqie-reader-app`（**私有**）
-> 分支：`master`　HEAD：以 `git log --oneline -1` 为准（本批为「笔记交互重构：多角标 + 拖拽标签」）
-> 版本：`1.0.129+134`　包名：`com.fqapp.fqapp`
+> 分支：`master`　功能基线：`236ca3b`（UI 交互动画）　HEAD：以 `git log --oneline -1` 为准（其后的文档同步提交）
+> 版本：`1.0.131+136`　包名：`com.fqapp.fqapp`
 
 本文是**唯一有效的当前状态说明**。`AGENT-HANDOVER.md` 是早期总交接归档，里面的 HEAD、测试数字、工作树描述都已过期，只能当历史背景读。
 
@@ -14,12 +14,12 @@
 
 | 项 | 值 |
 | --- | --- |
-| 代码状态 | `master` 干净，工作区无残留改动 |
+| 代码状态 | `master` 已提交；功能提交 `236ca3b`，本交接文档随后单独提交，工作区保持干净 |
 | 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1507**、跳过 **10**、失败 **0** |
 | 真机 | Redmi K20 Pro，serial `b2f8e975`（adb 走 Windows 侧 exe） |
-| 基准 APK | 38,524,599 字节，SHA-256 `32abc721675f235304f2e3248cd2ef27ae4ecb059d0653effaab42d28322a7c7`（`/mnt/d/APP/agent/apk/fqapp-v39.apk`，版本 1.0.130+135） |
+| 当前 APK | 38,459,043 字节，SHA-256 `57972b2305c91d2222a2b2d3ed7363af5586a26837cf70a7f25a8e84d5ec1680`（`/mnt/d/APP/agent/apk/fqapp-ui-animation.apk`，版本 1.0.131+136） |
 | APK 校验 | 本批只做了安装与真机截图复核；v35 的静态校验报告仍在 `build/apk-verification/wsl-native-v35/report.json` |
-| 当前批次 | 笔记：书名固定 + 标签独立一行、类型/标签多选筛选、手机式挤位排序、拖回自身卡片的吸附提示 |
+| 当前批次 | UI 动画：书架选中态 / 封面 Hero / 统一弹窗与主题渐变 / 翻页 280ms / 首屏错峰入场 |
 
 接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1507/10/0，再动手。
 
@@ -127,6 +127,7 @@ cd /home/fy/projects/fqapp-src
 | --- | --- |
 | `lib/main.dart` | 入口、底部导航、竖屏锁定、全局主题注入 |
 | `lib/services/app_theme.dart` | `ThemeData` / `ColorScheme` / 文本色 token（浅色 muted `#5E6B64`） |
+| `lib/widgets/app_dialog.dart` | 全应用统一弹窗：180ms 淡入 + 轻微上滑；墨水屏/减少动画瞬时 |
 | `lib/widgets/home/home_design.dart` | 首页配色 `HomePalette`（muted、accentText、soft） |
 | `lib/pages/home_page.dart` | 首页、分类区、`_CategoryRail`（滑到底进全部） |
 | `lib/pages/library_page.dart` | 书架、分组 chip / tab / 版式分段 |
