@@ -59,6 +59,8 @@ cd /home/fy/projects/fqapp-src
 
 - 远端只有一个：`origin` → `https://github.com/fangyuzhang/qingqie-reader-app.git`，**私有仓库**。
 - 历史仓库 `fangyuzhang/fqapp-qingqie`、`fangyuzhang/qingqie-reader` 已停用，不要往那边推。
+- 本机直连 `github.com:443` 会超时（TLS 被中断），推送走镜像：全局 `gitconfig` 已配 `url."https://ghproxy.net/https://github.com/".insteadOf`，仓库内另配了 `credential."https://ghproxy.net".helper`（运行时用 `gh auth token` 取令牌）。`remote.origin.url` 保持标准写法即可，`git remote -v` 显示展开后的 ghproxy 地址属正常。
+- 推送后务必用 `git ls-remote --heads origin master` 核对远端 SHA 等于本地 `git rev-parse HEAD`。
 - 提交粒度：一个批次一条提交，标题用 `area: 结果`，正文写「为什么 / 怎么验 / 影响面」。
 - 文档与代码同批提交：改了行为就同步 `QINGQIE-CHANGES.md`；改了状态就同步本文。
 - 不要执行 `git reset --hard`、`git checkout .`、`git clean -fdx`：`build/`、`release-archives/`、`rust/target/` 虽被忽略，但删掉要重建很久。
