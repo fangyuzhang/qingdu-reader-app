@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fqapp/services/audio_history.dart';
 import 'package:fqapp/services/library_store.dart';
 import 'package:fqapp/services/media_history_store.dart';
-import 'package:fqapp/services/player_history.dart';
 import 'package:fqapp/services/reader_history.dart';
 
 void main() {
@@ -27,7 +26,7 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  for (final kind in ['book', 'manga', 'audio', 'video', 'manju']) {
+  for (final kind in ['book', 'audio']) {
     test('$kind save initiated before clear cannot restore history', () async {
       final saved = _save(store, kind, 'old');
       final cleared = store.clearHistory();
@@ -55,7 +54,7 @@ void main() {
     });
   }
 
-  for (final kind in ['audio', 'video', 'manju']) {
+  for (final kind in ['audio']) {
     for (final clearAll in [false, true]) {
       test('$kind clear during statistics write (all: $clearAll)', () async {
         final readingTime = Hive.box('read_time');
@@ -105,7 +104,7 @@ void main() {
     });
   }
 
-  for (final kind in ['audio', 'manga']) {
+  for (final kind in ['audio']) {
     test(
       '$kind legacy progress copy cannot cross the clear boundary',
       () async {
@@ -199,8 +198,7 @@ void main() {
 
 bool _hasAudioScope(String kind) => kind == 'audio';
 
-bool _hasPlaybackTime(String kind) =>
-    kind == 'audio' || kind == 'video' || kind == 'manju';
+bool _hasPlaybackTime(String kind) => kind == 'audio';
 
 Future<void> _save(
   LibraryStore store,
@@ -218,11 +216,7 @@ Future<void> _save(
   };
   return switch (kind) {
     'audio' => AudioHistory(store).save(entry, listenedSeconds: seconds),
-    'video' ||
-    'manju' => PlayerHistory(store).save(entry, watchedSeconds: seconds),
-    _ => ReaderHistory(
-      kind == 'manga' ? scopedHistoryStore(store, kind) : store,
-    ).save(entry),
+    _ => ReaderHistory(store).save(entry),
   };
 }
 

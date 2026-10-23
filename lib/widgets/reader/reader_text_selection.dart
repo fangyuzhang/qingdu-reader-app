@@ -4,6 +4,7 @@ import 'dart:ui' show BoxHeightStyle, TextBox;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
+import '../../services/reader_mark_style.dart';
 import '../../services/reader_underline_store.dart';
 import 'reader_chapter_layout.dart';
 
@@ -34,12 +35,15 @@ class ReaderTextSelection {
   int get length => end - start;
   bool get isValid => end > start;
 
-  ReaderTextSelection copyWith({int? start, int? end, bool? isWholeParagraph}) =>
-      ReaderTextSelection(
-        start: start ?? this.start,
-        end: end ?? this.end,
-        isWholeParagraph: isWholeParagraph ?? this.isWholeParagraph,
-      );
+  ReaderTextSelection copyWith({
+    int? start,
+    int? end,
+    bool? isWholeParagraph,
+  }) => ReaderTextSelection(
+    start: start ?? this.start,
+    end: end ?? this.end,
+    isWholeParagraph: isWholeParagraph ?? this.isWholeParagraph,
+  );
 
   /// Moves one bound to [offset] within the chapter text of length
   /// [textLength], keeping the selection non-empty: a drag landing exactly on
@@ -136,7 +140,10 @@ int snapToCharacter(String text, int offset) {
   var x = isStart ? 0.0 : columnWidth;
   final leading = block.isTitle ? 0 : 1;
   final boxes = painter.getBoxesForSelection(
-    TextSelection(baseOffset: textOffset + leading, extentOffset: textOffset + leading + 1),
+    TextSelection(
+      baseOffset: textOffset + leading,
+      extentOffset: textOffset + leading + 1,
+    ),
     boxHeightStyle: BoxHeightStyle.tight,
   );
   if (boxes.isNotEmpty) {
@@ -241,7 +248,9 @@ class ReaderSelectionGeometry {
     final entry = _entryAt(global);
     if (entry == null) return null;
     final local = entry.box.globalToLocal(global);
-    final y = local.dy.clamp(0.0, math.max(0.0, entry.block.height - .01)).toDouble();
+    final y = local.dy
+        .clamp(0.0, math.max(0.0, entry.block.height - .01))
+        .toDouble();
     final position = entry.painter.getPositionForOffset(Offset(local.dx, y));
     final leading = entry.block.isTitle ? 0 : 1;
     final textOffset = (position.offset - leading).clamp(
@@ -518,7 +527,7 @@ class ReaderBlockMarkPainter extends CustomPainter {
   final (int, int)? narrationRange;
   final Color narrationColor;
 
-  /// 批注红线颜色（蜗牛读书式）。
+  /// 批注旧数据没有颜色字段时的兜底红色。
   static const annotationColor = Color(0xFFD64545);
 
   const ReaderBlockMarkPainter({
@@ -544,7 +553,10 @@ class ReaderBlockMarkPainter extends CustomPainter {
       final lineEnd = math.min(to, line.end);
       if (lineEnd <= lineStart) continue;
       final boxes = painter.getBoxesForSelection(
-        TextSelection(baseOffset: lineStart + leading, extentOffset: lineEnd + leading),
+        TextSelection(
+          baseOffset: lineStart + leading,
+          extentOffset: lineEnd + leading,
+        ),
         boxHeightStyle: BoxHeightStyle.tight,
       );
       for (final TextBox box in boxes) {
@@ -553,6 +565,64 @@ class ReaderBlockMarkPainter extends CustomPainter {
       }
     }
     return rects;
+  }
+
+  /// 四种原文标记共用同一套字形矩形，只改变落笔方式。
+  void _paintMark(
+    Canvas canvas,
+    Rect rect,
+    ReaderMarkStyle style,
+    Color color,
+  ) {
+    switch (style) {
+      case ReaderMarkStyle.highlighter:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTRB(rect.left, rect.top + 1, rect.right, rect.bottom - 1),
+            const Radius.circular(2.5),
+          ),
+          Paint()..color = color.withValues(alpha: 0.32),
+        );
+      case ReaderMarkStyle.solid:
+        final paint = Paint()
+          ..color = color
+          ..strokeWidth = 1.7
+          ..strokeCap = StrokeCap.round;
+        final y = rect.bottom - .7;
+        canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), paint);
+      case ReaderMarkStyle.dashed:
+        final paint = Paint()
+          ..color = color
+          ..strokeWidth = 1.6
+          ..strokeCap = StrokeCap.round;
+        final y = rect.bottom - .7;
+        const dash = 5.0;
+        const gap = 3.5;
+        for (var x = rect.left; x < rect.right; x += dash + gap) {
+          canvas.drawLine(
+            Offset(x, y),
+            Offset(math.min(x + dash, rect.right), y),
+            paint,
+          );
+        }
+      case ReaderMarkStyle.wavy:
+        final paint = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.45
+          ..strokeCap = StrokeCap.round;
+        final path = Path();
+        final baseY = rect.bottom - 1.2;
+        for (var x = rect.left; x <= rect.right; x += 1) {
+          final y = baseY + math.sin((x - rect.left) * math.pi / 3.5) * 1.25;
+          if (x == rect.left) {
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+          }
+        }
+        canvas.drawPath(path, paint);
+    }
   }
 
   @override
@@ -569,6 +639,29 @@ class ReaderBlockMarkPainter extends CustomPainter {
         );
       }
     }
+    // 荧光笔先铺在文字后方；实线/虚线/波浪线最后压在选区与正文上方。
+    for (final underline in rangeUnderlines) {
+      if (underline.style != ReaderMarkStyle.highlighter) continue;
+      final range = blockSelectionRange(block, underline.start, underline.end);
+      if (range == null) continue;
+      final color = underline.colorValue == 0
+          ? underlineColor
+          : Color(underline.colorValue);
+      for (final rect in _lineRects(range.$1, range.$2)) {
+        _paintMark(canvas, rect, underline.style, color);
+      }
+    }
+    for (final note in annotationRanges) {
+      if (note.style != ReaderMarkStyle.highlighter) continue;
+      final range = blockSelectionRange(block, note.start, note.end);
+      if (range == null) continue;
+      final color = note.colorValue == 0
+          ? annotationColor
+          : Color(note.colorValue);
+      for (final rect in _lineRects(range.$1, range.$2)) {
+        _paintMark(canvas, rect, note.style, color);
+      }
+    }
     final wash = Paint()..color = washColor;
     final selection = selectionRange;
     if (selection != null) {
@@ -579,28 +672,27 @@ class ReaderBlockMarkPainter extends CustomPainter {
         );
       }
     }
-    final line = Paint()
-      ..color = underlineColor
-      ..strokeWidth = 1.6;
     for (final underline in rangeUnderlines) {
+      if (underline.style == ReaderMarkStyle.highlighter) continue;
       final range = blockSelectionRange(block, underline.start, underline.end);
       if (range == null) continue;
+      final color = underline.colorValue == 0
+          ? underlineColor
+          : Color(underline.colorValue);
       for (final rect in _lineRects(range.$1, range.$2)) {
-        // Sit the stroke just under the glyphs, inside the line box.
-        final y = rect.bottom - .5;
-        canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), line);
+        _paintMark(canvas, rect, underline.style, color);
       }
     }
-    // 【青茄重构·新增】批注/书摘红线（2px，压在划线之上）。
-    final annot = Paint()
-      ..color = annotationColor
-      ..strokeWidth = 2;
+    // 批注默认实线横线；用户可在编辑器里改线型与颜色。
     for (final note in annotationRanges) {
+      if (note.style == ReaderMarkStyle.highlighter) continue;
       final range = blockSelectionRange(block, note.start, note.end);
       if (range == null) continue;
+      final color = note.colorValue == 0
+          ? annotationColor
+          : Color(note.colorValue);
       for (final rect in _lineRects(range.$1, range.$2)) {
-        final y = rect.bottom - 1;
-        canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), annot);
+        _paintMark(canvas, rect, note.style, color);
       }
     }
   }

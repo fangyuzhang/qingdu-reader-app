@@ -289,8 +289,7 @@ class AppLog with WidgetsBindingObserver {
   }
 
   /// `/_session/<capability>/…` — the per-launch loopback capability.
-  static final _sessionPathPattern =
-      RegExp(r'''/_session/[^/\s?#'"<>]+''');
+  static final _sessionPathPattern = RegExp(r'''/_session/[^/\s?#'"<>]+''');
 
   /// `Authorization: [Bearer ]<credential>` (case-insensitive).
   static final _authorizationPattern = RegExp(
@@ -298,9 +297,7 @@ class AppLog with WidgetsBindingObserver {
   );
 
   /// Bare `Bearer <credential>` without an `Authorization:` prefix.
-  static final _bareBearerPattern = RegExp(
-    r'''([Bb]earer\s+)[^\s"'\n,;]+''',
-  );
+  static final _bareBearerPattern = RegExp(r'''([Bb]earer\s+)[^\s"'\n,;]+''');
 
   /// `Cookie: <whole header value>` — redacted to end of line.
   static final _cookiePattern = RegExp(r'([Cc]ookie\s*[:=]\s*)[^\n]*');
@@ -443,7 +440,7 @@ class AppLog with WidgetsBindingObserver {
     'W' => LogLevel.warn,
     'I' => LogLevel.info,
     _ => LogLevel.debug,
-};
+  };
 
   /// 当前落盘日志文件路径（未开启持久化为 null）。
   String? get filePath => _file?.currentPath;
@@ -489,10 +486,17 @@ class AppLog with WidgetsBindingObserver {
   @visibleForTesting
   Future<void> resetForTest() async {
     uninstall();
-    // 先让落盘队列跑完再 close：close 与在途 flush 并发同样会抛 StreamSink 错误。
-    await _pendingWrite.catchError((Object _) {});
-    await _file?.close();
+    // A previous widget test may leave a no-op write chain parked in its fake
+    // async zone. With no open writer there is nothing to flush or close, so
+    // detach that chain instead of awaiting a future that cannot complete in
+    // the current test zone.
+    final writer = _file;
     _file = null;
+    if (writer != null) {
+      // 先让落盘队列跑完再 close：close 与在途 flush 并发同样会抛 StreamSink 错误。
+      await _pendingWrite.catchError((Object _) {});
+      await writer.close();
+    }
     _pendingWrite = Future<void>.value();
     _dirty = false;
     _history.clear();

@@ -3,7 +3,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../home/home_design.dart';
 
-/// Bottom action bar: secondary actions (听书 / 下载) on the left and the
+/// Bottom action bar: secondary actions (听书 / 加入书架) on the left and the
 /// primary read / play call to action as a filled pill on the right.
 class DetailReadBar extends StatelessWidget {
   final String label;
@@ -15,12 +15,11 @@ class DetailReadBar extends StatelessWidget {
   /// Opens the listening page. Hidden when the work has no audio version.
   final VoidCallback? onListen;
 
-  /// Starts (or stops) the whole-book download. The range sheet stays with the
-  /// reader, where picking a batch size still makes sense.
-  final VoidCallback? onDownload;
+  /// Adds or removes the work from the local shelf.
+  final VoidCallback? onShelf;
 
-  /// Running whole-book batch: its progress replaces the static download icon.
-  final ({int completed, int total})? download;
+  /// Whether the work is already on the shelf; switches the icon and label.
+  final bool inShelf;
 
   const DetailReadBar({
     super.key,
@@ -30,8 +29,8 @@ class DetailReadBar extends StatelessWidget {
     required this.onRead,
     this.resumeTitle,
     this.onListen,
-    this.onDownload,
-    this.download,
+    this.onShelf,
+    this.inShelf = false,
   });
 
   @override
@@ -45,17 +44,15 @@ class DetailReadBar extends StatelessWidget {
           label: '听书',
           keyName: '听书',
           onTap: onListen!,
-          progress: null,
+          emphasized: false,
         ),
-      if (onDownload != null)
+      if (onShelf != null)
         (
-          icon: LucideIcons.download,
-          label: download == null
-              ? '下载'
-              : '缓存 ${download!.completed}/${download!.total}',
-          keyName: '下载',
-          onTap: onDownload!,
-          progress: download == null ? null : _fraction(download!),
+          icon: inShelf ? LucideIcons.bookmark_check : LucideIcons.bookmark_plus,
+          label: inShelf ? '已在书架' : '加入书架',
+          keyName: '加入书架',
+          onTap: onShelf!,
+          emphasized: true,
         ),
     ];
     return RepaintBoundary(
@@ -124,7 +121,7 @@ class DetailReadBar extends StatelessWidget {
                           label: action.label,
                           keyName: action.keyName,
                           onTap: action.onTap,
-                          progress: action.progress,
+                          emphasized: action.emphasized,
                           compact: largeType,
                         ),
                         Container(
@@ -230,14 +227,15 @@ class _SecondaryAction extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  /// Stable identifier for the widget key: a running download puts its progress
-  /// into [label], so the label itself cannot be the key.
+  /// Stable identifier for the widget key; the label may change (e.g. 加入书架
+  /// vs 已在书架) while the key stays the same.
   final String keyName;
   final VoidCallback onTap;
   final bool compact;
 
-  /// 0..1 while a whole-book batch runs; null falls back to [icon].
-  final double? progress;
+  /// 加入书架 is the primary secondary action, so it gets a slightly larger
+  /// icon, label and horizontal padding.
+  final bool emphasized;
 
   const _SecondaryAction({
     required this.icon,
@@ -245,41 +243,33 @@ class _SecondaryAction extends StatelessWidget {
     required this.keyName,
     required this.onTap,
     required this.compact,
-    this.progress,
+    this.emphasized = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    final progress = this.progress;
     return HomePressable(
       key: Key('detail_action_$keyName'),
       semanticLabel: label,
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        padding: EdgeInsets.symmetric(
+          horizontal: emphasized ? 8 : 4,
+          vertical: emphasized ? 4 : 6,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (progress == null)
-              Icon(icon, size: 19, color: palette.ink)
-            else
-              SizedBox.square(
-                dimension: 19,
-                child: CircularProgressIndicator(
-                  value: progress.clamp(0.0, 1.0).toDouble(),
-                  strokeWidth: 2,
-                  color: palette.ink,
-                ),
-              ),
+            Icon(icon, size: emphasized ? 22 : 19, color: palette.ink),
             if (!compact) ...[
               const SizedBox(height: 3),
               Text(
                 label,
                 style: TextStyle(
                   color: palette.ink,
-                  fontSize: 10.5,
+                  fontSize: emphasized ? 11.5 : 10.5,
                   height: 1.25,
                 ),
               ),
@@ -291,16 +281,11 @@ class _SecondaryAction extends StatelessWidget {
   }
 }
 
-/// A secondary action: what it shows, what it opens, and — for a running
-/// whole-book download — the batch progress the entry renders in place of its
-/// static icon.
+/// A secondary action: what it shows and what it opens.
 typedef _Secondary = ({
   IconData icon,
   String label,
   String keyName,
   VoidCallback onTap,
-  double? progress,
+  bool emphasized,
 });
-
-double _fraction(({int completed, int total}) download) =>
-    download.total == 0 ? 0 : download.completed / download.total;

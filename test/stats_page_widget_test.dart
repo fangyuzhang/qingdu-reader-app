@@ -61,64 +61,12 @@ void main() {
     });
   }
 
-  for (final media in const {'audio': '听书', 'manga': '漫画'}.entries) {
-    testWidgets(
-      'retained ${media.key} statistics reopen the original content ID',
-      (tester) async {
-        await tester.runAsync(
-          () => LibraryStore.instance.accumulateReadTime(
-            '${media.key}:shared',
-            media.key,
-            60,
-          ),
-        );
-        final observer = _StatsRouteObserver();
-        await tester.pumpWidget(
-          MaterialApp(
-            navigatorObservers: [observer],
-            home: const Scaffold(body: StatsPage()),
-          ),
-        );
-        await tester.pumpAndSettle();
-        final context = tester.element(find.byType(StatsPage));
-        final showAll = find.widgetWithText(TextButton, '查看全部');
-        await tester.scrollUntilVisible(
-          showAll,
-          400,
-          scrollable: find
-              .descendant(
-                of: find.byType(StatsPage),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        );
-        await tester.pumpAndSettle();
-        await tester.ensureVisible(showAll);
-        await tester.pumpAndSettle();
-        await tester.tap(showAll.hitTestable());
-        await tester.pumpAndSettle();
-        await tester.tap(
-          find.descendant(
-            of: find.byType(SimpleDialog),
-            matching: find.text('${media.value} shared'),
-          ),
-        );
-        final page =
-            (observer.lastRoute! as MaterialPageRoute).builder(context)
-                as DetailPage;
-        expect(page.item.id, 'shared');
-        expect(page.item.kind, media.key);
-        await tester.pumpWidget(const SizedBox.shrink());
-      },
-    );
-  }
-
-  testWidgets('read-time-only statistics reopen with the recorded kind', (
+  testWidgets('audio statistics reopen the original content ID', (
     tester,
   ) async {
     await tester.runAsync(
       () =>
-          LibraryStore.instance.accumulateReadTime('orphan-video', 'video', 60),
+          LibraryStore.instance.accumulateReadTime('audio:shared', 'audio', 60),
     );
     final observer = _StatsRouteObserver();
     await tester.pumpWidget(
@@ -148,15 +96,42 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(SimpleDialog),
-        matching: find.text('orphan-video'),
+        matching: find.text('听书 shared'),
       ),
     );
     final page =
         (observer.lastRoute! as MaterialPageRoute).builder(context)
             as DetailPage;
-    expect(page.item.id, 'orphan-video');
-    expect(page.item.kind, 'video');
+    expect(page.item.id, 'shared');
+    expect(page.item.kind, 'audio');
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('legacy video statistics stay hidden from the product UI', (
+    tester,
+  ) async {
+    await tester.runAsync(
+      () =>
+          LibraryStore.instance.accumulateReadTime('orphan-video', 'video', 60),
+    );
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: StatsPage())),
+    );
+    await tester.pumpAndSettle();
+    final showAll = find.widgetWithText(TextButton, '查看全部');
+    await tester.scrollUntilVisible(
+      showAll,
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(StatsPage),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextButton>(showAll).onPressed, isNull);
+    expect(find.text('orphan-video'), findsNothing);
   });
 }
 

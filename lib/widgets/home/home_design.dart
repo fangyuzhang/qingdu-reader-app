@@ -27,15 +27,31 @@ class HomePalette {
       : (dark ? const Color(0xFF0F1413) : const Color(0xFFFAFBF6));
   Color get surface =>
       eink ? Colors.white : (dark ? const Color(0xFF171E1C) : Colors.white);
-  Color get ink =>
-      eink ? Colors.black : (dark ? const Color(0xFFF1F5F2) : const Color(0xFF212824));
-  Color get muted =>
-      eink ? Colors.black : (dark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73));
+  Color get ink => eink
+      ? Colors.black
+      : (dark ? const Color(0xFFF1F5F2) : const Color(0xFF212824));
+  Color get muted => eink
+      ? Colors.black
+      : (dark ? const Color(0xFF98A5A0) : const Color(0xFF6C7A73));
   Color get accentText => eink ? Colors.black : (dark ? accent : accentStrong);
-  Color get soft =>
-      eink ? Colors.white : (dark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC));
-  Color get line =>
-      eink ? Colors.black : (dark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1));
+  Color get soft => eink
+      ? Colors.white
+      : (dark ? const Color(0xFF1B2421) : const Color(0xFFEEF3EC));
+  Color get line => eink
+      ? Colors.black
+      : (dark ? const Color(0xFF2A3330) : const Color(0xFFE3E9E1));
+
+  // 筛选 chip 的统一配色，取自听书页的音色卡：未选是比底色更暗的一层，
+  // 选中抬成 surface 并加一圈主色描边，视线自然落在当前选择上。
+  Color get chipFill =>
+      eink ? Colors.white : line.withValues(alpha: dark ? 0.45 : 0.55);
+  Color get chipSelectedFill => eink ? Colors.white : surface;
+  BorderSide chipBorder(bool selected) => BorderSide(
+    color: selected
+        ? (eink ? Colors.black : accentText.withValues(alpha: 0.55))
+        : Colors.transparent,
+    width: selected ? (eink ? 1.4 : 1.2) : 0,
+  );
 }
 
 /// Pointer, keyboard and accessibility activation share the same action.

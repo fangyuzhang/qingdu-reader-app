@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/media_item.dart';
 import 'chapter_cache_store.dart';
 import 'chapter_text_formatter.dart';
+import 'readable_chapter_resolver.dart';
 
 /// Progress of one chapter batch, in the shape both surfaces render: the
 /// reader's cache panel and the detail page's download action.
@@ -15,6 +16,7 @@ class ChapterDownloadState {
     this.completed = 0,
     this.total = 0,
     this.incompleteImages = 0,
+    this.skipped = 0,
     this.message,
   });
 
@@ -24,6 +26,9 @@ class ChapterDownloadState {
 
   /// Saved without fresh illustrations: one online view still refreshes them.
   final int incompleteImages;
+
+  /// Catalogue entries that contained only their title and were not cached.
+  final int skipped;
 
   /// Final report, or the stop notice. Null before the first batch and while
   /// one is still running.
@@ -76,8 +81,13 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
         .skip(startIndex.clamp(0, book.chapters.length))
         .take(count <= 0 ? 0 : count)
         .toList(growable: false);
+    final resolver = ReadableChapterResolver(
+      chapters: book.chapters,
+      loadText: loader,
+    );
     var completed = 0;
     var incompleteImages = 0;
+    var skipped = 0;
     value = ChapterDownloadState(running: true, total: chapters.length);
     try {
       await cache.saveBook(book);
@@ -91,16 +101,36 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
         if (!_alive(job)) return;
         var content = _readCachedChapter(cached, chapter.title);
         var shouldWrite = false;
+        String? cachedText;
         if (content == null || content.needsImageRefresh()) {
           final text = await loader(
             chapter,
           ).timeout(const Duration(seconds: 30));
           if (!_alive(job)) return;
-          final fetched = ChapterContent.isStructuredCache(text)
-              ? ChapterContent.fromCacheText(text)
-              : ChapterContent.fromPlainText(text, illustrationsChecked: false);
-          if (fetched.withoutLeadingTitle(chapter.title).isEmpty) {
-            throw StateError('章节正文为空');
+          final fetched = resolver.parse(text);
+          if (fetched.isEmpty) throw const EmptyChapterBodyException();
+          if (!fetched.hasReadableBody(chapter.title)) {
+            // Keep the tiny title page in the offline catalogue so a later
+            // offline open can walk through it to the real next chapter. It is
+            // not counted as a saved reading chapter in the report.
+            await cache.write(
+              bookId: book.id,
+              chapterId: chapter.itemId,
+              title: chapter.title,
+              text: fetched.toCacheText(),
+              pinned: pin,
+            );
+            if (!_alive(job)) return;
+            completed++;
+            skipped++;
+            value = ChapterDownloadState(
+              running: true,
+              completed: completed,
+              total: chapters.length,
+              incompleteImages: incompleteImages,
+              skipped: skipped,
+            );
+            continue;
           }
           // A reader refresh may have completed while the batch was fetching.
           final latest = await cache.read(
@@ -111,8 +141,9 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
           final previous = _readCachedChapter(latest, chapter.title);
           content = fetched.preferCompleteCache(previous);
           shouldWrite = !identical(content, previous);
+          if (identical(content, fetched)) cachedText = text;
         }
-        final cachedText = content.toCacheText();
+        cachedText ??= content.toCacheText();
         // Publish before queuing the disk write so older reader requests can
         // no longer queue a stale write behind it.
         onContentAvailable?.call(chapter, cachedText);
@@ -133,6 +164,7 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
           completed: completed,
           total: chapters.length,
           incompleteImages: incompleteImages,
+          skipped: skipped,
         );
       }
       if (!_alive(job)) return;
@@ -140,15 +172,20 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
         completed: completed,
         total: chapters.length,
         incompleteImages: incompleteImages,
-        message: incompleteImages == 0
-            ? '缓存完成，可从书架的离线缓存入口继续阅读'
-            : '已保存 $completed/${chapters.length} 章，其中 $incompleteImages 章插图未更新，联网后可重试',
+        skipped: skipped,
+        message: _completionMessage(
+          completed: completed,
+          total: chapters.length,
+          incompleteImages: incompleteImages,
+          skipped: skipped,
+        ),
       );
     } catch (_) {
       if (_alive(job)) {
         value = ChapterDownloadState(
           completed: completed,
           total: chapters.length,
+          skipped: skipped,
           message: '缓存未完成，已保存 $completed/${chapters.length} 章。检查网络后可重试',
         );
       }
@@ -163,6 +200,7 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
       completed: state.completed,
       total: state.total,
       incompleteImages: state.incompleteImages,
+      skipped: state.skipped,
       message: '已停止缓存，已保存的章节会保留',
     );
   }
@@ -175,6 +213,23 @@ class ChapterDownload extends ValueNotifier<ChapterDownloadState> {
   }
 
   bool _alive(int job) => !_disposed && job == _job;
+
+  String _completionMessage({
+    required int completed,
+    required int total,
+    required int incompleteImages,
+    required int skipped,
+  }) {
+    final saved = completed - skipped;
+    if (saved == 0) {
+      return skipped == 0 ? '没有可缓存的章节' : '未发现可缓存正文，已跳过 $skipped 个无正文页';
+    }
+    final skipNote = skipped == 0 ? '' : '，跳过 $skipped 个无正文页';
+    if (incompleteImages == 0) {
+      return '缓存完成，已保存 $saved/$total 章$skipNote，可从书架的离线缓存入口继续阅读';
+    }
+    return '已保存 $saved/$total 章$skipNote，其中 $incompleteImages 章插图未更新，联网后可重试';
+  }
 }
 
 /// The whole-book batch a detail page started.

@@ -10,10 +10,10 @@
 
 ## 1. 项目与技术基线
 
-- fqapp 是内容聚合 Android 客户端，提供小说阅读、听书、短剧、漫剧和漫画。Flutter UI 通过 flutter_rust_bridge 调用进程内 Rust 核心 `fqapi_core`；`127.0.0.1:8080` loopback 服务承载 Web UI 与漫画图。无需 root，不部署独立后端进程。
+- 青茄阅读是面向 12–18 岁的 Android 阅读客户端，只提供小说阅读与听书。短剧、漫剧、漫画已从全部用户入口和客户端页面删除；底层 CENC/Media3 与 `libshortplay_crypto.so` 仅保留给加密听书和正文解密。Flutter UI 通过 flutter_rust_bridge 调用进程内 Rust 核心 `fqapi_core`；`127.0.0.1:8080` loopback 服务承载内置 Web 阅读页。无需 root，不部署独立后端进程。
 - 提供只读的番茄账号导入（网页登录后读取书架/历史/进度，不回写账号）；除此之外不提供登录或上游账号写操作。已裁撤的追剧、点赞、分享等入口不作为待办恢复。已有本机书架与详情页收藏按现有产品范围保留；没有真实能力时不放占位控件。
-- 基线：Flutter **3.44.6 stable**、Dart **^3.12.2**、Rust stable；FRB 的 Rust crate、Dart 包和 codegen **统一固定 2.13.0**。
-- Android：SDK 36、NDK **28.2.13676358**、JDK 17、Gradle **9.1.0**；仅构建 `arm64-v8a`。原生 C CENC 库由 CMake 生成 `libshortplay_crypto.so`，原生库须满足 **16 KiB** 对齐。
+- 基线：Flutter **3.47.7 stable**（Dart 3.13.5）、pubspec SDK **^3.12.2**、Rust stable；FRB 的 Rust crate、Dart 包和 codegen **统一固定 2.13.0**。
+- Android：SDK 36、NDK **28.2.13676358**、JDK 17、Gradle **9.1.0**；仅构建 `arm64-v8a`。原生 C CENC 库由 CMake 生成 `libshortplay_crypto.so`（名称沿用上游，实际服务加密听书），原生库须满足 **16 KiB** 对齐。
 - 状态存储使用 Hive（`LibraryStore`）与 SharedPreferences。依赖、工具链或架构调整须服务于当前任务，不顺手升级。
 
 | 路径 | 职责 |
@@ -72,11 +72,11 @@
 1. **版本**：用户可见功能变更递增 `pubspec.yaml` 的 `version: <versionName>+<versionCode>`，同步核对 About 页版本展示。仅文档或无行为变化的整理不升版。
 2. **Rust 库新鲜度**：检查 `git log --oneline <上一归档提交或标签>..HEAD -- rust/`，同时检查未提交及新增的 Rust 文件。Rust 已改变、`.so` 缺失或无法证明来源时，执行 `scripts/build_rust_backend.ps1` 重建；仅 Dart 改动且库已证实匹配时可复用。Gradle 只检查 `.so` 存在，不会重编 Rust。
 3. **原生校验**：重建后运行 `node scripts/check_native_alignment.cjs android/app/src/main/jniLibs/arm64-v8a/libfqapi_core.so`。可用 `node scripts/check_so_freshness.cjs <so路径> --since <归档提交或标签>` 辅查提交时间，但时间戳不能证明未提交代码已编入。
-4. **打包**：执行 `flutter build apk --release --target-platform android-arm64 --no-pub`，然后运行 `python scripts/verify_android_apk.py --apk <APK路径> --build-tools <SDK构建工具目录> --report-dir <报告目录> --expected-signer-sha256 <正式证书SHA256>`。占位符须替换为实际值；正式证书指纹核对 `.github/workflows/android-apk.yml` 与本地签名记录，不输出密码。
+4. **打包**：优先执行 `tool/build_release.ps1`；脚本要求正式签名材料，构建 `arm64-v8a` release APK 并自动调用 `scripts/verify_android_apk.py`。正式签名缺失时必须失败，禁止回退 Android debug 证书。证书指纹核对 CI 与本地签名记录，不输出密码。
 5. **安装验收**：在用户已授权的设备上使用 `adb -s <设备序列号> install -r <APK路径>`，核对包名 `com.fqapp.fqapp`、版本和实际画面。点击、滑动或返回前重新确认前台包名；用户切到其他应用时停止输入。以截图 / UI XML 证明页面状态，日志只作辅助；不要为覆盖安装擅自卸载应用或清除数据。
-6. **归档**：验收后立即将 APK、`SHA256SUMS` 和实际验证报告保存到 `release-archives/<tag>/`，注明对应提交及未验项。目录名不代表已创建 Git tag 或已发布 Release；不得覆盖已有归档。
+6. **归档**：验收后将 APK、`SHA256SUMS`、`VERIFICATION.md` 和 `report.json` 保存到新的 `release-archives/<tag>/`，注明对应提交及未验项。目录名不代表已创建 Git tag 或已发布 Release；不得覆盖已有归档。
 
-构建故障先查本地 CRIT-011 / CRIT-012；签名细节见 `docs/release-signing.md`，完整流程见 `docs/运维/构建与发布.md`。
+构建故障先查本地 CRIT-011 / CRIT-012；签名与完整 release 构建流程见仓库根目录 `README.md` 的“构建”一节。
 
 ## 6. Git 与发布边界
 

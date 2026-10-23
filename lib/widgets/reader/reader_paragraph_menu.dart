@@ -42,6 +42,10 @@ enum ReaderParagraphAction {
 class ReaderParagraphMenu extends StatelessWidget {
   /// See `res/layout/wt.xml`.
   static const _itemWidth = 60.0;
+
+  /// 「从本段开始听书」比其它标签长，单独加宽；整条操作栏的宽度与
+  /// [resolvePosition] 都按同一组宽度计算，避免文字压到相邻按钮。
+  static const _listenItemWidth = 84.0;
   static const _itemHeight = 48.0;
   static const _iconSize = 24.0;
   static const _labelTopGap = 2.0;
@@ -107,10 +111,30 @@ class ReaderParagraphMenu extends StatelessWidget {
     required bool paragraphScoped,
     bool showListening = true,
   }) {
-    // 【青茄重构】新增 批注/书摘 两个常驻动作（+2）。
-    final base = paragraphScoped ? (showListening ? 3 : 2) : 2;
-    return base + 2;
+    // 【青茄重构】监听项只要 showListening 就显示（不再区分整段 / 选区），
+    // 另有 复制 / 划线 / 批注 / 书摘 四个常驻动作。
+    return 4 + (showListening ? 1 : 0);
   }
+
+  static double _barWidth({required bool showListening}) =>
+      itemCount(
+            underlined: false,
+            paragraphScoped: true,
+            showListening: showListening,
+          ) *
+          _itemWidth +
+      (showListening ? _listenItemWidth - _itemWidth : 0) +
+      _multiPadding * 2;
+
+  static double barWidthFor({
+    required bool underlined,
+    required bool paragraphScoped,
+    bool showListening = true,
+  }) => _barWidth(showListening: showListening);
+
+  /// 操作条整体高度（含朝向段落一侧的箭头）。
+  static const double barHeight =
+      _verticalPadding * 2 + _itemHeight + _arrowHeight;
 
   /// Clamped top-left for the bar anchored at [anchor] (window coordinates),
   /// plus which side of the anchor it ended up on — the geometry
@@ -134,19 +158,16 @@ class ReaderParagraphMenu extends StatelessWidget {
     required bool underlined,
     bool showListening = true,
     double avoidBottom = 0,
+    double belowContentHeight = 0,
   }) {
     const flipClearance = 10.0;
-    final count = itemCount(
-      underlined: underlined,
-      paragraphScoped: paragraphScoped,
-      showListening: showListening,
-    );
-    final barWidth = count * _itemWidth + _multiPadding * 2;
+    final barWidth = _barWidth(showListening: showListening);
     // Only the tip facing the paragraph is laid out, exactly like `m.java`:
     // it calls `UIKt.gone` on the other arrow, which takes no space. Total
     // height is 8 (tip) + 56 (body) = 64dp, the same 64dp `m.java` uses when
     // it offsets the popup above the anchor.
-    final barHeight = _verticalPadding * 2 + _itemHeight + _arrowHeight;
+    const barHeight = ReaderParagraphMenu.barHeight;
+    final columnHeight = barHeight + belowContentHeight;
 
     final minLeft = _margin;
     final maxLeft = (view.width - barWidth - _margin).clamp(
@@ -157,14 +178,15 @@ class ReaderParagraphMenu extends StatelessWidget {
 
     final minTop = safeArea.top + _margin;
     final bottomLimit = view.height - safeArea.bottom - avoidBottom - _margin;
-    final maxTop = (bottomLimit - barHeight).clamp(minTop, double.infinity);
+    final maxTop = (bottomLimit - columnHeight).clamp(minTop, double.infinity);
     final belowTop = anchor.dy + _arrowHeight;
-    final below = belowTop + barHeight <= bottomLimit;
+    final below = belowTop + columnHeight <= bottomLimit;
     // Flipped above a selection: the bar's bottom (its down arrow) must sit
     // above the selection's first line top — the start caret's dot protrudes
     // 6dp above it, hence the extra clearance.
-    final flippedTop = (topAnchor?.dy ?? anchor.dy) -
-        barHeight -
+    final flippedTop =
+        (topAnchor?.dy ?? anchor.dy) -
+        columnHeight -
         _arrowHeight -
         (topAnchor == null ? 0 : flipClearance);
     final top = (below ? belowTop : flippedTop).clamp(minTop, maxTop);
@@ -197,11 +219,12 @@ class ReaderParagraphMenu extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (paragraphScoped && showListening)
+              if (showListening)
                 _Item(
                   key: const ValueKey('reader-action-listen'),
                   icon: LucideIcons.headphones,
-                  label: '从本段听',
+                  label: '从本段开始听书',
+                  width: _listenItemWidth,
                   onTap: () => onAction(ReaderParagraphAction.listen),
                 ),
               _Item(
@@ -212,12 +235,8 @@ class ReaderParagraphMenu extends StatelessWidget {
               ),
               _Item(
                 key: const ValueKey('reader-action-underline'),
-                icon: underlined
-                    ? LucideIcons.eraser
-                    : LucideIcons.highlighter,
-                label: underlined
-                    ? (paragraphScoped ? '取消划线' : '删除划线')
-                    : '划线',
+                icon: underlined ? LucideIcons.eraser : LucideIcons.highlighter,
+                label: underlined ? (paragraphScoped ? '取消划线' : '删除划线') : '划线',
                 onTap: () => onAction(
                   underlined
                       ? ReaderParagraphAction.removeUnderline
@@ -304,6 +323,7 @@ class _ArrowPainter extends CustomPainter {
 class _Item extends StatelessWidget {
   final IconData icon;
   final String label;
+  final double width;
   final VoidCallback onTap;
 
   const _Item({
@@ -311,6 +331,7 @@ class _Item extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.width = ReaderParagraphMenu._itemWidth,
   });
 
   @override
@@ -318,22 +339,33 @@ class _Item extends StatelessWidget {
     onTap: onTap,
     borderRadius: BorderRadius.circular(8),
     child: SizedBox(
-      width: ReaderParagraphMenu._itemWidth,
+      width: width,
       height: ReaderParagraphMenu._itemHeight,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: ReaderParagraphMenu._iconSize,
-              color: ReaderParagraphMenu._foreground),
+          Icon(
+            icon,
+            size: ReaderParagraphMenu._iconSize,
+            color: ReaderParagraphMenu._foreground,
+          ),
           const SizedBox(height: ReaderParagraphMenu._labelTopGap),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.visible,
-            style: const TextStyle(
-              color: ReaderParagraphMenu._foreground,
-              fontSize: ReaderParagraphMenu._labelSize,
-              height: 1.0,
+          // 大字号 / 窄屏下让标签在自己的格子里等比缩小，既不压到
+          // 相邻按钮，也不产生 RenderFlex 溢出。
+          SizedBox(
+            width: width - 4,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  color: ReaderParagraphMenu._foreground,
+                  fontSize: ReaderParagraphMenu._labelSize,
+                  height: 1.0,
+                ),
+              ),
             ),
           ),
         ],

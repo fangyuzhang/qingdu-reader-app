@@ -9,8 +9,10 @@ import 'package:fqapp/models/chapter_ideas.dart';
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/reader_page.dart';
 import 'package:fqapp/services/library_store.dart';
+import 'package:fqapp/services/listening_session.dart';
 import 'package:fqapp/services/chapter_cache_store.dart';
 import 'package:fqapp/services/chapter_text_formatter.dart';
+import 'package:fqapp/widgets/reader/reader_text_selection.dart';
 
 import 'support/fakes.dart';
 
@@ -48,6 +50,63 @@ void main() {
     expect(find.textContaining('这是 第一章 的正文。'), findsOneWidget);
     expect(attempts, 2);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('有声书朗读时正文段落会被高亮', (tester) async {
+    SharedPreferences.setMockInitialValues({'reader_page_mode': 'scroll'});
+    ListeningSession.instance.clear();
+    addTearDown(ListeningSession.instance.clear);
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      _readerApp(
+        chapterLoader: (chapter) async => [
+          chapter.title,
+          '第一段。',
+          '第二段话在这里。',
+          for (var i = 0; i < 30; i++) '这是用来把本章撑得比视口更长的第 $i 段。',
+        ].join('\n\n'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    ListeningSession.instance.update(
+      bookId: 'reader-test',
+      chapterId: 'chapter-1',
+      chapterTitle: '第一章',
+      position: const Duration(seconds: 30),
+      duration: const Duration(seconds: 60),
+      playing: true,
+      narrationText: '第二段话在这里。',
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    final layers = tester.widgetList<ReaderBlockMarkLayer>(
+      find.byType(ReaderBlockMarkLayer),
+    );
+    expect(layers, isNotEmpty);
+    expect(layers.any((layer) => layer.narrationRange != null), isTrue);
+    // 暂停后仍保留最后一句的高亮，方便读者对照原文。
+    ListeningSession.instance.update(
+      bookId: 'reader-test',
+      chapterId: 'chapter-1',
+      chapterTitle: '第一章',
+      position: const Duration(seconds: 30),
+      duration: const Duration(seconds: 60),
+      playing: false,
+      narrationText: '第二段话在这里。',
+    );
+    await tester.pump();
+    final pausedLayers = tester.widgetList<ReaderBlockMarkLayer>(
+      find.byType(ReaderBlockMarkLayer),
+    );
+    expect(pausedLayers.any((layer) => layer.narrationRange != null), isTrue);
+    // 停止听书后高亮消失。
+    ListeningSession.instance.clear();
+    await tester.pump();
+    final clearedLayers = tester.widgetList<ReaderBlockMarkLayer>(
+      find.byType(ReaderBlockMarkLayer),
+    );
+    expect(clearedLayers.any((layer) => layer.narrationRange != null), isFalse);
   });
 
   testWidgets(
@@ -112,6 +171,98 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     });
   }
+
+  testWidgets(
+    'a title-only catalog placeholder skips to the next real chapter',
+    (tester) async {
+      final loads = <String>[];
+      final chapters = [
+        Chapter(itemId: 'copyright', title: '版权信息', volumeName: ''),
+        Chapter(itemId: 'placeholder', title: '老人与海', volumeName: ''),
+        Chapter(itemId: 'body', title: '1', volumeName: ''),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderPage(
+            bookId: 'old-man-and-sea',
+            title: '老人与海',
+            chapters: chapters,
+            startIndex: 1,
+            readerStore: _FakeReaderStore(),
+            chapterCache: MemoryChapterCache(),
+            chapterLoader: (chapter) async {
+              loads.add(chapter.itemId);
+              return switch (chapter.itemId) {
+                'placeholder' => '老人与海',
+                'body' => '1\n老人独自在湾流里打鱼，已经八十四天没有收获。',
+                _ => '版权信息\n版权说明。',
+              };
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(loads.take(2), ['placeholder', 'body']);
+      expect(find.textContaining('老人独自在湾流里打鱼'), findsOneWidget);
+      expect(find.text('正文为空'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a truly empty chapter response is never cached', (tester) async {
+    final cache = MemoryChapterCache();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 'empty-book',
+          title: '空正文测试',
+          chapters: [Chapter(itemId: 'empty', title: '第一章', volumeName: '')],
+          startIndex: 0,
+          readerStore: _FakeReaderStore(),
+          chapterCache: cache,
+          chapterLoader: (_) async => '',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('正文为空'), findsOneWidget);
+    expect(cache.content['empty-book']?['empty'], isNull);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('a poisoned empty structured cache is refetched', (tester) async {
+    final cache = MemoryChapterCache();
+    await cache.write(
+      bookId: 'poisoned-book',
+      chapterId: 'chapter',
+      title: '第一章',
+      text: ChapterContent(blocks: const []).toCacheText(),
+    );
+    var loads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 'poisoned-book',
+          title: '旧缓存自愈测试',
+          chapters: [Chapter(itemId: 'chapter', title: '第一章', volumeName: '')],
+          startIndex: 0,
+          readerStore: _FakeReaderStore(),
+          chapterCache: cache,
+          chapterLoader: (_) async {
+            loads++;
+            return '第一章\n旧版本写入的空缓存应被替换为真实正文。';
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(loads, 1);
+    expect(find.textContaining('旧版本写入的空缓存应被替换为真实正文'), findsOneWidget);
+    expect(find.textContaining('正文为空'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('a failed chapter switch preserves the last displayed position', (
     tester,
@@ -564,55 +715,56 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('scroll mode: dragging past the top returns to the previous chapter', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(320, 560));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(_readerApp());
-    await tester.pumpAndSettle();
-    expect(find.textContaining('这是 第一章 的正文。'), findsOneWidget);
+  testWidgets(
+    'scroll mode: dragging past the top returns to the previous chapter',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 560));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(_readerApp());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('这是 第一章 的正文。'), findsOneWidget);
 
-    // The overscroll notifications are dispatched directly: tester.drag does
-    // not produce drag overscroll against this harness, and the
-    // gesture-to-notification path is framework behaviour this fix does
-    // not touch. What changed is the listener's handling of the
-    // notification, which is exactly what is exercised here.
-    final listElement = tester.element(
-      find.byKey(const ValueKey('reader-paragraph-list')),
-    );
-    final scrollable = Scrollable.of(
-      tester.element(find.textContaining('这是 第一章 的正文。')),
-    );
-    OverscrollNotification(
-      metrics: scrollable.position,
-      context: listElement,
-      overscroll: 100,
-      velocity: 0,
-      dragDetails: DragUpdateDetails(globalPosition: Offset.zero),
-    ).dispatch(listElement);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('这是 第二章 的正文。'), findsOneWidget);
+      // The overscroll notifications are dispatched directly: tester.drag does
+      // not produce drag overscroll against this harness, and the
+      // gesture-to-notification path is framework behaviour this fix does
+      // not touch. What changed is the listener's handling of the
+      // notification, which is exactly what is exercised here.
+      final listElement = tester.element(
+        find.byKey(const ValueKey('reader-paragraph-list')),
+      );
+      final scrollable = Scrollable.of(
+        tester.element(find.textContaining('这是 第一章 的正文。')),
+      );
+      OverscrollNotification(
+        metrics: scrollable.position,
+        context: listElement,
+        overscroll: 100,
+        velocity: 0,
+        dragDetails: DragUpdateDetails(globalPosition: Offset.zero),
+      ).dispatch(listElement);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('这是 第二章 的正文。'), findsOneWidget);
 
-    // Dragging past the top retreats to the previous chapter, landing at
-    // its end — this used to do nothing (#27).
-    final listElement2 = tester.element(
-      find.byKey(const ValueKey('reader-paragraph-list')),
-    );
-    final scrollable2 = Scrollable.of(
-      tester.element(find.textContaining('这是 第二章 的正文。')),
-    );
-    OverscrollNotification(
-      metrics: scrollable2.position,
-      context: listElement2,
-      overscroll: -100,
-      velocity: 0,
-      dragDetails: DragUpdateDetails(globalPosition: Offset.zero),
-    ).dispatch(listElement2);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('这是 第一章 的正文。'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      // Dragging past the top retreats to the previous chapter, landing at
+      // its end — this used to do nothing (#27).
+      final listElement2 = tester.element(
+        find.byKey(const ValueKey('reader-paragraph-list')),
+      );
+      final scrollable2 = Scrollable.of(
+        tester.element(find.textContaining('这是 第二章 的正文。')),
+      );
+      OverscrollNotification(
+        metrics: scrollable2.position,
+        context: listElement2,
+        overscroll: -100,
+        velocity: 0,
+        dragDetails: DragUpdateDetails(globalPosition: Offset.zero),
+      ).dispatch(listElement2);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('这是 第一章 的正文。'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Future<void> _openMenu(WidgetTester tester) async {

@@ -10,6 +10,8 @@ import 'package:fqapp/pages/audio_page.dart';
 import 'package:fqapp/pages/reader_page.dart';
 import 'package:fqapp/services/chapter_text_formatter.dart';
 import 'package:fqapp/services/reader_underline_store.dart';
+import 'package:fqapp/services/reader_mark_preferences.dart';
+import 'package:fqapp/services/reader_mark_style.dart';
 import 'package:fqapp/widgets/reader/reader_paged_view.dart';
 import 'package:fqapp/widgets/reader/reader_paragraph_menu.dart';
 import 'package:fqapp/widgets/reader/reader_text_selection.dart';
@@ -162,6 +164,7 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({'reader_page_mode': 'scroll'});
+    ReaderMarkPreferences.instance.resetForTest();
     TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
       AppLifecycleState.resumed,
     );
@@ -338,9 +341,22 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('reader-action-underline')));
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('underline-style-wavy')));
+    await tester.tap(
+      find.byKey(
+        ValueKey('underline-color-${readerMarkColorPresets[1].colorValue}'),
+      ),
+    );
+    await tester.pumpAndSettle();
 
     final ranges = await savedRanges();
     expect(ranges, hasLength(1));
+    expect(ranges.single.style, ReaderMarkStyle.wavy);
+    expect(ranges.single.colorValue, readerMarkColorPresets[1].colorValue);
     expect(ranges.single.text.length, greaterThan('“对不起......”'.length));
     // The action consumed the selection: handles are gone.
     expect(
@@ -358,6 +374,67 @@ void main() {
     expect(await savedRanges(), isEmpty);
     // The paragraph record space stays untouched by range operations.
     expect(store.entries, isEmpty);
+  });
+
+  // 划线面板打开时，面板里高亮的线型/颜色就是用户「已经选好」的预选项。
+  // 用户以为选上了、直接去点正文别处，之前会把这次划线悄悄丢掉。
+  testWidgets('tapping outside the underline panel commits the pre-selection', (
+    tester,
+  ) async {
+    final store = _MemoryUnderlines();
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(store));
+    await tester.pumpAndSettle();
+
+    Future<List<ReaderRangeUnderline>> savedRanges() async => [
+      for (final raw in store.entries.values)
+        ?ReaderRangeUnderline.fromMap(raw),
+    ];
+
+    await _longPressParagraph(tester, 0);
+    await tester.tap(find.byKey(const ValueKey('reader-action-underline')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsOneWidget,
+    );
+
+    // 没有点任何选项，直接点正文别处。
+    await tester.tapAt(const Offset(200, 60));
+    await tester.pumpAndSettle();
+
+    final ranges = await savedRanges();
+    expect(ranges, hasLength(1));
+    expect(ranges.single.style, ReaderMarkStyle.solid);
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('reader-selection-handle-start')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('取消 in the underline panel saves nothing', (tester) async {
+    final store = _MemoryUnderlines();
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(store));
+    await tester.pumpAndSettle();
+
+    await _longPressParagraph(tester, 0);
+    await tester.tap(find.byKey(const ValueKey('reader-action-underline')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('underline-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(store.entries, isEmpty);
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsNothing,
+    );
   });
 
   test('range underline records keep their own key space', () {
@@ -446,11 +523,24 @@ void main() {
     await _longPressParagraph(tester, 0);
     await tester.tap(find.byKey(const ValueKey('reader-action-underline')));
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('underline-style-dashed')));
+    await tester.tap(
+      find.byKey(
+        ValueKey('underline-color-${readerMarkColorPresets[4].colorValue}'),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    final saved = ReaderUnderline.fromMap(store.entries.values.single)!;
-    expect(saved.paraIndex, isNull);
-    expect(saved.blockIndex, 0);
-    expect(saved.id, paragraphUnderlineId(paraIndex: null, blockIndex: 0));
+    final saved = ReaderRangeUnderline.fromMap(store.entries.values.single)!;
+    expect(saved.bookId, 'reader-test');
+    expect(saved.chapterId, 'c1');
+    expect(saved.end, greaterThan(saved.start));
+    expect(saved.style, ReaderMarkStyle.dashed);
+    expect(saved.colorValue, readerMarkColorPresets[4].colorValue);
 
     // The ordinal is the identity here, so the menu must show the undo state.
     await _longPressParagraph(tester, 0);
@@ -481,7 +571,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('local-only paragraph actions offer 从本段听 via system TTS', (tester) async {
+  testWidgets('local-only paragraph actions offer 从本段听 via system TTS', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_MemoryUnderlines(), localOnly: true));
@@ -540,19 +632,40 @@ void main() {
     await _longPressParagraph(tester, 0);
     await tester.tap(find.byKey(const ValueKey('reader-action-underline')));
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reader-underline-options')),
+      findsOneWidget,
+    );
+    for (final style in ReaderMarkStyle.values) {
+      expect(
+        find.byKey(ValueKey('underline-style-${style.storageValue}')),
+        findsOneWidget,
+      );
+    }
+    await tester.tap(find.byKey(const ValueKey('underline-style-wavy')));
+    await tester.tap(
+      find.byKey(
+        ValueKey('underline-color-${readerMarkColorPresets[2].colorValue}'),
+      ),
+    );
+    await tester.pumpAndSettle();
 
     expect(store.entries, hasLength(1));
-    final saved = ReaderUnderline.fromMap(store.entries.values.single)!;
+    final saved = ReaderRangeUnderline.fromMap(store.entries.values.single)!;
     expect(saved.bookId, 'reader-test');
     expect(saved.chapterId, 'c1');
-    expect(saved.paraIndex, 0);
+    expect(saved.style, ReaderMarkStyle.wavy);
+    expect(saved.colorValue, readerMarkColorPresets[2].colorValue);
     expect(saved.text, '“对不起......”');
     expect(find.text('已划线'), findsOneWidget);
 
-    final span = tester
-        .widget<Text>(find.byKey(const ValueKey('reader-paragraph-0')))
-        .textSpan!;
-    expect(span.style?.decoration, TextDecoration.underline);
+    final painter = _painterFor(tester, saved.text.substring(0, 1));
+    expect(painter, isNotNull);
+    final painted = painter!.rangeUnderlines.singleWhere(
+      (entry) => entry.coversExactly(saved.start, saved.end),
+    );
+    expect(painted.style, ReaderMarkStyle.wavy);
+    expect(painted.colorValue, readerMarkColorPresets[2].colorValue);
 
     // The sheet now offers to undo it.
     await _longPressParagraph(tester, 0);

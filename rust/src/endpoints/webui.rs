@@ -122,7 +122,7 @@ fn normalize_search_tabs(data: &Value) -> Value {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                if !matches!(title.as_str(), "书籍" | "漫画" | "听书" | "短剧") {
+                if !matches!(title.as_str(), "书籍" | "听书") {
                     continue;
                 }
                 let existing_len = tab
@@ -147,6 +147,9 @@ async fn handle_web_detail(server: &Server, q: &Params) -> Response {
     let tab = q.get_str("tab");
     if source != "番茄" || book_id.is_empty() {
         return web_json(400, &web_err(400, "需要 source=番茄 和 book_id"));
+    }
+    if !matches!(tab.as_str(), "" | "小说" | "听书") {
+        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
     }
     let (ep_name, params) = match tab.as_str() {
         "听书" => {
@@ -176,6 +179,9 @@ async fn handle_web_directory(server: &Server, q: &Params) -> Response {
     let tab = q.get_str("tab");
     if source != "番茄" || book_id.is_empty() {
         return web_json(400, &web_err(400, "需要 source=番茄 和 book_id"));
+    }
+    if !matches!(tab.as_str(), "" | "小说" | "听书") {
+        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
     }
 
     let result: Result<Value, String>;
@@ -376,6 +382,9 @@ async fn handle_web_content(server: &Server, q: &Params) -> Response {
     let mode = q.get_str("mode");
     if source != "番茄" || item_id.is_empty() {
         return web_json(400, &web_err(400, "需要 source=番茄 和 item_id"));
+    }
+    if !matches!(tab.as_str(), "" | "小说" | "听书") {
+        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
     }
 
     let result = match tab.as_str() {

@@ -8,6 +8,7 @@ import 'package:fqapp/services/audio_preferences.dart';
 import 'package:fqapp/services/chapter_text_formatter.dart';
 import 'package:fqapp/services/listening_session.dart';
 import 'package:fqapp/services/system_tts.dart';
+import 'package:fqapp/widgets/audio/system_tts_controls.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _methods = MethodChannel('fqapp/system_tts');
@@ -70,6 +71,112 @@ void main() {
     beforePlay: () async {},
     onStop: () {},
   );
+
+  test(
+    'system TTS resolves title-only front matter to the next chapter',
+    () async {
+      final loaded = <String>[];
+      final book = SystemTtsBook(
+        bookId: 'book',
+        title: '书',
+        chapters: [
+          Chapter(itemId: 'c1', title: '第一章', volumeName: '正文'),
+          Chapter(itemId: 'title-page', title: '书名', volumeName: '正文'),
+          Chapter(itemId: 'c2', title: '第二章', volumeName: '正文'),
+        ],
+        startIndex: 0,
+        localOnly: true,
+        initialContent: ChapterContent.fromPlainText('第一章\n正文一'),
+        textLoader: (chapter) async {
+          loaded.add(chapter.itemId);
+          return chapter.itemId == 'title-page' ? '书名' : '第二章\n正文二';
+        },
+      );
+
+      final resolved = await book.load(1);
+
+      expect(resolved, isNotNull);
+      expect(resolved!.index, 2);
+      expect(resolved.chapter.itemId, 'c2');
+      expect(loaded, ['title-page', 'c2']);
+    },
+  );
+
+  test('an empty initial content still loads the chapter body', () async {
+    final loaded = <String>[];
+    final book = SystemTtsBook(
+      bookId: 'book',
+      title: '书',
+      chapters: [
+        Chapter(itemId: 'c1', title: '第一章', volumeName: '正文'),
+      ],
+      startIndex: 0,
+      localOnly: true,
+      initialContent: ChapterContent(blocks: const []),
+      textLoader: (chapter) async {
+        loaded.add(chapter.itemId);
+        return '第一章\n正文一';
+      },
+    );
+
+    final resolved = await book.load(0);
+
+    expect(resolved, isNotNull);
+    expect(resolved!.chapter.itemId, 'c1');
+    expect(resolved.content.blocks, isNotEmpty);
+    expect(loaded, ['c1']);
+  });
+
+  testWidgets('the listening page uses the same layout as audiobook pages', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final playback = session(text: '甲乙。丙丁。');
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: SystemTtsPlaybackPage(session: playback, onClose: () {}),
+        ),
+      );
+      playback.start();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('audio_chapter_title')), findsOneWidget);
+      expect(find.textContaining('第 1 / 2 章'), findsOneWidget);
+      expect(find.byKey(const Key('audio-page-label')), findsOneWidget);
+      expect(find.byKey(const Key('tts-narration-scroll')), findsOneWidget);
+      expect(find.byKey(const Key('tts_narration_current')), findsOneWidget);
+    } finally {
+      await playback.close();
+      await tester.pump();
+    }
+  });
+
+  testWidgets('the engine only ever receives one sentence at a time', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final playback = session(text: '甲乙。丙丁！戊己？庚辛。');
+    try {
+      playback.start();
+      await tester.pump();
+      await tester.pump();
+      expect(spoken(), hasLength(1));
+      expect((spoken().single.arguments as Map)['text'], '甲乙。');
+      expect(playback.sentenceRange, isNotNull);
+      expect(playback.sentences, hasLength(4));
+      // 阅读页拿到的是「这一句」的字符区间，而不是整段。
+      final range = playback.sentenceRange!;
+      expect(
+        playback.text.substring(range.start, range.end),
+        '甲乙。',
+      );
+    } finally {
+      await playback.close();
+      await tester.pump();
+    }
+  });
 
   testWidgets('pause invalidates a pending engine initialization', (
     tester,

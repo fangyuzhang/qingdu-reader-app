@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/media_item.dart';
+import 'readable_chapter_resolver.dart';
 
 /// Where a finished export landed, as the platform reported it.
 @immutable
@@ -84,6 +85,7 @@ class BookTxtExportState {
     this.completed = 0,
     this.total = 0,
     this.failed = 0,
+    this.skipped = 0,
     this.target,
     this.message,
   });
@@ -96,6 +98,9 @@ class BookTxtExportState {
   /// the file still shows the book's shape, and the final message says how many
   /// they were instead of quietly shipping a shorter book.
   final int failed;
+
+  /// Title-only front-matter entries omitted from the exported book.
+  final int skipped;
 
   /// Set only after a successful write.
   final ExportTarget? target;
@@ -159,29 +164,40 @@ class BookTxtExport extends ValueNotifier<BookTxtExportState> {
     final buffer = StringBuffer();
     var completed = 0;
     var failed = 0;
+    var skipped = 0;
+    final resolver = ReadableChapterResolver(
+      chapters: chapters,
+      loadText: chapterLoader,
+    );
     value = BookTxtExportState(running: true, total: chapters.length);
-    for (final chapter in chapters) {
+    for (var index = 0; index < chapters.length; index++) {
       if (!_alive(job)) return;
-      buffer.write('# ${chapter.title}\n');
+      final chapter = chapters[index];
       try {
-        final body = (await chapterLoader(chapter).timeout(timeout)).trim();
+        final resolved = await resolver.resolveSingle(index).timeout(timeout);
         if (!_alive(job)) return;
-        if (body.isNotEmpty) {
-          buffer.write(body);
-          buffer.write('\n');
+        if (resolved == null) {
+          skipped++;
+        } else {
+          buffer.write('# ${chapter.title}\n');
+          // Loaders may return the structured chapter cache. Export the
+          // user-readable legacy text rather than leaking its JSON envelope.
+          buffer.write(resolved.content.legacyText.trim());
+          buffer.write('\n\n');
         }
       } catch (_) {
         if (!_alive(job)) return;
         // One dead chapter must not cost the user the other 999.
         failed++;
+        buffer.write('# ${chapter.title}\n\n');
       }
-      buffer.write('\n');
       completed++;
       value = BookTxtExportState(
         running: true,
         completed: completed,
         total: chapters.length,
         failed: failed,
+        skipped: skipped,
       );
     }
     if (!_alive(job)) return;
@@ -203,8 +219,9 @@ class BookTxtExport extends ValueNotifier<BookTxtExportState> {
       completed: completed,
       total: chapters.length,
       failed: failed,
+      skipped: skipped,
       target: target,
-      message: _report(title, target, completed, failed),
+      message: _report(title, target, completed, failed, skipped: skipped),
     );
   }
 
@@ -217,6 +234,7 @@ class BookTxtExport extends ValueNotifier<BookTxtExportState> {
       completed: state.completed,
       total: state.total,
       failed: state.failed,
+      skipped: state.skipped,
       message: '已取消导出，未写入文件',
     );
   }
@@ -231,10 +249,18 @@ class BookTxtExport extends ValueNotifier<BookTxtExportState> {
   bool _alive(int job) => !_disposed && job == _job;
 }
 
-String _report(String title, ExportTarget target, int completed, int failed) {
+String _report(
+  String title,
+  ExportTarget target,
+  int completed,
+  int failed, {
+  int skipped = 0,
+}) {
   final where = target.isPublic ? target.path : '${target.path}（应用私有目录）';
   final missing = failed == 0 ? '' : '，$failed 章取文失败，已保留标题';
-  return '已导出《$title》$completed 章$missing\n$where';
+  final skippedNote = skipped == 0 ? '' : '，跳过 $skipped 个无正文页';
+  final saved = completed - failed - skipped;
+  return '已导出《$title》$saved 章$missing$skippedNote\n$where';
 }
 
 /// `<书名>.txt`, folded into a name a Downloads entry accepts: separators and

@@ -19,16 +19,14 @@ import '../services/connectivity_status.dart';
 import '../services/imported_book_store.dart';
 import '../services/library_store.dart';
 import '../services/media_history_store.dart';
-import '../services/reader_history.dart';
 import '../services/shelf_store.dart';
 import '../widgets/bookshelf_card.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/shelf/shelf_design.dart';
 import '../widgets/shelf/shelf_empty.dart';
-import 'cached_book_reader.dart';
 import 'cached_books_page.dart';
 import 'detail_page.dart';
-import 'reader_page.dart';
+import 'local_book_detail_page.dart';
 import 'search_page.dart';
 
 /// 版式偏好：0 宫格 / 1 双列 / 2 列表，与 [BookshelfLayout] 的枚举下标一致。
@@ -69,8 +67,7 @@ class LibraryPage extends StatefulWidget {
   /// 空，此时按钮不响应。
   final VoidCallback? onBrowse;
 
-  /// 离线直读要用的三件外部依赖；都缺省走真实实现，注入后测试可完全离线
-  /// （与缓存页、详情页的注入同一套路）。
+  /// 保留这些注入点以兼容测试与详情页的离线路径。
   final ChapterCache? cacheStore;
   final ReaderStore? readerStore;
   final Future<ConnectivityView> Function()? connectivity;
@@ -143,17 +140,17 @@ class _LibraryPageState extends State<LibraryPage> {
       // 【青茄重构·删除】产品已删除 短剧/漫剧/漫画 三类内容入口，
       // 书架（收藏）与浏览历史不再展示这三类条目；数据保留在本地，
       // 二期恢复分类时移除本过滤即可。
-      const hiddenKinds = {'video', 'manju', 'manga'};
+      const supportedKinds = {'book', 'audio'};
       _shelf = _shelfEntries(
         ShelfStore.instance
             .records()
-            .where((record) => !hiddenKinds.contains(record.item.kind))
+            .where((record) => supportedKinds.contains(record.item.kind))
             .toList(),
         history,
       );
       _browseHistory = [
         for (final entry in history)
-          if (!hiddenKinds.contains(entry['kind']?.toString() ?? 'book'))
+          if (supportedKinds.contains(entry['kind']?.toString() ?? 'book'))
             _ShelfEntry.fromHistory(entry),
       ];
       // 选中集合随数据回真：条目在别处被移出 / 删除后，它的键不该继续占着
@@ -331,18 +328,12 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  /// 点书：离线且本地有缓存时直接进阅读器，否则走详情页。
-  ///
-  /// 官方客户端书架点书就是直接起阅读器（`ReaderBundleBuilder`），中间没有
-  /// 那个要联网取目录的页面。这里只在「无网 + 有缓存」时抄这条捷径：联网时
-  /// 仍走详情页（或按设置 → 阅读 →「点击书籍直接进入阅读」自动进阅读器），
-  /// 段评、章节目录预览这些联网能力不会被悄悄降级。
+  /// 点书始终先进入详情与目录页；本地导入书也有自己的详情页。
   Future<void> _open(MediaItem item, {bool importedResume = false}) async {
     if (ImportedBookStore.isLocalBookId(item.id)) {
       await _openLocalBook(item);
       return;
     }
-    if (await _openCached(item)) return;
     if (!mounted) return;
     // The shelf snapshot already knows which entries carry imported anchors.
     // Ordinary books must keep the original navigation timing; DetailPage
@@ -351,11 +342,8 @@ class _LibraryPageState extends State<LibraryPage> {
       await Navigator.push(
         context,
         MaterialPageRoute<void>(
-          builder: (_) => DetailPage(
-            item: item,
-            readerStore: widget.readerStore,
-            autoOpenReader: true,
-          ),
+          builder: (_) =>
+              DetailPage(item: item, readerStore: widget.readerStore),
         ),
       );
       return;
@@ -374,51 +362,21 @@ class _LibraryPageState extends State<LibraryPage> {
       return;
     }
     final readerStore = widget.readerStore ?? LibraryStore.instance;
-    Map<String, dynamic>? saved;
-    try {
-      saved = await ReaderHistory(readerStore).load(book.id);
-    } catch (_) {}
-    if (!mounted) return;
-    var startIndex = book.chapters.indexWhere(
-      (chapter) => chapter.itemId == saved?['chapterId']?.toString(),
-    );
-    if (startIndex < 0) {
-      final episode = num.tryParse(saved?['episode']?.toString() ?? '');
-      startIndex = episode != null && episode.isFinite
-          ? episode.toInt().clamp(0, book.chapters.length - 1).toInt()
-          : 0;
-    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => ReaderPage(
+        builder: (_) => LocalBookDetailPage(
           bookId: book.id,
           title: book.title,
+          subtitle: '本地导入 · ${book.format.toUpperCase()}',
+          author: book.author,
+          cover: book.coverPath ?? '',
           chapters: book.chapters,
-          startIndex: startIndex,
-          localOnly: true,
           readerStore: readerStore,
           chapterLoader: (chapter) =>
               store.chapterText(book.id, chapter.itemId),
         ),
       ),
-    );
-  }
-
-  /// 离线直读：只有小说有章节缓存，且必须在无网时才抢在详情页前面。
-  Future<bool> _openCached(MediaItem item) async {
-    final cache = widget.cacheStore ?? ChapterCacheStore.instance;
-    final book = await cachedBookForOfflineOpen(
-      item,
-      cache: cache,
-      connectivity: await (widget.connectivity ?? currentConnectivity)(),
-    );
-    if (book == null || !mounted) return false;
-    return openCachedBook(
-      context,
-      book: book,
-      cache: cache,
-      readerStore: widget.readerStore,
     );
   }
 
@@ -1140,17 +1098,18 @@ class _LibraryPageState extends State<LibraryPage> {
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),
-            for (final key in [ShelfStatus.reading, ShelfStatus.want, ShelfStatus.done])
+            for (final key in [
+              ShelfStatus.reading,
+              ShelfStatus.want,
+              ShelfStatus.done,
+            ])
               ListTile(
                 key: Key('shelf-group-pick-$key'),
-                leading: Icon(
-                  switch (key) {
-                    ShelfStatus.want => LucideIcons.bookmark,
-                    ShelfStatus.done => LucideIcons.circle_check,
-                    _ => LucideIcons.book_open,
-                  },
-                  size: 20,
-                ),
+                leading: Icon(switch (key) {
+                  ShelfStatus.want => LucideIcons.bookmark,
+                  ShelfStatus.done => LucideIcons.circle_check,
+                  _ => LucideIcons.book_open,
+                }, size: 20),
                 title: Text(ShelfStatus.label(key)),
                 onTap: () => Navigator.of(sheetContext).pop(key),
               ),
@@ -1253,7 +1212,9 @@ class _GroupChip extends StatelessWidget {
           color: selected ? palette.soft : Colors.transparent,
           borderRadius: BorderRadius.circular(ShelfTokens.radiusChip),
           border: Border.all(
-            color: selected ? HomePalette.accent.withValues(alpha: 0.45) : palette.line,
+            color: selected
+                ? HomePalette.accent.withValues(alpha: 0.45)
+                : palette.line,
             width: 0.6,
           ),
         ),

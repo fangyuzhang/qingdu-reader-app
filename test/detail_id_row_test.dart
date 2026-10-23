@@ -101,12 +101,10 @@ void main() {
       expect(find.text('7491705400958405694'), findsOneWidget);
     });
 
-    testWidgets('a short drama shows the series id it loads with', (
+    testWidgets('unsupported legacy media never issues detail requests', (
       tester,
     ) async {
-      // The row must show the same id the page uses for its requests, so that
-      // pasting it back into the `id:` search reopens the same series.
-      final requested = <String>[];
+      var requested = 0;
       await tester.binding.setSurfaceSize(const Size(400, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
@@ -116,7 +114,7 @@ void main() {
               id: '7489902587913972766',
               seriesId: '7675233261169167422',
               episodeId: '7489902587913972766',
-              title: '初次沦陷',
+              title: '旧内容',
               cover: '',
               author: '',
               badge: '',
@@ -125,24 +123,20 @@ void main() {
             ),
             readerStore: MemoryReaderStore(),
             detailLoader: (id, {String tab = '小说'}) async {
-              requested.add(id);
+              requested++;
               return const {};
             },
             directoryLoader: (id, {String tab = '小说'}) async {
-              requested.add(id);
-              return [
-                [Chapter(itemId: 'e1', title: '第1集', volumeName: '剧集')],
-              ];
+              requested++;
+              return const [];
             },
           ),
         ),
       );
       await tester.pumpAndSettle();
-      // The series id is what the page requests and what the row shows; the
-      // raw item id must not appear.
-      expect(requested.toSet(), {'7675233261169167422'});
-      expect(find.text('7675233261169167422'), findsOneWidget);
-      expect(find.text('7489902587913972766'), findsNothing);
+      expect(requested, 0);
+      expect(find.text('青茄阅读仅提供小说与听书'), findsOneWidget);
+      expect(find.byKey(const Key('detail_id_row')), findsNothing);
     });
   });
 }

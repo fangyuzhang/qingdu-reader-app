@@ -109,7 +109,7 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
         _preview = null;
         _message =
             '恢复完成：新增 ${result.shelf} 条收藏、${result.history} 条进度、'
-            '${result.episodes} 集已看标记。\n'
+            '${result.episodes} 条续读标记。\n'
             '保留本机已有收藏/进度 '
             '${backup.shelf.length + backup.history.length - result.shelf - result.history} 条。';
       });
@@ -118,7 +118,7 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
 
   static String _counts(LibraryBackup backup) =>
       '${backup.shelf.length} 条收藏、${backup.history.length} 条进度、'
-      '${backup.episodeCount} 集已看标记';
+      '${backup.episodeCount} 条续读标记';
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +155,7 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
                       DataTransferRow(
                         icon: LucideIcons.download,
                         title: '导出备份',
-                        subtitle: '保存收藏、阅读进度与已看剧集',
+                        subtitle: '保存收藏、阅读进度与续读标记',
                         onTap: enabled ? _export : null,
                       ),
                       Divider(height: 1, indent: 68, color: palette.line),
@@ -211,12 +211,12 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
                                 values: {
                                   '收藏': preview.shelf.length,
                                   '进度': preview.history.length,
-                                  '已看剧集': preview.episodeCount,
+                                  '续读标记': preview.episodeCount,
                                 },
                               ),
                               const SizedBox(height: 14),
                               Text(
-                                '只补充缺失的收藏与进度，保留本机已有记录。已看剧集会合并，可重复导入。',
+                                '只补充缺失的收藏与进度，保留本机已有记录。续读标记会合并，可重复导入。',
                                 style: TextStyle(
                                   color: palette.ink,
                                   fontSize: 13,
@@ -264,7 +264,7 @@ class _LibraryBackupPageState extends State<LibraryBackupPage> {
                         ),
                         children: [
                           Text(
-                            '包含在线小说、听书、漫画、短剧和漫剧的收藏、已保存进度，以及已看剧集。\n\n'
+                            '包含在线小说与听书的收藏、已保存进度，以及续读标记。\n\n'
                             '本地 TXT / EPUB 原文件、下载缓存、阅读时长、划线和应用设置需另行保留。\n\n'
                             '导出前请退出阅读或暂停播放，让当前进度保存；换手机时传输备份文件，再在这里恢复。',
                             style: TextStyle(

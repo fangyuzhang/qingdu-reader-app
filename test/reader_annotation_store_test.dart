@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 
 import 'package:fqapp/services/reader_annotation_store.dart';
+import 'package:fqapp/services/reader_mark_style.dart';
 
 /// 【青茄重构】批注存储的落盘测试。
 ///
@@ -108,4 +109,42 @@ void main() {
     expect(await store.load('b1', 'c1'), isEmpty);
     expect(await store.load('b2', 'c9'), hasLength(1));
   });
+
+  test(
+    'editing classification, tags and marks preserves identity and timestamp',
+    () async {
+      final store = ReaderAnnotationStore();
+      final item = note();
+      await store.add(item);
+
+      await store.updateNote(
+        item.key,
+        const AnnotationDraft(
+          thought: 'edited thought',
+          category: 'custom category',
+          tags: ['tag-a', 'tag-b', 'tag-a'],
+          markerType: AnnotationDraft.customMarkerType,
+          markerLabel: '\u5f85\u67e5\u8bc1',
+          markerColorValue: 0xFF4F7CD1,
+          markStyle: ReaderMarkStyle.wavy,
+          markColorValue: 0xFFE9B949,
+        ),
+      );
+
+      final loaded = (await store.load('b1', 'c1')).single;
+      expect(loaded.key, item.key);
+      expect(loaded.start, item.start);
+      expect(loaded.end, item.end);
+      expect(loaded.createdAt, item.createdAt);
+      expect(loaded.bookTitle, item.bookTitle);
+      expect(loaded.chapterTitle, item.chapterTitle);
+      expect(loaded.thought, 'edited thought');
+      expect(loaded.category, 'custom category');
+      expect(loaded.tags, ['tag-a', 'tag-b']);
+      expect(loaded.markerLabel, '\u5f85\u67e5\u8bc1');
+      expect(loaded.markerColorValue, 0xFF4F7CD1);
+      expect(loaded.markStyle, ReaderMarkStyle.wavy);
+      expect(loaded.markColorValue, 0xFFE9B949);
+    },
+  );
 }

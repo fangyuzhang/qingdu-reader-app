@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/media_item.dart';
 import '../services/api_client.dart';
 import '../services/book_txt_export.dart';
 import '../services/chapter_cache_store.dart';
 import '../services/library_store.dart';
-import 'cached_book_reader.dart';
+import '../widgets/home/home_design.dart';
+import '../widgets/home/home_media_card.dart';
+import 'local_book_detail_page.dart';
 
 class CachedBooksPage extends StatefulWidget {
   final ChapterCacheStore? cacheStore;
@@ -112,14 +115,25 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
     if (_openingBook) return;
     _openingBook = true;
     try {
-      final opened = await openCachedBook(
+      final cached = await _store.cachedChapterIds(book.id);
+      if (cached.isEmpty || !mounted) {
+        if (mounted) await _reload();
+        return;
+      }
+      await Navigator.push<void>(
         context,
-        book: book,
-        cache: _store,
-        readerStore: widget.readerStore,
+        MaterialPageRoute<void>(
+          builder: (_) => LocalBookDetailPage(
+            bookId: book.id,
+            title: book.title,
+            subtitle: '离线缓存 · ${book.chapters.length} 章',
+            cover: book.cover,
+            chapters: book.chapters,
+            readerStore: widget.readerStore,
+            chapterCache: _store,
+          ),
+        ),
       );
-      // 目录与章节对不上（章节已被逐出）时刷新列表，别让一行点不动又没反馈。
-      if (!opened && mounted) await _reload();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -183,79 +197,119 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
   /// One cached book row: tap opens the reader, the trailing actions export and
   /// clear. A running export turns its own button into progress and cancel.
   Widget _bookTile(CachedBookSummary item) {
+    final palette = HomePalette.of(context);
     final bookId = item.book.id;
     // _onExportChanged clears _exportBookId as soon as the export stops, so a
     // row can only see a state here while that export is still running.
     final progress = _exportBookId == bookId ? _export?.value : null;
-    return Card(
+    final mediaItem = MediaItem(
+      id: bookId,
+      title: item.book.title,
+      cover: item.book.cover,
+      author: '',
+      badge: '',
+      ep: '',
+      kind: 'book',
+    );
+    return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        leading: Container(
-          width: 38,
-          height: 48,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: const Icon(Icons.menu_book_outlined, size: 20),
-        ),
-        title: Text(
-          item.book.title,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${item.stats.chapterCount}/${item.book.chapters.length} 章'
-              ' · ${formatCacheBytes(item.stats.byteCount)}',
-            ),
-            if (progress != null)
-              Text(
-                progress.total == 0
-                    ? '导出中…'
-                    : '导出 ${progress.completed}/${progress.total} 章',
-                key: Key('cached_book_export_progress_$bookId'),
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-          ],
-        ),
-        onTap: () => _open(item.book),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (progress != null)
-              IconButton(
-                key: Key('cached_book_export_$bookId'),
-                tooltip: '取消导出',
-                onPressed: _cancelExport,
-                icon: SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(
-                    value: progress.total == 0 ? null : progress.fraction,
-                    strokeWidth: 2,
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: palette.line, width: 0.6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () => _open(item.book),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 38,
+                  height: 52,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: StoryCover(
+                      item: mediaItem,
+                      cacheWidth: (38 * MediaQuery.devicePixelRatioOf(context))
+                          .round(),
+                    ),
                   ),
                 ),
-              )
-            else
-              IconButton(
-                key: Key('cached_book_export_$bookId'),
-                tooltip: '导出 TXT 到系统「下载」',
-                onPressed: _export == null
-                    ? () => _startExport(item.book)
-                    : null,
-                icon: const Icon(Icons.file_download_outlined),
-              ),
-            IconButton(
-              tooltip: '删除《${item.book.title}》缓存',
-              onPressed: () => _clear(item.book),
-              icon: const Icon(Icons.delete_outline),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.book.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: palette.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${item.stats.chapterCount}/${item.book.chapters.length} 章'
+                        ' · ${formatCacheBytes(item.stats.byteCount)}',
+                        style: TextStyle(fontSize: 12, color: palette.muted),
+                      ),
+                      if (progress != null)
+                        Text(
+                          progress.total == 0
+                              ? '导出中…'
+                              : '导出 ${progress.completed}/${progress.total} 章',
+                          key: Key('cached_book_export_progress_$bookId'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: palette.accentText,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (progress != null)
+                  IconButton(
+                    key: Key('cached_book_export_$bookId'),
+                    tooltip: '取消导出',
+                    color: palette.muted,
+                    onPressed: _cancelExport,
+                    icon: SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(
+                        value: progress.total == 0 ? null : progress.fraction,
+                        strokeWidth: 2,
+                        color: HomePalette.accent,
+                        backgroundColor: palette.line,
+                      ),
+                    ),
+                  )
+                else
+                  IconButton(
+                    key: Key('cached_book_export_$bookId'),
+                    tooltip: '导出 TXT 到系统「下载」',
+                    color: palette.muted,
+                    onPressed: _export == null
+                        ? () => _startExport(item.book)
+                        : null,
+                    icon: const Icon(LucideIcons.file_down, size: 19),
+                  ),
+                IconButton(
+                  tooltip: '删除《${item.book.title}》缓存',
+                  color: palette.muted,
+                  onPressed: () => _clear(item.book),
+                  icon: const Icon(LucideIcons.trash, size: 19),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -265,14 +319,20 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
   Widget build(BuildContext context) {
     final count = _books.fold(0, (sum, item) => sum + item.stats.chapterCount);
     final bytes = _books.fold(0, (sum, item) => sum + item.stats.byteCount);
+    final palette = HomePalette.of(context);
     return Scaffold(
+      backgroundColor: palette.canvas,
       appBar: AppBar(
         title: const Text('离线缓存'),
+        backgroundColor: palette.canvas,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         actions: [
           IconButton(
             tooltip: '清空全部缓存',
+            color: palette.muted,
             onPressed: _books.isEmpty ? null : () => _clear(),
-            icon: const Icon(Icons.delete_sweep_outlined),
+            icon: const Icon(LucideIcons.trash, size: 20),
           ),
         ],
       ),
@@ -299,24 +359,22 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
                       width: 64,
                       height: 64,
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest
-                            .withValues(alpha: 0.5),
+                        color: palette.soft,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.download_for_offline_outlined,
-                        size: 32,
-                        color: Theme.of(context).colorScheme.outline,
+                        LucideIcons.download,
+                        size: 28,
+                        color: palette.muted,
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       '暂无缓存章节',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
+                        color: palette.ink,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -325,7 +383,8 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        height: 1.5,
+                        color: palette.muted,
                       ),
                     ),
                   ],
@@ -336,44 +395,38 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(14),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
+                    color: palette.soft,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                      width: 0.6,
-                    ),
                   ),
                   child: Row(
                     children: [
                       Container(
-                        width: 44,
-                        height: 44,
+                        width: 42,
+                        height: 42,
                         decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withValues(alpha: 0.12),
+                          color: HomePalette.accent.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          Icons.menu_book_outlined,
-                          color: Theme.of(context).colorScheme.primary,
-                          size: 22,
+                        child: const Icon(
+                          LucideIcons.book_open,
+                          color: HomePalette.accent,
+                          size: 20,
                         ),
                       ),
-                      const SizedBox(width: 14),
+                      const SizedBox(width: 13),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
                               '已缓存 ${_books.length} 本 · 共 $count 章',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w700,
+                                color: palette.ink,
                               ),
                             ),
                             const SizedBox(height: 3),
@@ -381,9 +434,7 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
                               '占用空间：${formatCacheBytes(bytes)} · 点击可离线续读',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                                color: palette.muted,
                               ),
                             ),
                           ],

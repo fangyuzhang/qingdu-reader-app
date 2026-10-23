@@ -78,6 +78,66 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('章首往下拖直接接上一章末尾，且不重新加载整章', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var firstChapterLoads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 'reader-seamless-back',
+          title: '测试书籍',
+          chapters: _chapters,
+          startIndex: 1,
+          localOnly: true,
+          chapterLoader: (chapter) async {
+            if (chapter.itemId == 'chapter-1') firstChapterLoads++;
+            return _chapterLoader(chapter);
+          },
+          readerStore: MemoryReaderStore(),
+          chapterCache: MemoryChapterCache(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 上一章已经静默排进窗口最前面（这一次加载就是唯一的加载）。
+    expect(firstChapterLoads, 1);
+
+    // 在章首往下拖：接上来的是上一章的正文本身。
+    await tester.drag(_list, const Offset(0, 600));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('这是第一章'), findsWidgets);
+    expect(firstChapterLoads, 1, reason: '往下拖不该再触发一次整章加载（那正是之前卡顿的来源）');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('跨章向前滚时窗口只增不减，不会整块重建', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final controller = tester.widget<ListView>(_list).controller!;
+    var previousMax = controller.position.maxScrollExtent;
+    for (var i = 0; i < 3; i++) {
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      final max = controller.position.maxScrollExtent;
+      expect(
+        max,
+        greaterThanOrEqualTo(previousMax - 0.5),
+        reason: '越过章界时窗口被重建会把滚动范围缩回去，读者就被甩到别处',
+      );
+      previousMax = max;
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('越过边界后进度记录切到下一章', (tester) async {
     await tester.binding.setSurfaceSize(const Size(400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));

@@ -1,5 +1,5 @@
 name: fqapp
-description: "A new Flutter project."
+description: "青茄阅读：面向 12–18 岁的纯净小说与听书阅读空间。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.121+126
+version: 1.0.129+134
 
 environment:
   sdk: ^3.12.2
@@ -53,7 +53,6 @@ dependencies:
   html: 0.15.6
   xml: ^7.0.1
   flutter_lucide: ^1.43.0
-  lottie: ^3.6.1
   flutter_rust_bridge: 2.13.0
   connectivity_plus: ^7.3.1
   image: ^4.12.0
@@ -69,8 +68,6 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   shared_preferences_platform_interface: ^2.4.1
-  # 弹幕调度器用假时钟覆盖重试与生命周期时序（test/playlet_danmaku_loader_test.dart）。
-  fake_async: ^1.3.3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -93,17 +90,8 @@ flutter:
     - assets/web/assets/
     - assets/web/assets/css/
     - assets/web/assets/webfonts/
-    - assets/plugins/
     - assets/images/app_logo.webp
     - assets/images/bubble/
-    # 短剧单列卡右侧栏/信息层的官方图标，从
-    # `ckao/decompile/apktool/res/drawable*/` 原样抽出（见
-    # docs/research/short-drama-decompile-comparison-20260921.md §8）。
-    - assets/images/drama/
-    # 「上滑查看更多视频」的官方箭头动画（`more_wonderful_series_up_arrow.json`），
-    # 原样复制、仅把填充色改为白色——官方运行时用 LottieValueCallback 强制
-    # `@color/al`=#ffffffff（见同文档 §19）。
-    - assets/lottie/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

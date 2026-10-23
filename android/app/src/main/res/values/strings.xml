@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 听书与听视频（listen mode）前台服务的通知文案。 -->
+    <!-- 听书（listen mode）前台服务的通知文案。 -->
+    <string name="app_name">青茄阅读</string>
     <string name="listen_channel_name">音频后台播放</string>
     <string name="listen_notification_title">正在听书</string>
     <string name="listen_notification_text">音频播放中，锁屏或退出应用仍会继续</string>

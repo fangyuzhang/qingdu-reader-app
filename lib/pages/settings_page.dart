@@ -9,13 +9,10 @@ import '../services/api_client.dart';
 import '../services/app_theme.dart';
 import '../services/audio_preferences.dart';
 import '../services/backend_service.dart';
-import '../services/book_open_preferences.dart';
-import '../services/drama_mute_preferences.dart';
 import '../services/library_store.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
-import 'cached_dramas_page.dart';
 import 'library_backup_page.dart';
 import 'log_viewer_page.dart';
 import 'settings_category_page.dart';
@@ -28,8 +25,6 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 开关读的是 ValueNotifier：先把持久化的值读出来，读到后自动重绘。
-    unawaited(BookOpenPreferences.instance.load());
     final palette = HomePalette.of(context);
     final categories = <SettingsCategory>[
       SettingsCategory(
@@ -37,12 +32,6 @@ class SettingsPage extends StatelessWidget {
         title: '外观',
         subtitle: '深色模式、墨水屏模式',
         items: [_themeModeItem(), _einkModeItem()],
-      ),
-      SettingsCategory(
-        icon: LucideIcons.book_open,
-        title: '阅读',
-        subtitle: '点书直达阅读器',
-        items: [_directReaderItem()],
       ),
       SettingsCategory(
         icon: LucideIcons.headphones,
@@ -62,15 +51,9 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
       SettingsCategory(
-        icon: LucideIcons.film,
-        title: '短剧',
-        subtitle: '播放',
-        items: [_muteWhenColdStartItem()],
-      ),
-      SettingsCategory(
         icon: LucideIcons.database,
         title: '数据',
-        subtitle: '备份与恢复、缓存、阅读与播放历史',
+        subtitle: '备份与恢复、缓存、阅读与收听历史',
         items: [
           SettingsItem(
             icon: LucideIcons.database,
@@ -88,15 +71,6 @@ class SettingsPage extends StatelessWidget {
             onTap: (context, setState) => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const CachedBooksPage()),
-            ),
-          ),
-          SettingsItem(
-            icon: LucideIcons.clapperboard,
-            title: '剧集离线缓存',
-            subtitle: '短剧下载、离线播放和清理缓存',
-            onTap: (context, setState) => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CachedDramasPage()),
             ),
           ),
           _clearHistItem(),
@@ -117,15 +91,13 @@ class SettingsPage extends StatelessWidget {
       ),
     ];
 
-    const categoryColors = [
-      Color(0xFFEF5038), // 外观
-      Color(0xFF14B8A6), // 阅读
-      Color(0xFF8B5CF6), // 听书
-      Color(0xFFF59E0B), // 短剧
-      Color(0xFF3B82F6), // 数据
-      Color(0xFF10B981), // 服务
-      Color(0xFF6366F1), // 关于
-    ];
+    // 分类底色跟着品牌走：默认青茄绿，听书用珊瑚橙点一下（品牌另一半），
+    // 服务/关于这类系统项退到 muted，形成层级而不是六种颜色互相抢。
+    Color tintOf(SettingsCategory category) => switch (category.title) {
+      '听书' => HomePalette.highlight,
+      '服务' || '关于' => palette.muted,
+      _ => HomePalette.accent,
+    };
 
     return Scaffold(
       backgroundColor: palette.canvas,
@@ -146,87 +118,72 @@ class SettingsPage extends StatelessWidget {
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: palette.line,
-                  width: 0.6,
-                ),
+                border: Border.all(color: palette.line, width: 0.6),
               ),
               child: Column(
-              children: [
-                for (var i = 0; i < categories.length; i++) ...[
-                  if (i > 0)
-                    Divider(
-                      height: 1,
-                      indent: 68,
-                      color: palette.line,
-                    ),
-                  ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 4,
-                    ),
-                    leading: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: (i < categoryColors.length
-                                ? categoryColors[i]
-                                : HomePalette.accent)
-                            .withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
+                children: [
+                  for (var i = 0; i < categories.length; i++) ...[
+                    if (i > 0)
+                      Divider(height: 1, indent: 68, color: palette.line),
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
                       ),
-                      child: Icon(
-                        categories[i].icon,
-                        size: 20,
-                        color: i < categoryColors.length
-                            ? categoryColors[i]
-                            : HomePalette.accent,
+                      leading: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: tintOf(categories[i]).withValues(alpha: 0.13),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: Icon(
+                          categories[i].icon,
+                          size: 19,
+                          color: tintOf(categories[i]),
+                        ),
                       ),
-                    ),
-                    title: Text(
-                      categories[i].title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                        color: palette.ink,
+                      title: Text(
+                        categories[i].title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: palette.ink,
+                        ),
                       ),
-                    ),
-                    subtitle: Text(
-                      categories[i].subtitle,
-                      style: TextStyle(
-                        fontSize: 12.5,
+                      subtitle: Text(
+                        categories[i].subtitle,
+                        style: TextStyle(fontSize: 12.5, color: palette.muted),
+                      ),
+                      trailing: Icon(
+                        LucideIcons.chevron_right,
+                        size: 18,
                         color: palette.muted,
                       ),
+                      onTap: () {
+                        final cat = categories[i];
+                        final pageBuilder = cat.pageBuilder;
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder:
+                                pageBuilder ??
+                                (_) => SettingsCategoryPage(
+                                  title: cat.title,
+                                  items: cat.items,
+                                ),
+                          ),
+                        );
+                      },
                     ),
-                    trailing: Icon(
-                      LucideIcons.chevron_right,
-                      size: 18,
-                      color: palette.muted,
-                    ),
-                    onTap: () {
-                      final cat = categories[i];
-                      final pageBuilder = cat.pageBuilder;
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder:
-                              pageBuilder ??
-                              (_) => SettingsCategoryPage(
-                                title: cat.title,
-                                items: cat.items,
-                              ),
-                        ),
-                      );
-                    },
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
   }
 
   // ── 外观 ──────────────────────────────────────────────────────────────
@@ -341,26 +298,6 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  // ── 阅读 ──────────────────────────────────────────────────────────────
-
-  /// issue #19 第 3 条：点书跳过详情页，直接按上次进度进阅读器（小说/漫画）。
-  /// 默认关＝现有行为（先进详情页）。听书/短剧与加载失败时仍停留在详情页。
-  SettingsItem _directReaderItem() => SettingsItem(
-    icon: LucideIcons.book_open,
-    title: '点击书籍直接进入阅读',
-    subtitle: '点书架、首页、搜索里的书时，跳过详情页直接开始阅读',
-    trailingBuilder: (context) => ValueListenableBuilder<bool>(
-      valueListenable: BookOpenPreferences.instance.directReader,
-      builder: (context, value, _) => Switch(
-        value: value,
-        onChanged: (v) => unawaited(BookOpenPreferences.instance.set(v)),
-      ),
-    ),
-    onTap: (context, setState) {
-      final current = BookOpenPreferences.instance.directReader.value;
-      unawaited(BookOpenPreferences.instance.set(!current));
-    },
-  );
   // ── 听书 ──────────────────────────────────────────────────────────────
 
   SettingsItem _backgroundAudioItem() => SettingsItem(
@@ -371,7 +308,8 @@ class SettingsPage extends StatelessWidget {
       valueListenable: AudioPreferences.instance.backgroundPlayback,
       builder: (context, value, _) => Switch(
         value: value,
-        onChanged: (v) => unawaited(AudioPreferences.instance.setBackgroundPlayback(v)),
+        onChanged: (v) =>
+            unawaited(AudioPreferences.instance.setBackgroundPlayback(v)),
       ),
     ),
     onTap: (context, setState) {
@@ -380,38 +318,14 @@ class SettingsPage extends StatelessWidget {
     },
   );
 
-  // ── 短剧 ──────────────────────────────────────────────────────────────
-
-  /// 官方设置项「开启应用时默认静音」（`GlobalMuteConfig` 标题，持久层
-  /// `open_mute_when_cold_start`，默认 false＝有声起播）。
-  SettingsItem _muteWhenColdStartItem() => SettingsItem(
-    icon: LucideIcons.volume_x,
-    title: '开启应用时默认静音',
-    subtitle: '进入短剧时静音播放，可在播放页取消',
-    // Switch 走 ValueListenableBuilder，翻转后无需依赖页面的 setState。
-    trailingBuilder: (context) => ValueListenableBuilder<bool>(
-      valueListenable: DramaMutePreferences.instance.muteWhenColdStart,
-      builder: (context, value, _) => Switch(
-        value: value,
-        onChanged: (v) => unawaited(DramaMutePreferences.instance.set(v)),
-      ),
-    ),
-    onTap: (context, setState) {
-      final current = DramaMutePreferences.instance.muteWhenColdStart.value;
-      unawaited(DramaMutePreferences.instance.set(!current));
-    },
-  );
-
-  // ── 数据 ──────────────────────────────────────────────────────────────
-
   SettingsItem _clearHistItem() => SettingsItem(
     icon: LucideIcons.trash,
     title: '清空历史',
-    subtitle: '删除全部阅读/播放历史与累计时长',
+    subtitle: '删除全部阅读/收听历史与累计时长',
     onTap: (context, setState) => _confirmClear(
       context,
       '清空历史',
-      '确定清空全部阅读/播放历史与累计时长吗？',
+      '确定清空全部阅读/收听历史与累计时长吗？',
       LibraryStore.instance.clearReadingData,
     ),
   );

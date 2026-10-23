@@ -50,7 +50,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Native ExoPlayer host for DRM (CENC) short dramas and audiobook audio playback.
+ * Native ExoPlayer host for encrypted (CENC) audiobook playback.
  * Decrypted plaintext is served to ExoPlayer through a [CryptoDataSource] backed
  * by the C crypto core; events are pushed to Flutter over an EventChannel.
  */

@@ -14,7 +14,6 @@ import 'package:fqapp/pages/audio_page.dart';
 import 'package:fqapp/pages/detail_page.dart';
 import 'package:fqapp/services/api_client.dart';
 import 'package:fqapp/services/listening_session.dart';
-import 'package:fqapp/widgets/audio/audio_sections.dart';
 import 'package:fqapp/widgets/detail/detail_read_bar.dart';
 
 import 'support/controlled_player.dart';
@@ -65,7 +64,7 @@ void main() {
       await _mount(tester, session);
       final original = session.players.single;
       original.emitPosition(const Duration(milliseconds: 37500));
-      _openRelated(tester);
+      await _openRelated(tester);
       await _flush(tester);
       expect(original.disposed, isTrue);
       expect(original.isPlaying, isFalse);
@@ -101,10 +100,15 @@ void main() {
         firstPlayer: ControlledNativePlayer(releaseGate: release),
       );
       await _mount(tester, session);
-      final row = tester.widget<AudioRelatedRow>(find.byType(AudioRelatedRow));
-      row.onTap(_related);
-      row.onTap(_related);
-      await _flush(tester);
+      Future<void> tapRelated() async {
+        await tester.tap(find.byTooltip('更多'));
+        await _flush(tester);
+        await tester.tap(find.byKey(const ValueKey('audio-related-novel')));
+        await _flush(tester);
+      }
+
+      await tapRelated();
+      await tapRelated();
       expect(session.pushes.detailRoutes, 0);
       release.complete();
       await _flush(tester);
@@ -123,7 +127,7 @@ void main() {
     final session = _Session(firstPlayer: original);
     await _mount(tester, session);
     original.failPause = true;
-    _openRelated(tester);
+    await _openRelated(tester);
     await _flush(tester);
     expect(original.disposed, isTrue);
     expect(find.byType(DetailPage), findsOneWidget);
@@ -145,7 +149,7 @@ void main() {
       firstPlayer: ControlledNativePlayer(releaseGate: release),
     );
     await _mount(tester, session);
-    _openRelated(tester);
+    await _openRelated(tester);
     await _flush(tester);
     await tester.tap(find.byTooltip('下一章'));
     await _flush(tester);
@@ -168,7 +172,7 @@ void main() {
       );
       await _mount(tester, session);
       expect(session.players, isEmpty);
-      _openRelated(tester);
+      await _openRelated(tester);
       await _flush(tester);
       expect(find.byType(DetailPage), findsOneWidget);
       source.complete(_source('1'));
@@ -182,8 +186,11 @@ void main() {
   );
 }
 
-void _openRelated(WidgetTester tester) {
-  tester.widget<AudioRelatedRow>(find.byType(AudioRelatedRow)).onTap(_related);
+Future<void> _openRelated(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('更多'));
+  await _flush(tester);
+  await tester.tap(find.byKey(const ValueKey('audio-related-novel')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _flush(WidgetTester tester) async {
@@ -260,7 +267,7 @@ class _RouteObserver extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (previousRoute != null) detailRoutes++;
+    if (previousRoute != null && route is! PopupRoute) detailRoutes++;
   }
 }
 

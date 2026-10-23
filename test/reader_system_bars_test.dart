@@ -227,7 +227,11 @@ void main() {
           tester.getRect(find.byTooltip('返回书籍')).top,
           greaterThanOrEqualTo(40),
         );
-        expect(tester.getRect(_surface), viewport);
+        // 章首展开菜单时正文会整体让开工具栏（只平移绘制，不改视口高度），
+        // 所以这里只要求正文没有被压小、也没有跑到安全区上方。
+        final opened = tester.getRect(_surface);
+        expect(opened.top, greaterThanOrEqualTo(viewport.top));
+        expect(opened.size, viewport.size);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
       },
@@ -267,7 +271,10 @@ void main() {
           find.byKey(const ValueKey('reader-settings')),
         );
         expect(settings.bottom, lessThanOrEqualTo(800 - bottom));
-        expect(tester.getRect(_surface), viewport);
+        // 章首让位：正文整体下移，但视口尺寸不变、也不会压到安全区。
+        final opened = tester.getRect(_surface);
+        expect(opened.top, greaterThanOrEqualTo(viewport.top));
+        expect(opened.size, viewport.size);
         await tester.tap(find.byTooltip('收起阅读菜单'));
         await tester.pumpAndSettle();
         expect(tester.getRect(_surface), viewport);

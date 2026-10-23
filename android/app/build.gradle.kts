@@ -8,15 +8,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Release signing material is deliberately optional: without it the release
-// build still succeeds but produces an UNSIGNED package, so the task stays
-// usable for someone who only wants to inspect the build. What must never
-// happen is a release silently signed with the public debug key, so the
-// expected certificate is pinned in CI as RELEASE_SIGNER_SHA256 instead.
+// Release builds require a real signing identity. They must never silently
+// fall back to the public Android debug key. Release tasks fail fast when the
+// local keystore properties or CI signing environment are incomplete.
 //
 // Local builds read android/keystore.properties, which is git-ignored and kept
 // outside version control. CI supplies the same four values as environment
-// variables. See docs/release-signing.md.
+// variables. See README.md, section 正式签名.
 val keystoreProperties = Properties().apply {
     val file = rootProject.file("keystore.properties")
     if (file.isFile) file.inputStream().use { load(it) }
@@ -120,14 +118,11 @@ android {
             // key cannot be overwritten by these -- it must be uninstalled.
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
-            } else {
-                // 【青茄】没有正式签名时退回 debug 签名：否则 release APK 完全
-                // 未签名，adb install 直接报 INSTALL_PARSE_FAILED_NO_CERTIFICATES，
-                // 用户日常只能装 400MB+ 的 debug 包。
-                signingConfig = signingConfigs.getByName("debug")
             }
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Keep release reliable on real devices: R8 previously stripped JNI/Pigeon
+            // runtime types used by shared_preferences and secure storage.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -147,7 +142,7 @@ dependencies {
     // core calls back into for streaming CENC decrypt.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Media3 ExoPlayer — NativePlayerPlugin host for short-drama playback.
+    // Media3 ExoPlayer hosts encrypted audio playback in NativePlayerPlugin.
     val media3Version = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")

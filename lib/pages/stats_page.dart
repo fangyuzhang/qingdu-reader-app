@@ -5,11 +5,13 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../models/media_item.dart';
+import '../services/app_theme.dart';
 import '../services/library_store.dart';
 import '../services/poster_cache.dart';
 import '../services/media_history_store.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_stats_store.dart';
+import '../widgets/home/home_design.dart';
 import 'notes_page.dart';
 import 'detail_page.dart';
 import 'reading_report_page.dart';
@@ -155,9 +157,23 @@ class _StatsPageState extends State<StatsPage> {
     _reloadTimer = null;
     _storeDirty = false;
     final store = LibraryStore.instance;
-    final history = store.historySnapshot();
-    final timeMap = store.readTimeSnapshot();
+    final allHistory = store.historySnapshot();
+    final allTimeMap = store.readTimeSnapshot();
     final kinds = store.readTimeKindSnapshot();
+    final history = allHistory
+        .where(
+          (entry) => _isSupportedStatisticsKind(
+            _statisticsKind(entry['kind']?.toString(), entry['id']?.toString()),
+          ),
+        )
+        .toList(growable: false);
+    final timeMap = <String, Map<String, double>>{
+      for (final entry in allTimeMap.entries)
+        if (_isSupportedStatisticsKind(
+          _statisticsKind(kinds[entry.key], entry.key),
+        ))
+          entry.key: entry.value,
+    };
     setState(() {
       _history = history;
       _readTimeMap = timeMap;
@@ -401,8 +417,29 @@ class _StatsPageState extends State<StatsPage> {
   }
 }
 
+const Set<String> _supportedStatisticsKinds = {'book', 'audio'};
+
+String _statisticsKind(String? storedKind, String? id) {
+  final kind = storedKind?.trim() ?? '';
+  if (kind.isNotEmpty) return kind;
+  final prefixEnd = id?.indexOf(':') ?? -1;
+  if (prefixEnd > 0) {
+    final prefix = id!.substring(0, prefixEnd);
+    if (prefix == 'audio' ||
+        prefix == 'video' ||
+        prefix == 'manju' ||
+        prefix == 'manga') {
+      return prefix;
+    }
+  }
+  return 'book';
+}
+
+bool _isSupportedStatisticsKind(String kind) =>
+    _supportedStatisticsKinds.contains(kind);
+
 Map<String, dynamic> _historyForStatisticsId(String id, [String? storedKind]) {
-  for (final kind in const {'audio': '听书', 'manga': '漫画'}.entries) {
+  for (final kind in const {'audio': '听书'}.entries) {
     final prefix = '${kind.key}:';
     if (!id.startsWith(prefix) || id.length == prefix.length) continue;
     final contentId = id.substring(prefix.length);
@@ -524,13 +561,13 @@ class _NotesEntryCard extends StatelessWidget {
               height: 34,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: const Color(0x1AD64545),
+                color: AppTheme.highlight.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
                 LucideIcons.pen_line,
                 size: 18,
-                color: Color(0xFFD64545),
+                color: AppTheme.highlight,
               ),
             ),
             const SizedBox(width: 12),
@@ -567,7 +604,7 @@ class _NotesEntryCard extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
-                  color: Color(0xFFD64545),
+                  color: AppTheme.highlight,
                 ),
               ),
             const SizedBox(width: 6),
@@ -597,7 +634,7 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final palette = HomePalette.of(context);
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -609,25 +646,22 @@ class _Card extends StatelessWidget {
                 height: 15,
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
-                  color: scheme.primary,
+                  color: HomePalette.accent,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               Expanded(
                 child: Text(
                   title!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w700,
+                    color: palette.ink,
                   ),
                 ),
               ),
               if (onTap != null)
-                Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: scheme.onSurfaceVariant,
-                ),
+                Icon(Icons.chevron_right, size: 18, color: palette.muted),
             ],
           ),
           if (subtitle != null) ...[
@@ -636,7 +670,7 @@ class _Card extends StatelessWidget {
               padding: const EdgeInsets.only(left: 11.5),
               child: Text(
                 subtitle!,
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                style: TextStyle(fontSize: 12, color: palette.muted),
               ),
             ),
           ],
@@ -649,9 +683,8 @@ class _Card extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: scheme.surface,
+          color: palette.soft,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: scheme.outlineVariant, width: 0.6),
         ),
         child: body,
       );
@@ -659,11 +692,8 @@ class _Card extends StatelessWidget {
     // 可点击时把底色/描边放到 Material 上，水波纹才不会盖在 Container 底下。
     return Material(
       key: ValueKey('stats-card-$title'),
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: scheme.outlineVariant, width: 0.6),
-      ),
+      color: palette.soft,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -705,7 +735,7 @@ class _OverviewCard extends StatelessWidget {
       ('累计字数', totalChars > 0 ? formatCharacterCount(totalChars) : '--'),
       ('连续打卡', streakDays > 0 ? '$streakDays 天' : '--'),
     ];
-    final scheme = Theme.of(context).colorScheme;
+    final palette = HomePalette.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     return _Card(
       child: GridView(
@@ -722,22 +752,29 @@ class _OverviewCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerLow,
+                color: palette.line.withValues(
+                  alpha: palette.dark ? 0.45 : 0.55,
+                ),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 19,
-                      height: 1.2,
-                      fontWeight: FontWeight.bold,
-                      color: scheme.onSurface,
+                  // 指标数字随宽度缩放而不是截断：「3 小时 17 分」这类值
+                  // 在窄屏/大字号下很容易被省略号吃掉关键分钟数。
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 19,
+                        height: 1.2,
+                        fontWeight: FontWeight.w700,
+                        color: palette.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -746,7 +783,7 @@ class _OverviewCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.2,
-                      color: scheme.onSurfaceVariant,
+                      color: palette.muted,
                     ),
                   ),
                 ],
@@ -930,15 +967,12 @@ class _RecentBooksCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final title = entry['title']?.toString() ?? '未知';
     final chapter = entry['chapterId']?.toString() ?? '';
-    final isVideo = isVideoKind(entry['kind']?.toString() ?? '');
     final time = DateTime.fromMillisecondsSinceEpoch(
       (entry['time'] as num?)?.toInt() ?? 0,
     );
     final meta = [
       if (chapter.isNotEmpty)
-        (isVideo
-            ? '看到第${((entry['episode'] as num?)?.toInt() ?? 0) + 1}集'
-            : '读到第${((entry['episode'] as num?)?.toInt() ?? 0) + 1}章'),
+        '读到第${((entry['episode'] as num?)?.toInt() ?? 0) + 1}章',
       '最近打开 ${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
     ].join(' · ');
 

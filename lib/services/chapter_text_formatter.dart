@@ -71,7 +71,10 @@ final _contentMarkers = <RegExp>[
 /// The `PGC_` signature is required — the same one the 段评 previews match on —
 /// so a stray `{!--` inside a novel's prose is left alone rather than eating the
 /// rest of its line.
-final _truncatedMarker = RegExp(r'\{!--\s*PGC_[A-Z_]+:[^\n]*$', multiLine: true);
+final _truncatedMarker = RegExp(
+  r'\{!--\s*PGC_[A-Z_]+:[^\n]*$',
+  multiLine: true,
+);
 
 String _stripContentMarkers(String text) {
   // Closed markers first: a stray unterminated `{!--` must not be allowed to
@@ -197,6 +200,21 @@ class ChapterContent {
 
   bool get isEmpty => blocks.isEmpty;
   bool get hasImages => blocks.any((block) => block is ChapterImage);
+
+  /// True when the chapter still has text after its leading title is removed.
+  ///
+  /// Some upstream catalogs expose front-matter placeholders as chapters whose
+  /// entire payload is the chapter title (for example a standalone book-title
+  /// page between 版权信息 and 第一章). They are not readable chapters and must
+  /// be skipped rather than shown as an empty page.
+  bool hasReadableBody(String title) => !withoutLeadingTitle(title).isEmpty;
+
+  /// True only when the response has blocks but none remain after removing the
+  /// leading title. Unlike [isEmpty], this distinguishes a deliberate upstream
+  /// title page from a failed/empty source response.
+  bool isTitleOnlyPlaceholder(String title) =>
+      !isEmpty && !hasReadableBody(title);
+
   Iterable<ChapterImage> get images => blocks.whereType<ChapterImage>();
 
   /// An incomplete response is useful on a cache miss, but cannot refresh a
@@ -239,7 +257,6 @@ class ChapterContent {
                 block is ChapterParagraph && _holdsContentMarker(block.text),
           ) ||
       needsImageRefresh(now: now);
-
 
   ChapterContent withoutLeadingTitle(String title) {
     final wanted = title.replaceAll(_titleSpaces, '');

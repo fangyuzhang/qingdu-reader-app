@@ -49,35 +49,41 @@ void main() {
     }
   });
 
-  test('concurrent starts run one initialization and share the result', () async {
-    final transport = _FakeRustTransport();
-    final backend = createBackend(transport: transport);
+  test(
+    'concurrent starts run one initialization and share the result',
+    () async {
+      final transport = _FakeRustTransport();
+      final backend = createBackend(transport: transport);
 
-    final first = backend.start();
-    final second = backend.start();
-    expect(identical(first, second), isTrue);
-    await Future.wait([first, second]);
+      final first = backend.start();
+      final second = backend.start();
+      expect(identical(first, second), isTrue);
+      await Future.wait([first, second]);
 
-    expect(transport.initCalls, 1);
-    expect(backend.isRunning, isTrue);
-    await backend.stop();
-    expect(transport.stopCalls, 1);
-    expect(backend.isRunning, isFalse);
-  });
+      expect(transport.initCalls, 1);
+      expect(backend.isRunning, isTrue);
+      await backend.stop();
+      expect(transport.stopCalls, 1);
+      expect(backend.isRunning, isFalse);
+    },
+  );
 
-  test('a failed core initialization surfaces and leaves nothing running', () async {
-    final transport = _FakeRustTransport(initResult: 'failed: listen busy');
-    final backend = createBackend(transport: transport);
+  test(
+    'a failed core initialization surfaces and leaves nothing running',
+    () async {
+      final transport = _FakeRustTransport(initResult: 'failed: listen busy');
+      final backend = createBackend(transport: transport);
 
-    await expectLater(backend.start(), throwsStateError);
-    expect(backend.isRunning, isFalse);
-    // A failed start performs its own cleanup so a retry is not blocked.
-    transport.initResult = 'running';
-    await backend.start();
-    expect(backend.isRunning, isTrue);
-    expect(transport.initCalls, 2);
-    await backend.stop();
-  });
+      await expectLater(backend.start(), throwsStateError);
+      expect(backend.isRunning, isFalse);
+      // A failed start performs its own cleanup so a retry is not blocked.
+      transport.initResult = 'running';
+      await backend.start();
+      expect(backend.isRunning, isTrue);
+      expect(transport.initCalls, 2);
+      await backend.stop();
+    },
+  );
 
   test('startup times out when the health endpoint never turns 200', () async {
     final transport = _FakeRustTransport(healthy: false);
@@ -138,33 +144,35 @@ void main() {
     expect(backend.isRunning, isFalse);
   });
 
-  test('deploys nested runtime assets and keeps the registered device pool',
-      () async {
-    final transport = _FakeRustTransport();
-    final backend = createBackend(transport: transport);
-    await backend.start();
+  test(
+    'deploys nested runtime assets and keeps the registered device pool',
+    () async {
+      final transport = _FakeRustTransport();
+      final backend = createBackend(transport: transport);
+      await backend.start();
 
-    for (final path in _BackendAssets.runtimeAssets) {
-      final file = File(
-        '${directory.path}/backend/${path.substring('assets/'.length)}',
+      for (final path in _BackendAssets.runtimeAssets) {
+        final file = File(
+          '${directory.path}/backend/${path.substring('assets/'.length)}',
+        );
+        expect(await file.readAsString(), '{}', reason: path);
+      }
+
+      // The pool holds real device credentials: a restart must not overwrite it.
+      final pool = File('${directory.path}/backend/config/device_pool.json');
+      await pool.writeAsString('registered-device');
+      final stylesheet = File(
+        '${directory.path}/backend/web/assets/css/all.min.css',
       );
-      expect(await file.readAsString(), '{}', reason: path);
-    }
+      await stylesheet.writeAsString('old stylesheet');
+      await backend.stop();
 
-    // The pool holds real device credentials: a restart must not overwrite it.
-    final pool = File('${directory.path}/backend/config/device_pool.json');
-    await pool.writeAsString('registered-device');
-    final stylesheet = File(
-      '${directory.path}/backend/web/assets/css/all.min.css',
-    );
-    await stylesheet.writeAsString('old stylesheet');
-    await backend.stop();
-
-    await backend.start();
-    expect(await pool.readAsString(), 'registered-device');
-    expect(await stylesheet.readAsString(), '{}');
-    await backend.stop();
-  });
+      await backend.start();
+      expect(await pool.readAsString(), 'registered-device');
+      expect(await stylesheet.readAsString(), '{}');
+      await backend.stop();
+    },
+  );
 
   test('the core is initialized with the deployed runtime paths', () async {
     final transport = _FakeRustTransport();
@@ -261,7 +269,6 @@ class _BackendAssets extends CachingAssetBundle {
     'assets/web/index.html',
     'assets/web/assets/css/all.min.css',
     'assets/web/assets/webfonts/fa-solid-900.woff2',
-    'assets/plugins/player.html',
   ];
 
   @override

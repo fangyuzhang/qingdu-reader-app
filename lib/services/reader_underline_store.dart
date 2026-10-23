@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 
 import 'encrypted_hive.dart';
+import 'reader_mark_style.dart';
 
 /// One locally saved 划线: a paragraph the reader marked, kept on the device.
 @immutable
@@ -20,6 +22,8 @@ class ReaderUnderline {
 
   final String text;
   final int createdAt;
+  final ReaderMarkStyle style;
+  final int colorValue;
 
   const ReaderUnderline({
     required this.bookId,
@@ -28,13 +32,13 @@ class ReaderUnderline {
     required this.text,
     this.paraIndex,
     this.createdAt = 0,
+    this.style = ReaderMarkStyle.solid,
+    this.colorValue = 0,
   });
 
   /// See [paragraphUnderlineId].
-  int get id => paragraphUnderlineId(
-    paraIndex: paraIndex,
-    blockIndex: blockIndex,
-  );
+  int get id =>
+      paragraphUnderlineId(paraIndex: paraIndex, blockIndex: blockIndex);
 
   String get key => ReaderUnderlineStore.keyFor(
     bookId: bookId,
@@ -50,6 +54,8 @@ class ReaderUnderline {
     'blockIndex': blockIndex,
     'text': text,
     'createdAt': createdAt,
+    'style': style.storageValue,
+    'colorValue': colorValue,
   };
 
   static ReaderUnderline? fromMap(dynamic raw) {
@@ -69,6 +75,7 @@ class ReaderUnderline {
     }
     final paraIndex = raw['paraIndex'];
     final createdAt = raw['createdAt'];
+    final colorValue = raw['colorValue'];
     return ReaderUnderline(
       bookId: bookId,
       chapterId: chapterId,
@@ -76,6 +83,10 @@ class ReaderUnderline {
       text: text,
       paraIndex: paraIndex is num ? paraIndex.toInt() : null,
       createdAt: createdAt is num && createdAt.isFinite ? createdAt.toInt() : 0,
+      style: ReaderMarkStyle.fromStorage(raw['style']),
+      colorValue: colorValue is num && colorValue.isFinite
+          ? colorValue.toInt()
+          : 0,
     );
   }
 }
@@ -105,6 +116,8 @@ class ReaderRangeUnderline {
   final int end;
   final String text;
   final int createdAt;
+  final ReaderMarkStyle style;
+  final int colorValue;
 
   const ReaderRangeUnderline({
     required this.bookId,
@@ -113,6 +126,8 @@ class ReaderRangeUnderline {
     required this.end,
     required this.text,
     this.createdAt = 0,
+    this.style = ReaderMarkStyle.solid,
+    this.colorValue = 0,
   });
 
   bool get isEmpty => end <= start;
@@ -123,8 +138,7 @@ class ReaderRangeUnderline {
 
   /// True when the selection sits entirely inside this mark, so removing it
   /// cannot cut through an unrelated underline.
-  bool contains(int start, int end) =>
-      this.start <= start && end <= this.end;
+  bool contains(int start, int end) => this.start <= start && end <= this.end;
 
   String get key => ReaderUnderlineStore.rangeKeyFor(
     bookId: bookId,
@@ -140,6 +154,8 @@ class ReaderRangeUnderline {
     'end': end,
     'text': text,
     'createdAt': createdAt,
+    'style': style.storageValue,
+    'colorValue': colorValue,
   };
 
   static ReaderRangeUnderline? fromMap(dynamic raw) {
@@ -161,6 +177,7 @@ class ReaderRangeUnderline {
       return null;
     }
     final createdAt = raw['createdAt'];
+    final colorValue = raw['colorValue'];
     return ReaderRangeUnderline(
       bookId: bookId,
       chapterId: chapterId,
@@ -168,6 +185,10 @@ class ReaderRangeUnderline {
       end: end.toInt(),
       text: text,
       createdAt: createdAt is num && createdAt.isFinite ? createdAt.toInt() : 0,
+      style: ReaderMarkStyle.fromStorage(raw['style']),
+      colorValue: colorValue is num && colorValue.isFinite
+          ? colorValue.toInt()
+          : 0,
     );
   }
 }
@@ -195,6 +216,11 @@ class ReaderUnderlineStore {
 
   Future<Box<dynamic>>? _opening;
   Future<void> _writes = Future<void>.value();
+
+  /// 写队列属于创建它的 zone。widget 测试每个用例一个 fake-async zone，
+  /// 跨 zone 复用一条未完成的链会让下一个用例的读取永远等不到——
+  /// 与 [DetailSnapshotCache] 同一处理：换 zone 就丢弃旧链。
+  Zone _writesZone = Zone.current;
 
   static String keyFor({
     required String bookId,
@@ -232,8 +258,10 @@ class ReaderUnderlineStore {
     try {
       // Hive throws synchronously when it has no directory yet, so the call
       // itself has to sit inside the guard, not only its await.
-      final pending =
-          _opening ??= EncryptedHive.openBox<dynamic>(_hive, _boxName);
+      final pending = _opening ??= EncryptedHive.openBox<dynamic>(
+        _hive,
+        _boxName,
+      );
       final box = await pending;
       if (box.isOpen) return box;
       _opening = null;
@@ -249,6 +277,10 @@ class ReaderUnderlineStore {
     required T onUnavailable,
     bool failWhenUnavailable = false,
   }) {
+    if (!identical(Zone.current, _writesZone)) {
+      _writes = Future<void>.value();
+      _writesZone = Zone.current;
+    }
     final operation = _writes.then((_) async {
       final box = await _box();
       if (box == null) {
@@ -303,9 +335,7 @@ class ReaderUnderlineStore {
     if (box.length <= maxEntries) return;
     final oldest = box.keys.toList()
       ..sort(
-        (a, b) => _createdAtOf(
-          box.get(a),
-        ).compareTo(_createdAtOf(box.get(b))),
+        (a, b) => _createdAtOf(box.get(a)).compareTo(_createdAtOf(box.get(b))),
       );
     await box.deleteAll(oldest.take(box.length - maxEntries));
   }
@@ -326,6 +356,55 @@ class ReaderUnderlineStore {
     return out;
   }, onUnavailable: const []);
 
+  /// Every range underline of every book, newest first (notes page 划线 view).
+  Future<List<ReaderRangeUnderline>> loadAllRanges() => _serialize((box) async {
+    final out = <ReaderRangeUnderline>[];
+    for (final raw in box.values) {
+      final entry = ReaderRangeUnderline.fromMap(raw);
+      if (entry != null) out.add(entry);
+    }
+    out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return out;
+  }, onUnavailable: const []);
+
+  /// Every whole-paragraph underline of every book, newest first.
+  Future<List<ReaderUnderline>> loadAllParagraphs() => _serialize((box) async {
+    final out = <ReaderUnderline>[];
+    for (final raw in box.values) {
+      final entry = ReaderUnderline.fromMap(raw);
+      if (entry != null) out.add(entry);
+    }
+    out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return out;
+  }, onUnavailable: const []);
+
+  /// Every range underline of one book (notes page 划线/荧光笔 view).
+  Future<List<ReaderRangeUnderline>> loadBookRanges(String bookId) =>
+      _serialize((box) async {
+        final out = <ReaderRangeUnderline>[];
+        for (final raw in box.values) {
+          final entry = ReaderRangeUnderline.fromMap(raw);
+          if (entry == null || entry.bookId != bookId) continue;
+          out.add(entry);
+        }
+        out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return out;
+      }, onUnavailable: const []);
+
+  /// Every whole-paragraph underline of one book — the legacy shape written by
+  /// earlier builds, still shown beside the range records.
+  Future<List<ReaderUnderline>> loadBookParagraphs(String bookId) =>
+      _serialize((box) async {
+        final out = <ReaderUnderline>[];
+        for (final raw in box.values) {
+          final entry = ReaderUnderline.fromMap(raw);
+          if (entry == null || entry.bookId != bookId) continue;
+          out.add(entry);
+        }
+        out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return out;
+      }, onUnavailable: const []);
+
   Future<void> remove(String key) => _serialize(
     (box) async {
       await box.delete(key);
@@ -339,7 +418,8 @@ class ReaderUnderlineStore {
     final doomed = <dynamic>[];
     for (final key in box.keys) {
       final raw = box.get(key);
-      final book = ReaderUnderline.fromMap(raw)?.bookId ??
+      final book =
+          ReaderUnderline.fromMap(raw)?.bookId ??
           ReaderRangeUnderline.fromMap(raw)?.bookId;
       if (book == bookId) doomed.add(key);
     }

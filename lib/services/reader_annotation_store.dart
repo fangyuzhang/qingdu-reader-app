@@ -5,6 +5,60 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 
 import 'encrypted_hive.dart';
+import 'reader_mark_style.dart';
+
+/// 一次新建/编辑批注时由编辑器收集的全部内容。
+@immutable
+class AnnotationDraft {
+  const AnnotationDraft({
+    this.thought = '',
+    this.category = '',
+    this.tags = const [],
+    this.markerType = '',
+    this.markerLabel = '批',
+    this.markerColorValue = readerDefaultAnnotationColor,
+    this.markStyle = ReaderMarkStyle.solid,
+    this.markColorValue = readerDefaultAnnotationColor,
+  });
+
+  final String thought;
+  final String category;
+  final List<String> tags;
+  final String markerType;
+  final String markerLabel;
+  final int markerColorValue;
+  final ReaderMarkStyle markStyle;
+  final int markColorValue;
+
+  static const String customMarkerType = 'custom';
+
+  factory AnnotationDraft.forExcerpt({
+    String category = '',
+    List<String> tags = const [],
+  }) => AnnotationDraft(
+    category: category,
+    tags: tags,
+    markerType: 'excerpt',
+    markerLabel: '摘',
+    markerColorValue: readerDefaultExcerptColor,
+    markStyle: ReaderMarkStyle.solid,
+    markColorValue: readerDefaultExcerptColor,
+  );
+
+  /// 分类保持原样，标签去空白、去重，并兼容中英文逗号/换行分隔。
+  static List<String> normalizeTags(Iterable<String> input) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final raw in input) {
+      for (final part in raw.split(RegExp(r'[,，\n]'))) {
+        final tag = part.trim();
+        if (tag.isEmpty) continue;
+        if (seen.add(tag)) result.add(tag);
+      }
+    }
+    return List.unmodifiable(result);
+  }
+}
 
 /// 一条本地批注/书摘（蜗牛读书式：选中文字 + 想法 + 位置）。
 ///
@@ -26,6 +80,13 @@ class ReaderAnnotation {
     this.createdAt = 0,
     this.bookTitle = '',
     this.chapterTitle = '',
+    this.category = '',
+    this.tags = const [],
+    this.markerType = '',
+    this.markerLabel = '',
+    this.markerColorValue = 0,
+    this.markStyle = ReaderMarkStyle.solid,
+    this.markColorValue = 0,
   });
 
   static const String kTypeAnnot = 'annot';
@@ -54,8 +115,64 @@ class ReaderAnnotation {
   final String bookTitle;
   final String chapterTitle;
 
+  /// 分类是归属维度：一条笔记最多一个；标签是多维标记，可有多个。
+  final String category;
+  final List<String> tags;
+
+  /// 批注标记类型及角标文案/底色。旧数据为空时自动回退到「批 / 摘」。
+  final String markerType;
+  final String markerLabel;
+  final int markerColorValue;
+
+  /// 原文标记的线型与颜色；批注默认横线（solid）。
+  final ReaderMarkStyle markStyle;
+  final int markColorValue;
+
   bool get isAnnot => type == kTypeAnnot;
   bool get isEmpty => end <= start;
+
+  String get displayMarkerLabel {
+    final value = markerLabel.trim();
+    if (value.isNotEmpty) return value;
+    return isAnnot ? '批' : '摘';
+  }
+
+  int get effectiveMarkerColorValue => markerColorValue != 0
+      ? markerColorValue
+      : (isAnnot ? readerDefaultAnnotationColor : readerDefaultExcerptColor);
+
+  int get effectiveMarkColorValue => markColorValue != 0
+      ? markColorValue
+      : (isAnnot ? readerDefaultAnnotationColor : readerDefaultExcerptColor);
+
+  ReaderAnnotation copyWith({
+    String? thought,
+    String? category,
+    List<String>? tags,
+    String? markerType,
+    String? markerLabel,
+    int? markerColorValue,
+    ReaderMarkStyle? markStyle,
+    int? markColorValue,
+  }) => ReaderAnnotation(
+    bookId: bookId,
+    chapterId: chapterId,
+    start: start,
+    end: end,
+    text: text,
+    thought: thought ?? this.thought,
+    type: type,
+    createdAt: createdAt,
+    bookTitle: bookTitle,
+    chapterTitle: chapterTitle,
+    category: category ?? this.category,
+    tags: tags ?? this.tags,
+    markerType: markerType ?? this.markerType,
+    markerLabel: markerLabel ?? this.markerLabel,
+    markerColorValue: markerColorValue ?? this.markerColorValue,
+    markStyle: markStyle ?? this.markStyle,
+    markColorValue: markColorValue ?? this.markColorValue,
+  );
 
   String get key => ReaderAnnotationStore.keyFor(
     bookId: bookId,
@@ -75,6 +192,13 @@ class ReaderAnnotation {
     'createdAt': createdAt,
     'bookTitle': bookTitle,
     'chapterTitle': chapterTitle,
+    'category': category,
+    'tags': tags,
+    'markerType': markerType,
+    'markerLabel': markerLabel,
+    'markerColorValue': markerColorValue,
+    'markStyle': markStyle.storageValue,
+    'markColorValue': markColorValue,
   };
 
   static ReaderAnnotation? fromMap(dynamic raw) {
@@ -100,6 +224,17 @@ class ReaderAnnotation {
     final createdAt = raw['createdAt'];
     final bookTitle = raw['bookTitle'];
     final chapterTitle = raw['chapterTitle'];
+    final category = raw['category'];
+    final rawTags = raw['tags'];
+    final tags = rawTags is List
+        ? AnnotationDraft.normalizeTags(
+            rawTags.whereType<Object?>().map((value) => value.toString()),
+          )
+        : const <String>[];
+    final markerType = raw['markerType'];
+    final markerLabel = raw['markerLabel'];
+    final markerColorValue = raw['markerColorValue'];
+    final markColorValue = raw['markColorValue'];
     return ReaderAnnotation(
       bookId: bookId,
       chapterId: chapterId,
@@ -111,6 +246,17 @@ class ReaderAnnotation {
       createdAt: createdAt is num && createdAt.isFinite ? createdAt.toInt() : 0,
       bookTitle: bookTitle is String ? bookTitle : '',
       chapterTitle: chapterTitle is String ? chapterTitle : '',
+      category: category is String ? category.trim() : '',
+      tags: tags,
+      markerType: markerType is String ? markerType : '',
+      markerLabel: markerLabel is String ? markerLabel.trim() : '',
+      markerColorValue: markerColorValue is num && markerColorValue.isFinite
+          ? markerColorValue.toInt()
+          : 0,
+      markStyle: ReaderMarkStyle.fromStorage(raw['markStyle']),
+      markColorValue: markColorValue is num && markColorValue.isFinite
+          ? markColorValue.toInt()
+          : 0,
     );
   }
 }
@@ -144,7 +290,10 @@ class ReaderAnnotationStore {
   Future<Box<dynamic>?> _box() async {
     if (!hiveReady) return null;
     try {
-      final pending = _opening ??= EncryptedHive.openBox<dynamic>(_hive, _boxName);
+      final pending = _opening ??= EncryptedHive.openBox<dynamic>(
+        _hive,
+        _boxName,
+      );
       final box = await pending;
       if (box.isOpen) return box;
       _opening = null;
@@ -189,17 +338,18 @@ class ReaderAnnotationStore {
       }, onUnavailable: const []);
 
   /// 整本书的批注/书摘（笔记页用），按创建时间排序。
-  Future<List<ReaderAnnotation>> loadBook(String bookId) => _serialize((box) async {
-    final out = <ReaderAnnotation>[];
-    for (final raw in box.values) {
-      final entry = ReaderAnnotation.fromMap(raw);
-      if (entry == null) continue;
-      if (entry.bookId != bookId) continue;
-      out.add(entry);
-    }
-    out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return out;
-  }, onUnavailable: const []);
+  Future<List<ReaderAnnotation>> loadBook(String bookId) =>
+      _serialize((box) async {
+        final out = <ReaderAnnotation>[];
+        for (final raw in box.values) {
+          final entry = ReaderAnnotation.fromMap(raw);
+          if (entry == null) continue;
+          if (entry.bookId != bookId) continue;
+          out.add(entry);
+        }
+        out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        return out;
+      }, onUnavailable: const []);
 
   /// 全部书籍的批注/书摘（笔记页用），按创建时间倒序。
   Future<List<ReaderAnnotation>> loadAll() => _serialize((box) async {
@@ -232,29 +382,35 @@ class ReaderAnnotationStore {
   );
 
   /// 更新想法（编辑批注）。
-  Future<void> updateThought(String key, String thought) => _serialize(
+  Future<void> updateThought(String key, String thought) =>
+      _serialize((box) async {
+        final raw = box.get(key);
+        final existing = ReaderAnnotation.fromMap(raw);
+        if (existing == null) return;
+        await box.put(key, existing.copyWith(thought: thought).toMap());
+        changes.value++;
+      }, onUnavailable: null);
+
+  /// 编辑想法、分类、标签、角标和原文标记样式，同时保留位置与创建时间。
+  Future<void> updateNote(String key, AnnotationDraft draft) => _serialize(
     (box) async {
-      final raw = box.get(key);
-      final existing = ReaderAnnotation.fromMap(raw);
+      final existing = ReaderAnnotation.fromMap(box.get(key));
       if (existing == null) return;
-      await box.put(
-        key,
-        ReaderAnnotation(
-          bookId: existing.bookId,
-          chapterId: existing.chapterId,
-          start: existing.start,
-          end: existing.end,
-          text: existing.text,
-          thought: thought,
-          type: existing.type,
-          createdAt: existing.createdAt,
-          bookTitle: existing.bookTitle,
-          chapterTitle: existing.chapterTitle,
-        ).toMap(),
+      final updated = existing.copyWith(
+        thought: draft.thought.trim(),
+        category: draft.category.trim(),
+        tags: AnnotationDraft.normalizeTags(draft.tags),
+        markerType: draft.markerType.trim(),
+        markerLabel: draft.markerLabel.trim(),
+        markerColorValue: draft.markerColorValue,
+        markStyle: draft.markStyle,
+        markColorValue: draft.markColorValue,
       );
+      await box.put(key, updated.toMap());
       changes.value++;
     },
     onUnavailable: null,
+    failWhenUnavailable: true,
   );
 
   Future<void> remove(String key) => _serialize(
@@ -283,10 +439,7 @@ class ReaderAnnotationStore {
   /// 会永久挂起（encrypted_hive 注释里的 CRIT-014 同类问题）。
   void closeSync() {
     _opening = null;
-    for (final name in [
-      _boxName,
-      EncryptedHive.encryptedBoxName(_boxName),
-    ]) {
+    for (final name in [_boxName, EncryptedHive.encryptedBoxName(_boxName)]) {
       try {
         if (_hive.isBoxOpen(name)) unawaited(_hive.box(name).close());
       } catch (_) {

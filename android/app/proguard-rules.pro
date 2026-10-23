@@ -44,7 +44,15 @@
 -keep class io.flutter.app.** { *; }
 -keep class io.flutter.embedding.** { *; }
 -keep class io.flutter.plugin.** { *; }
--keep class io.flutter.plugins.** { *; }
+# Pigeon JNI resolves suspend method descriptors by their original Kotlin
+# parameter types. Keeping only the plugin class/method names is insufficient:
+# R8 may still rename kotlin.coroutines.Continuation, after which the JNI lookup
+# throws NoSuchMethodError during startup.
+-keep,includedescriptorclasses class io.flutter.plugins.** { *; }
+-keep class kotlin.coroutines.** { *; }
+-keep class kotlin.Result { *; }
+-keep class kotlin.Result$* { *; }
+-keep class kotlin.Unit { *; }
 -keep class io.flutter.util.** { *; }
 -keep class io.flutter.view.** { *; }
 

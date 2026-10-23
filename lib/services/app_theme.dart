@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Persisted theme-mode preference key: 'theme_mode' = 'light'|'dark'|'system'.
 const themeModeKey = 'theme_mode';
@@ -37,6 +38,28 @@ class _NoPageTransitionBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) => child;
+}
+
+/// Resolves [mode] against the current platform brightness. `system` follows the
+/// device setting; everything else answers for itself.
+bool themeModeIsDark(ThemeMode mode, Brightness platformBrightness) => switch (
+  mode
+) {
+  ThemeMode.dark => true,
+  ThemeMode.light => false,
+  ThemeMode.system => platformBrightness == Brightness.dark,
+};
+
+/// Writes the global theme mode and persists it, so the reader's night button
+/// and the settings / 我的 switches all drive the same preference.
+Future<void> setThemeMode(ThemeMode mode) async {
+  themeModeNotifier.value = mode;
+  try {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(themeModeKey, mode.name);
+  } catch (_) {
+    // 保存失败不影响当前会话的显示，下次启动退回系统默认。
+  }
 }
 
 ThemeMode themeModeFromName(String? name) {

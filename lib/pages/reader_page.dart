@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
@@ -12,18 +13,22 @@ import '../services/app_theme.dart';
 import '../services/backend_transport.dart';
 import '../services/chapter_cache_store.dart';
 import '../services/chapter_text_formatter.dart';
+import '../services/readable_chapter_resolver.dart';
 import '../services/library_store.dart';
 import '../services/listening_session.dart';
 import '../services/reader_device.dart';
 import '../services/eink_refresh.dart';
 import '../services/volume_key.dart';
 import '../services/reader_history.dart';
+import '../services/reader_mark_preferences.dart';
+import '../services/reader_mark_style.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_tap_zones.dart';
 import '../services/app_log.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
+import '../services/shelf_store.dart';
 import '../services/system_tts.dart';
 import '../widgets/chapter_cache_sheet.dart';
 import '../widgets/reader/reader_appearance_sheet.dart';
@@ -58,6 +63,10 @@ typedef ParagraphCommentResolver =
     );
 
 class ReaderPage extends StatefulWidget {
+  /// 连续阅读护眼提醒的间隔。真机固定 45 分钟；测试里可缩短以验证弹窗层级。
+  @visibleForTesting
+  static Duration eyeCareInterval = const Duration(minutes: 45);
+
   final String bookId;
   final String title;
   final String cover;
@@ -121,6 +130,11 @@ class ReaderPage extends StatefulWidget {
 // Note: 菜单覆盖层与正文布局分离；见
 // .agents/notes/implemented/feature/2026-09-10-reader-interface.md
 class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
+  /// Extra space reserved by the underline panel when it opens below the bar.
+  /// Keeping it in the same position calculation prevents the panel from
+  /// disappearing behind the system navigation gesture area on short screens.
+  static const double _underlinePanelHeight = 118;
+
   late int _index;
   final ScrollController _scrollController = ScrollController();
   Timer? _saveTimer;
@@ -145,6 +159,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   ReaderPreferences _preferences = const ReaderPreferences();
   ReaderThemePreset _dayTheme = ReaderThemePreset.light;
   bool _controlsVisible = false;
+
+  /// 当前已经应用给系统的界面模式。只有真正的显隐切换才重新下发，
+  /// 避免每帧/每次 setState 都调用 SystemChrome。
+  SystemUiMode? _appliedSystemUiMode;
 
   /// 自动翻页: a repeating timer flips forward every [ReaderPreferences.autoTurnSeconds]
   /// seconds; any tap or drag stops it. See
@@ -203,7 +221,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _stopAutoTurn();
       return;
     }
-    _controlsVisible = false;
+    _clearControls();
+    _syncSystemBars();
     _autoTurnTimer = Timer.periodic(
       Duration(seconds: _preferences.autoTurnSeconds),
       (_) => _autoTurnStep(),
@@ -229,8 +248,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _listenFollowPausedUntil = DateTime.now().add(const Duration(seconds: 15));
   }
 
-  /// 朗读句高亮：与跟随翻页独立同步，跟随关闭时高亮仍可显示；暂停、
-  /// 切章或未在读本章时清空。
+  /// 朗读句高亮：与跟随翻页独立同步，跟随关闭、暂停朗读时仍然显示；
+  /// 停止听书、切章或不在读被朗读的那一章时清空。
   (int, int)? _narrationRange;
 
   void _syncNarrationHighlight() {
@@ -238,15 +257,40 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final layout = _chapterLayout;
     (int, int)? next;
     final session = ListeningSession.instance;
-    if (_preferences.narrationHighlight &&
-        layout != null &&
-        session.matches(widget.bookId, _chapter.itemId)) {
+    // 暂停时也保留最后一句的高亮：读者常常停下来对照原文。停止听书会走
+    // ListeningSession.clear()，此时 bookId 为空，高亮自然消失。
+    final sameChapter =
+        session.bookId == widget.bookId && session.chapterId == _chapter.itemId;
+    if (_preferences.narrationHighlight && layout != null && sameChapter) {
       final ttsRange = session.sentenceRange;
       if (ttsRange != null) {
         final translated = narrationLayoutRange(layout, ttsRange);
-        if (translated != null) {
+        // 系统朗读会同时给出分句原文；偏移与排版块错位时（标题块、空段、
+        // 图片占位都可能导致一位错位），原文就近匹配的结果更可信。
+        final clause = session.narrationText;
+        if (clause != null && clause.trim().isNotEmpty) {
+          final located = narrationTextRangeNear(
+            layout,
+            clause,
+            translated?.start ?? ttsRange.start,
+          );
+          final range = located ?? translated;
+          if (range != null) next = (range.start, range.end);
+        } else if (translated != null) {
           next = (translated.start, translated.end);
         }
+      } else if (session.narrationText case final sentence?
+          when sentence.trim().isNotEmpty) {
+        final located = narrationTextRange(layout, sentence);
+        final fallback = located == null
+            ? narrationBlockAtProgress(layout, session.progress)
+            : null;
+        final range = located ?? fallback;
+        if (range != null) next = (range.start, range.end);
+      } else if (session.textProgress == null) {
+        // 没有字幕轨的有声书：按进度整段高亮，至少让读者知道在读哪一段。
+        final range = narrationBlockAtProgress(layout, session.progress);
+        if (range != null) next = (range.start, range.end);
       }
     }
     if (next != _narrationRange) {
@@ -282,16 +326,60 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (_paged) {
       _pagedKey.currentState?.followProgress(progress);
     } else if (_scrollController.hasClients) {
-      final position = _scrollController.position;
-      // 【青茄修复·滚动无缝】跟着读的是「活动段」，不是整条窗口：
-      // progress 是章内比例，必须换算成段内偏移再加段起点。
-      final segment = _activeScrollSegment;
-      final top = segment?.top ?? 0.0;
-      final span = segment?.extent ?? position.maxScrollExtent;
-      if (span > 0) {
-        _scrollController.jumpTo(top + progress.clamp(0.0, 1.0) * span);
-      }
+      _followListeningScroll(progress);
     }
+  }
+
+  /// 听书跟随：把正在朗读/高亮的那一行送到可视区上部约 1/3 处。
+  ///
+  /// 【青茄修复·听书跟随】原实现用 `jumpTo(top + progress * extent)` 把
+  /// 章内进度当成视口顶部，朗读行因此被顶到屏幕外；而且每次 tick 直接
+  /// 跳，表现为“一点一点突然下降”。现在按排版里的真实行位置换算，
+  /// 目标 = 行顶部 - 视口高度/3，并用 [animateTo] 缓动过去。
+  void _followListeningScroll(double progress) {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    // 【青茄修复·滚动无缝】跟着读的是「活动段」，不是整条窗口：
+    // 段内坐标要加上段起点才是列表偏移。
+    final segment = _activeScrollSegment;
+    final layout = segment?.layout ?? _chapterLayout;
+    final top = segment?.top ?? 0.0;
+    final span = segment?.extent ?? position.maxScrollExtent;
+    if (span <= 0) return;
+    final viewport = position.viewportDimension;
+    // 有朗读高亮时用真实行位置；高亮关闭时退回按播放进度换算的章内位置。
+    final range = _narrationRange;
+    final local = layout != null && range != null
+        ? layout.scrollForTextOffset(range.$1)
+        : progress.clamp(0.0, 1.0) * span;
+    final lineTop = top + local;
+    var target = (lineTop - viewport / 3).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    // 夹紧之后再保证高亮行本身留在视口内：章末/恢复位置等极端情况下
+    // 顶部 1/3 已不可达，也不能把正在读的那一行送出屏幕。
+    final visibleLow = (lineTop - viewport + 24).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    final visibleHigh = (lineTop - 24).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (visibleLow <= visibleHigh) {
+      target = target.clamp(visibleLow, visibleHigh);
+    }
+    // 上一段缓动还没结束：不叠加新动画，下一拍再跟随。
+    if (position.isScrollingNotifier.value) return;
+    if ((target - position.pixels).abs() < 8) return;
+    unawaited(
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
+      ),
+    );
   }
 
   void _autoTurnStep() {
@@ -329,6 +417,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// finishes, or when the chapter fails to load.
   // Note: .agents/notes/implemented/bug-fix/2026-10-15-reader-chapter-turn-animation.md
   ReaderChapterTurn? _chapterTurnRequest;
+
+  /// 顶部工具栏（返回/书名/本章评论/书架）是浮在正文之上的，展开时不占
+  /// 正文高度；只有章节第一页需要把正文让开它的实测高度（见 _toolbarLift）。
+
+  /// 冻结的系统安全区。Android 进入 immersive 后 `viewPadding` 会变成 0，
+  /// 系统栏恢复后又变回真实高度；如果直接把它喂给 SafeArea，切换工具栏时
+  /// 正文视口高度会变一次，整页文字就上下跳一下。这里记住见过的最大值，
+  /// 让正文布局与系统栏显隐解耦，切换时只有工具栏/状态栏滑上来盖住。
+  EdgeInsets _stableInsets = EdgeInsets.zero;
+
+  /// 工具栏让位只在「打开工具栏的那一刻位于章首」时为 true，并在关闭工具栏
+  /// 或切章时清除。不能用实时的滚动位置判断：否则章首打开工具栏后手指一动
+  /// `pixels > 2`，让位突然消失，正文又跳 56px。
+  bool _liftForToolbar = false;
+  bool _stableInsetsInitialized = false;
+  final GlobalKey _toolbarKey = GlobalKey();
+
+  /// 实测的工具栏高度（含状态栏安全区）；null 表示还没量到。
+  double? _toolbarHeight;
 
   /// Height of the reader's own bottom toolbar (目录/夜间/听书/设置) as measured
   /// on device, including its safe-area inset. The paragraph action bar keeps
@@ -373,12 +480,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 当前视口中心所在的段（同时决定 `_index/_chapterLayout/...` 指向哪一章）。
   int _scrollActive = 0;
 
-  /// 窗口对应的「书 + 章」与排版规格：任一变化都要把窗口从当前章重建。
-  String? _scrollWindowBookChapter;
+  /// 窗口测量用的排版规格：规格一变，所有段都得重新量，只能重建窗口。
   ReaderLayoutSpec? _scrollWindowSpec;
 
-  /// 正在预取的相邻章（防止滚动时重复发起）。
+  /// 正在预取的后一章（防止滚动时重复发起）。
   bool _scrollBusy = false;
+
+  /// 正在预取的前一章。与 [_scrollBusy] 分开：底部预取下一章时不应该
+  /// 挡住顶部预取上一章，否则往下滚到底再快速拉回章首会卡一次。
+  bool _scrollBusyBefore = false;
 
   /// 拍平后的列表项（段下标, 块下标）。只在段变化时重建。
   List<({int segment, int block})>? _scrollItems;
@@ -413,7 +523,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 【青茄重构·新增】护眼提醒 =====
   /// 连续阅读提醒间隔（青少年护眼边界，不做家长监护）。
-  static const _eyeCareInterval = Duration(minutes: 45);
 
   Timer? _eyeCareTimer;
 
@@ -441,6 +550,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// the official PopupWindow is too — so the drag handles stay touchable
   /// while it shows, and a tap outside it cancels the selection.
   bool _selectionBarOpen = false;
+  bool _underlinePanelOpen = false;
+  ReaderMarkChoice _markChoice = const ReaderMarkChoice();
 
   /// The anchor (window coordinates) the bar was opened with: the long-press
   /// point or the handle position at drag end, with y re-based onto the
@@ -478,12 +589,29 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     chapters: widget.chapters,
   );
 
+  /// 加入书架用的书籍条目。阅读页只拿得到 bookId/title/cover，书架键
+  /// 与详情页一致：`kind:book` + `seriesId ?? id`，而 ReaderPage.bookId
+  /// 本身已经是内容 id，所以这里直接作为 id。
+  MediaItem get _shelfMediaItem => MediaItem(
+    id: widget.bookId,
+    title: widget.title,
+    cover: widget.cover,
+    author: '',
+    badge: '',
+    ep: '',
+    kind: 'book',
+  );
+
   @override
   void initState() {
     super.initState();
+    ReadingCapsuleHost.instance.enterReader();
     VolumeKeyService.instance.setOnVolumeKey(_onVolumeKey);
     _syncVolumeKeyEnabled();
     ListeningSession.instance.addListener(_onListeningTick);
+    // 【青茄·全局日夜同步】App 全局切深/浅色（设置页或「我的」的切换按钮）
+    // 时，正文跟着切；正文的夜间按钮也回写全局，两边是同一条偏好。
+    themeModeNotifier.addListener(_onGlobalThemeModeChanged);
     WidgetsBinding.instance.addObserver(this);
     _appActive =
         WidgetsBinding.instance.lifecycleState == null ||
@@ -498,6 +626,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     };
     _annotationStore.changes.addListener(_annotationListener);
     _preferencesFuture = _loadPreferences();
+    unawaited(_loadMarkChoice());
     _startEyeCareTimer();
     if (widget.chapters.isEmpty) {
       _loading = false;
@@ -522,8 +651,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // Note: Route/lifecycle ownership and SDK 36 compatibility; see
   // .agents/notes/implemented/bug-fix/2026-10-12-reader-system-bars.md.
-  // 【青茄修复·状态栏常显】曾经的「段评弹层保持沉浸」(#57) 逻辑已随
-  // 沉浸模式整体下线：状态栏常显后没有任何显隐切换，也就没有闪烁。
+  // 【青茄·沉浸式系统栏】显隐只在状态真正变化时下发（见 _syncSystemBars），
+  // 路由切换与 dispose 都会恢复 edge-to-edge，不会把沉浸模式带到别的页面。
 
   // 【青茄修复·进章顺滑】正文排版是重活（整章逐段 TextPainter 量高），
   // 若在路由转场动画进行中排版，动画必掉帧。等转场完成再放正文：
@@ -552,13 +681,64 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     setState(() => _routeIntroReady = true);
   }
 
+  /// 正文配色对应的系统栏样式：底色跟正文完全一致，图标按明暗取反，
+  /// 这样深色系统 + 日间正文时顶部状态栏不会留一条黑边。
+  SystemUiOverlayStyle get _systemOverlayStyle {
+    final preset = _effectivePreset;
+    final base = preset.isDark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
+    return base.copyWith(
+      statusBarColor: preset.backgroundColor,
+      systemNavigationBarColor: preset.backgroundColor,
+    );
+  }
+
   void _syncSystemBars() {
-    // 【青茄修复·状态栏常显】不再进入沉浸模式：系统状态栏（电量/WiFi/
-    // 信号/时间）在阅读器全程可见。之前进正文隐藏、退出再显示，系统栏
-    // 一隐一显会让正文整体上移/下移各跳一次，是进入/退出卡顿的来源之一；
-    // 常显之后布局恒定，状态栏底色由 AnnotatedRegion 跟随阅读主题。
-    // 段评弹层（#57）的沉浸保持逻辑随之失效，保留标记不再生效。
-    unawaited(_device.setImmersive(false));
+    // 【青茄·沉浸式系统栏】工具栏收起（正文沉浸）时隐藏状态栏与手势条，
+    // 工具栏出现时恢复 edge-to-edge。弹层/对话框会把自己压到栈顶，此时
+    // `_routeCurrent` 为 false，按“面板打开着算工具栏显示态”处理，系统
+    // 栏随之恢复，避免「面板开着但系统栏被隐藏」。
+    final hide =
+        _routeCurrent &&
+        _appActive &&
+        !_controlsVisible &&
+        widget.chapters.isNotEmpty;
+    final mode = hide ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge;
+    if (_appliedSystemUiMode == mode) return;
+    _appliedSystemUiMode = mode;
+    if (hide) {
+      unawaited(
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
+      );
+    } else {
+      // 先让原生阅读会话还原系统栏，再交给 Flutter 的 edge-to-edge；
+      // 两者都是「显示」，顺序差异不会把栏重新藏起来。
+      unawaited(_device.setImmersive(false));
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+      // 切换系统栏模式会把已下发的 SystemUiOverlayStyle 冲掉（状态栏会先用
+      // 系统默认底色画一帧），切完立刻按当前正文配色重发一次。
+      SystemChrome.setSystemUIOverlayStyle(_systemOverlayStyle);
+    }
+  }
+
+  /// 全局深色/亮色切换后让正文跟随。`system` 按当前系统亮度解析；
+  /// 墨水屏模式强制浅色，不受此影响。
+  void _onGlobalThemeModeChanged() {
+    if (!mounted) return;
+    final dark = einkModeNotifier.value
+        ? false
+        : themeModeIsDark(
+            themeModeNotifier.value,
+            WidgetsBinding.instance.platformDispatcher.platformBrightness,
+          );
+    if (dark == (_preferences.themePreset == ReaderThemePreset.dark)) return;
+    _previewPreferences(
+      _preferences.copyWith(
+        themePreset: dark ? ReaderThemePreset.dark : _dayTheme,
+      ),
+    );
+    unawaited(_savePreferences());
   }
 
   Future<void> _loadPreferences() async {
@@ -569,16 +749,35 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       preferences = const ReaderPreferences();
     }
     if (!mounted) return;
+    // 先记住用户选的日间预设，再按全局明暗决定这次用哪套配色：全局深色时
+    // 进正文就是夜间，全局亮色时回到用户原来那张纸色。
+    if (preferences.themePreset != ReaderThemePreset.dark) {
+      _dayTheme = preferences.themePreset;
+    }
+    final dark = einkModeNotifier.value
+        ? false
+        : themeModeIsDark(
+            themeModeNotifier.value,
+            WidgetsBinding.instance.platformDispatcher.platformBrightness,
+          );
+    if (dark != (preferences.themePreset == ReaderThemePreset.dark)) {
+      preferences = preferences.copyWith(
+        themePreset: dark ? ReaderThemePreset.dark : _dayTheme,
+      );
+    }
     setState(() {
       _preferences = preferences;
       _preferencesReady = true;
-      if (preferences.themePreset != ReaderThemePreset.dark) {
-        _dayTheme = preferences.themePreset;
-      }
     });
     _syncVolumeKeyEnabled();
     await _loadFont(preferences.fontPath);
     if (mounted && _appActive) unawaited(_refreshDevice());
+  }
+
+  Future<void> _loadMarkChoice() async {
+    await ReaderMarkPreferences.instance.load();
+    if (!mounted) return;
+    setState(() => _markChoice = ReaderMarkPreferences.instance.choice.value);
   }
 
   Future<void> _refreshDevice() async {
@@ -654,6 +853,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _toggleShelf() async {
+    if (!ShelfStore.instance.isReady) {
+      _showMessage('本地书架暂不可用，请重试');
+      return;
+    }
+    final added = await ShelfStore.instance.toggle(_shelfMediaItem);
+    if (!mounted) return;
+    _showMessage(added ? '已加入书架' : '已移出书架');
   }
 
   /// Long press on a paragraph: select it whole and open the action bar.
@@ -796,8 +1005,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// (outside tap, scroll, page turn — anything but a handle drag).
   void _closeSelectionBar({required bool clearSelection}) {
     if (clearSelection) _clearSelection();
-    if (!_selectionBarOpen) return;
-    setState(() => _selectionBarOpen = false);
+    if (!_selectionBarOpen && !_underlinePanelOpen) return;
+    setState(() {
+      _selectionBarOpen = false;
+      _underlinePanelOpen = false;
+    });
   }
 
   /// The action bar overlay, or null while no selection is active. Geometry
@@ -856,30 +1068,227 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       underlined: underlined,
       showListening: true,
       avoidBottom: avoidBottom,
+      belowContentHeight: _underlinePanelOpen ? _underlinePanelHeight : 0,
+    );
+    final barWidth = ReaderParagraphMenu.barWidthFor(
+      underlined: underlined,
+      paragraphScoped: selection.isWholeParagraph,
+      showListening: true,
     );
     return Positioned(
       key: const ValueKey('reader-selection-bar'),
       left: position.dx,
       top: position.dy,
-      child: ReaderParagraphMenu(
-        underlined: underlined,
-        paragraphScoped: selection.isWholeParagraph,
-        showListening: true,
-        isDark: preset.isDark,
-        belowAnchor: below,
-        onAction: (action) {
-          unawaited(() async {
-            await _applySelectionAction(action);
-            // Every action consumes the selection, like the official bar.
-            if (mounted) _closeSelectionBar(clearSelection: true);
-          }());
-        },
+      child: SizedBox(
+        width: barWidth,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ReaderParagraphMenu(
+              underlined: underlined,
+              paragraphScoped: selection.isWholeParagraph,
+              showListening: true,
+              isDark: preset.isDark,
+              belowAnchor: below,
+              onAction: (action) {
+                if (action == ReaderParagraphAction.underline) {
+                  setState(() => _underlinePanelOpen = true);
+                  return;
+                }
+                unawaited(() async {
+                  await _applySelectionAction(action);
+                  // Every other action consumes the selection, like the official bar.
+                  if (mounted) _closeSelectionBar(clearSelection: true);
+                }());
+              },
+            ),
+            if (_underlinePanelOpen) _underlineChoicePanel(preset.isDark),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _underlineChoicePanel(bool isDark) {
+    final foreground = isDark ? Colors.white : const Color(0xFFF7F1E8);
+    final muted = foreground.withValues(alpha: 0.68);
+    return Container(
+      key: const ValueKey('reader-underline-options'),
+      margin: const EdgeInsets.only(top: 5),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 11),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF252525) : const Color(0xFF343434),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '线型',
+                style: TextStyle(
+                  color: muted,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              // 预选项一直在，但显式给一个「确定」：点其他部位同样会按预选
+              // 落笔（见 _buildContent 的 onTapUp），这里让规则看得见。
+              GestureDetector(
+                key: const ValueKey('underline-confirm'),
+                onTap: () => unawaited(
+                  _commitSelectedUnderline(
+                    _markChoice.style,
+                    _markChoice.colorValue,
+                  ),
+                ),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    '确定',
+                    style: TextStyle(
+                      color: const Color(0xFFE85D26),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              GestureDetector(
+                key: const ValueKey('underline-cancel'),
+                onTap: () => _closeSelectionBar(clearSelection: true),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    '取消',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              for (final style in ReaderMarkStyle.values)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: InkWell(
+                      key: ValueKey('underline-style-${style.storageValue}'),
+                      borderRadius: BorderRadius.circular(7),
+                      onTap: () => setState(
+                        () => _markChoice = ReaderMarkChoice(
+                          style: style,
+                          colorValue: _markChoice.colorValue,
+                        ),
+                      ),
+                      child: Container(
+                        height: 31,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _markChoice.style == style
+                              ? const Color(0xFFE85D26)
+                              : Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: Text(
+                          style.label,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: foreground,
+                            fontSize: 11,
+                            fontWeight: _markChoice.style == style
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Row(
+            children: [
+              Text(
+                '颜色',
+                style: TextStyle(
+                  color: muted,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Wrap(
+                  spacing: 9,
+                  runSpacing: 6,
+                  children: [
+                    for (final preset in readerMarkColorPresets)
+                      InkWell(
+                        key: ValueKey('underline-color-${preset.colorValue}'),
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => unawaited(
+                          _commitSelectedUnderline(
+                            _markChoice.style,
+                            preset.colorValue,
+                          ),
+                        ),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: Color(preset.colorValue),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _markChoice.colorValue == preset.colorValue
+                                  ? Colors.white
+                                  : Colors.white.withValues(alpha: 0.35),
+                              width: _markChoice.colorValue == preset.colorValue
+                                  ? 2.2
+                                  : 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
   void _clearSelection() {
     _longPressDragging = false;
+    _underlinePanelOpen = false;
     if (_selection == null) return;
     setState(() => _selection = null);
   }
@@ -917,10 +1326,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         if (block == null || textId == null) return;
         await _openListening(fromMs: block.startMs, textId: textId);
       case ReaderParagraphAction.underline:
+        // 真正的落库发生在样式/颜色面板里，避免用户刚点划线就被写成默认样式。
+        if (mounted) setState(() => _underlinePanelOpen = true);
       case ReaderParagraphAction.removeUnderline:
-        await _toggleSelectionUnderline(
-          add: action == ReaderParagraphAction.underline,
-        );
+        await _removeSelectionUnderline();
       // 【青茄重构·新增】批注 / 书摘：选中范围落库后由排版层插入行内批注块。
       case ReaderParagraphAction.annot:
         await _createAnnotation(excerpt: false);
@@ -929,27 +1338,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 划线 on the current selection. A whole-paragraph selection keeps the
-  /// paragraph-identity store (the pre-selection model, still how saved
-  /// marks render); a dragged character range saves a range record.
-  Future<void> _toggleSelectionUnderline({required bool add}) async {
+  Future<void> _commitSelectedUnderline(
+    ReaderMarkStyle style,
+    int colorValue,
+  ) async {
+    _markChoice = ReaderMarkChoice(style: style, colorValue: colorValue);
+    await ReaderMarkPreferences.instance.select(style, colorValue);
+    final saved = await _addSelectionUnderline(style, colorValue);
+    if (saved && mounted) _closeSelectionBar(clearSelection: true);
+  }
+
+  /// 新划线统一写范围记录，让整段与局部都能保存线型和颜色。旧整段记录
+  /// 仍可读取和删除，升级不会丢历史划线。
+  Future<bool> _addSelectionUnderline(
+    ReaderMarkStyle style,
+    int colorValue,
+  ) async {
     final selection = _selection;
     final layout = _chapterLayout;
-    if (selection == null || layout == null || !selection.isValid) return;
-    if (selection.isWholeParagraph) {
-      final block = layout.blockAtOffset(selection.start);
-      // A range record exactly spanning the paragraph (a whole-paragraph
-      // drag) must be toggled in the range store — routing to the
-      // paragraph-identity store here would strand it, unreachable for
-      // 删除划线 forever.
-      final hasExactRange = _rangeUnderlines.any(
-        (underline) => underline.coversExactly(selection.start, selection.end),
-      );
-      if (block != null && !hasExactRange) {
-        await _toggleUnderline(block, add: add);
-        return;
-      }
-    }
+    if (selection == null || layout == null || !selection.isValid) return false;
     final store = widget.underlineStore ?? ReaderUnderlineStore.instance;
     final chapterId = _chapter.itemId;
     final loadGeneration = _loadGeneration;
@@ -959,7 +1366,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               underline.coversExactly(selection.start, selection.end),
         )
         .toList();
-    if (!add && existing.isEmpty) return;
     final record = ReaderRangeUnderline(
       bookId: widget.bookId,
       chapterId: chapterId,
@@ -967,16 +1373,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       end: selection.end,
       text: layout.textInRange(selection.start, selection.end),
       createdAt: DateTime.now().millisecondsSinceEpoch,
+      style: style,
+      colorValue: colorValue,
     );
     try {
-      if (add) {
-        await store.addRange(record);
-      } else {
+      if (existing.isNotEmpty) {
         await store.remove(existing.first.key);
       }
+      await store.addRange(record);
     } catch (_) {
-      if (mounted) _showMessage(add ? '划线保存失败，请重试' : '删除划线失败，请重试');
-      return;
+      if (mounted) _showMessage('划线保存失败，请重试');
+      return false;
     }
     // The await can span a chapter switch; appending a record that belongs to
     // the previous chapter would paint it onto the new one (the same guard
@@ -984,19 +1391,57 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (!mounted ||
         loadGeneration != _loadGeneration ||
         chapterId != _chapter.itemId) {
-      return;
+      return false;
     }
     setState(() {
-      if (add) {
-        _rangeUnderlines = [..._rangeUnderlines, record]
-          ..sort((a, b) => a.start.compareTo(b.start));
-      } else {
+      _rangeUnderlines = [
+        ..._rangeUnderlines.where(
+          (underline) => underline.key != existing.firstOrNull?.key,
+        ),
+        record,
+      ]..sort((a, b) => a.start.compareTo(b.start));
+      _underlinePanelOpen = false;
+    });
+    _showMessage('已划线');
+    return true;
+  }
+
+  Future<void> _removeSelectionUnderline() async {
+    final selection = _selection;
+    final layout = _chapterLayout;
+    if (selection == null || layout == null || !selection.isValid) return;
+    final existing = _rangeUnderlines
+        .where(
+          (underline) =>
+              underline.coversExactly(selection.start, selection.end),
+        )
+        .toList();
+    if (existing.isNotEmpty) {
+      final store = widget.underlineStore ?? ReaderUnderlineStore.instance;
+      try {
+        await store.remove(existing.first.key);
+      } catch (_) {
+        if (mounted) _showMessage('删除划线失败，请重试');
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
         _rangeUnderlines = _rangeUnderlines
             .where((underline) => underline.key != existing.first.key)
             .toList();
-      }
-    });
-    _showMessage(add ? '已划线' : '已删除划线');
+      });
+      _showMessage(
+        selection.isWholeParagraph
+            ? '\u5df2\u53d6\u6d88\u5212\u7ebf'
+            : '\u5df2\u5220\u9664\u5212\u7ebf',
+      );
+      return;
+    }
+    if (selection.isWholeParagraph) {
+      final block = layout.blockAtOffset(selection.start);
+      if (block != null) await _toggleUnderline(block, add: false);
+      return;
+    }
   }
 
   Future<void> _toggleUnderline(
@@ -1073,6 +1518,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     if (!mounted || generation != _loadGeneration) return;
     if (chapterId != _chapter.itemId) return;
+    // 这一章没有划线（最常见的情况）：不必为一个空的装饰层整章重排一次。
+    if (ids.isEmpty &&
+        ranges.isEmpty &&
+        _underlines.isEmpty &&
+        _rangeUnderlines.isEmpty) {
+      return;
+    }
     setState(() {
       _underlines = ids;
       _rangeUnderlines = ranges;
@@ -1087,7 +1539,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _startEyeCareTimer() {
     _eyeCareTimer?.cancel();
     if (_eyeCareMuted) return;
-    _eyeCareTimer = Timer(_eyeCareInterval, () {
+    _eyeCareTimer = Timer(ReaderPage.eyeCareInterval, () {
       if (!mounted) return;
       if (ModalRoute.of(context)?.isCurrent != true) {
         // 不在前台就顺延，回来后再提醒。
@@ -1099,38 +1551,46 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _showEyeCareReminder() async {
-    final action = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        key: const ValueKey('reader-eye-care-dialog'),
-        title: const Text('休息一下眼睛'),
-        content: const Text(
-          '你已经连续阅读 45 分钟。抬头看看远处，让眼睛放松一会儿再继续吧。',
-          style: TextStyle(fontSize: 13, height: 1.6),
-        ),
-        actions: [
-          TextButton(
-            key: const ValueKey('reader-eye-care-mute'),
-            onPressed: () => Navigator.of(dialogContext).pop('mute'),
-            child: const Text('今天不再提醒'),
+    // 护眼提醒必须压过听书胶囊：胶囊在最外层 Overlay，普通 showDialog 只到
+    // Navigator 的 Overlay，会被胶囊盖住，所以弹窗期间先让胶囊整体隐藏。
+    ReadingCapsuleHost.instance.setDialogOpen(true);
+    final String? action;
+    try {
+      action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          key: const ValueKey('reader-eye-care-dialog'),
+          title: const Text('休息一下眼睛'),
+          content: const Text(
+            '你已经连续阅读 45 分钟。抬头看看远处，让眼睛放松一会儿再继续吧。',
+            style: TextStyle(fontSize: 13, height: 1.6),
           ),
-          TextButton(
-            key: const ValueKey('reader-eye-care-later'),
-            onPressed: () => Navigator.of(dialogContext).pop('later'),
-            child: const Text('再看 15 分钟'),
-          ),
-          FilledButton(
-            key: const ValueKey('reader-eye-care-rest'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE85D26),
+          actions: [
+            TextButton(
+              key: const ValueKey('reader-eye-care-mute'),
+              onPressed: () => Navigator.of(dialogContext).pop('mute'),
+              child: const Text('今天不再提醒'),
             ),
-            onPressed: () => Navigator.of(dialogContext).pop('rest'),
-            child: const Text('休息一下'),
-          ),
-        ],
-      ),
-    );
+            TextButton(
+              key: const ValueKey('reader-eye-care-later'),
+              onPressed: () => Navigator.of(dialogContext).pop('later'),
+              child: const Text('再看 15 分钟'),
+            ),
+            FilledButton(
+              key: const ValueKey('reader-eye-care-rest'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE85D26),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop('rest'),
+              child: const Text('休息一下'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      ReadingCapsuleHost.instance.setDialogOpen(false);
+    }
     if (!mounted) return;
     switch (action) {
       case 'mute':
@@ -1156,7 +1616,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   ReaderAnnotationStore get _annotationStore =>
       widget.annotationStore ?? ReaderAnnotationStore.instance;
 
-  /// 批注红线（蜗牛读书式 2px 下划线），与划线共用章节坐标空间。
+  /// 批注原文标记，与划线共用章节坐标空间。
   List<ReaderRangeUnderline> get _annotationRanges => [
     for (final note in _annotations)
       ReaderRangeUnderline(
@@ -1166,6 +1626,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         end: note.end,
         text: note.text,
         createdAt: note.createdAt,
+        style: note.markStyle,
+        colorValue: note.effectiveMarkColorValue,
       ),
   ];
 
@@ -1179,6 +1641,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         quote: note.text,
         thought: note.thought,
         isExcerpt: !note.isAnnot,
+        category: note.category,
+        tags: note.tags,
+        markerType: note.markerType,
+        markerLabel: note.displayMarkerLabel,
+        markerColorValue: note.effectiveMarkerColorValue,
+        markStyle: note.markStyle,
+        markColorValue: note.effectiveMarkColorValue,
       ),
   ];
 
@@ -1194,6 +1663,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     if (!mounted || generation != _loadGeneration) return;
     if (chapterId != _chapter.itemId) return;
+    // 没有批注就不要为此重建排版。
+    if (loaded.isEmpty && _annotations.isEmpty) return;
     setState(() {
       _annotations = loaded;
       ++_annotationRevision;
@@ -1216,17 +1687,39 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 等当前帧结束，让选区先真正从画面消失，再开始弹层动画。
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
-    var thought = '';
-    if (!excerpt) {
-      final input = await showAnnotationEditor(
-        context,
-        quote: quote,
-        title: '写想法',
-      );
-      // 取消或留空视为放弃，不产生半成品批注。
-      if (input == null || input.trim().isEmpty) return;
-      thought = input.trim();
+    final knownCategories = <String>[];
+    final knownTags = <String>[];
+    try {
+      for (final entry in await _annotationStore.loadAll()) {
+        final category = entry.category.trim();
+        if (category.isNotEmpty && !knownCategories.contains(category)) {
+          knownCategories.add(category);
+        }
+        for (final tag in entry.tags) {
+          if (!knownTags.contains(tag)) knownTags.add(tag);
+        }
+      }
+    } catch (_) {
+      // 已有值只作为快捷建议，读取失败不影响新建。
     }
+    if (!mounted) return;
+    final draft = await showAnnotationEditor(
+      context,
+      quote: quote,
+      title: excerpt ? '加入书摘' : '写批注',
+      isExcerpt: excerpt,
+      initialMarkerLabel: excerpt ? '摘' : '批',
+      initialMarkerColorValue: excerpt
+          ? readerDefaultExcerptColor
+          : readerDefaultAnnotationColor,
+      initialMarkColorValue: excerpt
+          ? readerDefaultExcerptColor
+          : readerDefaultAnnotationColor,
+      knownCategories: knownCategories,
+      knownTags: knownTags,
+    );
+    // 批注必须写想法；书摘只收藏原文，也允许顺带归类。
+    if (draft == null || (!excerpt && draft.thought.trim().isEmpty)) return;
     if (!mounted) return;
     final note = ReaderAnnotation(
       bookId: widget.bookId,
@@ -1234,13 +1727,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       start: start,
       end: end,
       text: quote,
-      thought: thought,
+      thought: draft.thought.trim(),
       type: excerpt
           ? ReaderAnnotation.kTypeExcerpt
           : ReaderAnnotation.kTypeAnnot,
       createdAt: DateTime.now().millisecondsSinceEpoch,
       bookTitle: widget.title,
       chapterTitle: _chapter.title,
+      category: draft.category.trim(),
+      tags: AnnotationDraft.normalizeTags(draft.tags),
+      markerType: draft.markerType,
+      markerLabel: draft.markerLabel,
+      markerColorValue: draft.markerColorValue,
+      markStyle: draft.markStyle,
+      markColorValue: draft.markColorValue,
     );
     try {
       await _annotationStore.add(note);
@@ -1277,10 +1777,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    ReadingCapsuleHost.instance.exitReader();
     _chapterRequest?.cancel();
     VolumeKeyService.instance.setOnVolumeKey(null);
     unawaited(VolumeKeyService.instance.setEnabled(false));
     ListeningSession.instance.removeListener(_onListeningTick);
+    themeModeNotifier.removeListener(_onGlobalThemeModeChanged);
     _introAnimation?.removeStatusListener(_onIntroStatus);
     _autoTurnTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -1298,6 +1800,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _eyeCareTimer?.cancel();
     unawaited(ReadingStatsStore.instance.flush());
     _annotationStore.changes.removeListener(_annotationListener);
+    // 离开阅读页必须把系统栏还给其他页面，避免沉浸模式泄漏出去。
+    _appliedSystemUiMode = SystemUiMode.edgeToEdge;
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     _scrollController.dispose();
     super.dispose();
   }
@@ -1348,6 +1853,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _layoutMode = null;
       _textOffset = 0;
       _pageIndex = 0;
+      _liftForToolbar = false;
       _needsRestore = true;
       _requestedStartAtEnd = startAtEnd;
       _sessionActive = false;
@@ -1358,25 +1864,55 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     if (_scrollController.hasClients) _scrollController.jumpTo(0);
 
+    // 本地偏好与阅读进度跟正文没有依赖，先并行起跑，别让它们排在上游请求后面。
+    final positionFuture = _readSavedPosition();
     try {
       final loaded = await _chapterText(chapter);
+      final loadedByIndex = <int, _LoadedChapter>{_index: loaded};
+      final resolver = ReadableChapterResolver(
+        chapters: widget.chapters,
+        loadText: (candidate) async {
+          final result = await _chapterText(candidate);
+          final candidateIndex = widget.chapters.indexWhere(
+            (entry) => entry.itemId == candidate.itemId,
+          );
+          if (candidateIndex >= 0) loadedByIndex[candidateIndex] = result;
+          return result.text;
+        },
+      );
+      var resolved = await resolver.resolve(
+        index: _index,
+        direction: chapterTurn?.direction ?? 1,
+        initialText: loaded.text,
+      );
+      // A TOC jump or first launch has no turn direction. If the selected
+      // entry is a trailing placeholder, fall back to the nearest readable
+      // chapter before reporting the book as empty.
+      if (resolved == null && chapterTurn == null) {
+        resolved = await resolver.resolve(
+          index: _index,
+          direction: -1,
+          initialText: loaded.text,
+        );
+      }
+      if (resolved == null) throw const ApiException('正文为空');
+      final selected = resolved;
+      final selectedChapter = selected.chapter;
+      final selectedLoaded =
+          loadedByIndex[selected.index] ??
+          (text: selected.text, fetched: false);
       await _preferencesFuture;
       if (!mounted || generation != _loadGeneration) return;
-      Map<String, dynamic>? saved;
-      try {
-        saved = await _history.load(widget.bookId);
-        if (saved?['kind'] != null && saved?['kind'] != 'book') saved = null;
-      } catch (_) {
-        // History storage must not prevent an available chapter from opening.
-      }
+      final saved = await positionFuture;
       if (!mounted || generation != _loadGeneration) return;
       // Cache updates may arrive while preferences/history are being read.
-      final text = _chapterCache[chapter.itemId] ?? loaded.text;
+      final text = _chapterCache[selectedChapter.itemId] ?? selectedLoaded.text;
       final content = ChapterContent.fromCacheText(text);
-      if (content.withoutLeadingTitle(chapter.title).isEmpty) {
-        throw ApiException('正文为空');
+      if (!content.hasReadableBody(selectedChapter.title)) {
+        throw const ApiException('正文为空');
       }
       setState(() {
+        _index = selected.index;
         _content = text;
         _chapterContent = content;
         // 【青茄重构·新增】笔记页定位：首次加载的目标章直接跳到批注位置，
@@ -1385,7 +1921,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _savedPosition =
             jump != null && _index == widget.startIndex && jump >= 0
             ? {
-                'chapterId': chapter.itemId,
+                'chapterId': selectedChapter.itemId,
                 'positionVersion': 2,
                 'textOffset': jump,
                 'kind': 'book',
@@ -1400,19 +1936,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _annotations = const [];
         _selection = null;
         _selectionBarOpen = false;
+        _underlinePanelOpen = false;
       });
+      unawaited(_precacheIllustrations(content));
       unawaited(_prefetchAround(_index));
-      unawaited(_loadIdeas(chapter, generation));
+      unawaited(_loadIdeas(selectedChapter, generation));
       unawaited(_loadUnderlines());
       unawaited(_loadAnnotations());
       // 【青茄重构·新增】按章记一次阅读字数（同一章本次会话只计一次）。
-      if (_countedChapters.add(chapter.itemId)) {
+      if (_countedChapters.add(selectedChapter.itemId)) {
         ReadingStatsStore.instance.addCharacters(
-          content.withoutLeadingTitle(chapter.title).legacyText.length,
+          content.withoutLeadingTitle(selectedChapter.title).legacyText.length,
         );
       }
-      if (!loaded.fetched && content.needsRefresh()) {
-        unawaited(_refreshCachedChapter(chapter));
+      if (!selectedLoaded.fetched && content.needsRefresh()) {
+        unawaited(_refreshCachedChapter(selectedChapter));
       }
     } catch (e) {
       if (!mounted || generation != _loadGeneration) return;
@@ -1421,6 +1959,39 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _loading = false;
         _chapterTurnRequest = null;
       });
+    }
+  }
+
+  /// 读上一次的阅读位置；存储异常不允许挡住正文。
+  Future<Map<String, dynamic>?> _readSavedPosition() async {
+    try {
+      final saved = await _history.load(widget.bookId);
+      if (saved?['kind'] != null && saved?['kind'] != 'book') return null;
+      return saved;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 正文一解析出来就开始下载插图，别等排版画到那一格才发起请求。
+  ///
+  /// 缓存键与 [ReaderIllustration] 默认 provider 完全一致，所以预热的字节
+  /// 会被插图组件直接命中；失败不影响正文本体。
+  Future<void> _precacheIllustrations(ChapterContent content) async {
+    if (!content.hasImages || !mounted) return;
+    final factory = widget.imageProviderFactory;
+    var warmed = 0;
+    for (final block in content.blocks) {
+      if (block is! ChapterImage) continue;
+      if (warmed >= 6 || !mounted) return;
+      warmed++;
+      final provider =
+          factory?.call(block) ?? ReaderImageSizing.provider(block);
+      try {
+        await precacheImage(provider, context, onError: (_, _) {});
+      } catch (_) {
+        // 预热是尽力而为，插图组件自己还会重试。
+      }
     }
   }
 
@@ -1438,6 +2009,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       final ideas = await (loader ?? _defaultIdeas)(chapter.itemId);
       if (!mounted || generation != _loadGeneration) return;
       if (chapter.itemId != widget.chapters[_index].itemId) return;
+      // 本来就空、拉回来还是空：气泡数没变，排版不必再来一遍。
+      if (ideas.isEmpty && _ideas.isEmpty) return;
       setState(() {
         _ideas = ideas;
         ++_ideasRevision;
@@ -1476,7 +2049,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   Future<void> _showIdeas({int? focusParaIndex}) async {
     if (_ideas.isEmpty) return;
-    setState(() => _controlsVisible = false);
+    setState(_clearControls);
     final ideaSnapshot = _ideas;
     final chapter = widget.chapters[_index];
     try {
@@ -1581,7 +2154,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       final request = _chapterRequest = BackendRequest();
       content = await ApiClient.instance.withCancellation(
         request,
-        () => ApiClient.instance.chapterContent(chapter.itemId),
+        () =>
+            ApiClient.instance.chapterContent(chapter.itemId, allowEmpty: true),
       );
     } else {
       final text = await loader(chapter);
@@ -1589,9 +2163,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           ? ChapterContent.fromCacheText(text)
           : ChapterContent.fromPlainText(text, illustrationsChecked: true);
     }
-    if (content.withoutLeadingTitle(chapter.title).isEmpty) {
-      throw const ApiException('正文为空');
-    }
+    // A truly empty response is transient or broken, never a cacheable page.
+    // Caching its structured representation would suppress the next online
+    // retry and leave the user staring at the same empty chapter forever.
+    if (content.isEmpty) throw const EmptyChapterBodyException();
+    // Keep title-only placeholders in the chapter cache. The foreground load
+    // skips them to the next readable entry, while caching prevents repeated
+    // upstream requests for the same front matter.
     return content.toCacheText();
   }
 
@@ -1729,12 +2307,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           bookId: widget.bookId,
           chapterId: chapter.itemId,
         );
-        if (cached != null &&
-            cached.trim().isNotEmpty &&
-            !ChapterContent.fromCacheText(
-              cached,
-            ).withoutLeadingTitle(chapter.title).isEmpty) {
-          text = cached;
+        if (cached != null && cached.trim().isNotEmpty) {
+          final content = ChapterContent.fromCacheText(cached);
+          // Title-only placeholders contain their title block and remain
+          // authoritative. A truly empty structured cache is different: older
+          // builds could persist one after a failed response, and treating it
+          // as authoritative would pin that chapter to "正文为空" forever.
+          // Let it fall through to the network so upgrades self-heal.
+          if (!content.isEmpty) {
+            text = cached;
+          }
         }
       } catch (_) {
         // A storage failure must not prevent online reading.
@@ -1751,20 +2333,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       }
       if (superseded()) return _latestChapterText(chapter);
       if (mounted && !widget.localOnly) {
-        try {
-          await _ensureCatalog();
-          if (superseded()) return await _latestChapterText(chapter);
-          if (mounted) {
+        // 【青茄性能·改】目录与正文落盘都不该挡在正文前面：整本目录写一次
+        // 就可能上百毫秒，用户却只想马上看到这一章。落盘转后台，且先确认
+        // 这期间内容没被刷新版本覆盖，避免旧文字盖掉新图文。
+        final pending = text;
+        unawaited(() async {
+          try {
+            await _ensureCatalog();
+            if (superseded()) return;
             await _diskCache.write(
               bookId: widget.bookId,
               chapterId: chapter.itemId,
               title: chapter.title,
-              text: text,
+              text: pending,
             );
+          } catch (_) {
+            // Cache management reports storage errors; keep the fetched text usable.
           }
-        } catch (_) {
-          // Cache management reports storage errors; keep the fetched text usable.
-        }
+        }());
       }
     }
     if (superseded()) return _latestChapterText(chapter);
@@ -1787,7 +2373,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await Future.wait(
       nearby.map((chapter) async {
         try {
-          await _chapterText(chapter);
+          final loaded = await _chapterText(chapter);
+          // 只给「下一章」预热插图：翻页时图已经在缓存里，上一章不再花流量。
+          if (index + 1 < widget.chapters.length &&
+              widget.chapters[index + 1].itemId == chapter.itemId) {
+            unawaited(
+              _precacheIllustrations(ChapterContent.fromCacheText(loaded.text)),
+            );
+          }
         } catch (_) {
           // Prefetch is opportunistic; the foreground load still reports a
           // useful error and offers retry if this chapter is opened later.
@@ -1803,11 +2396,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _scrollSegments.clear();
     _scrollActive = 0;
     _scrollItems = null;
-    _scrollWindowBookChapter = null;
     _scrollWindowSpec = null;
   }
-
-  String get _scrollWindowKey => '${widget.bookId}\u0000${_chapter.itemId}';
 
   /// 当前段；窗口为空时返回 null。
   _ScrollSegment? get _activeScrollSegment =>
@@ -1866,7 +2456,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         ),
       );
     _scrollActive = 0;
-    _scrollWindowBookChapter = _scrollWindowKey;
     _scrollWindowSpec = layout.spec;
     _layoutScrollTops();
     if (!compensate || previousTop <= 0 || previousChapter == null) return;
@@ -1881,23 +2470,33 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
-  /// 每帧排版后校准窗口：确保第 0 段就是当前章，且下标与几何都对得上。
+  /// 每帧排版后校准窗口：确保窗口里找得到当前章，且下标与几何都对得上。
   ///
   /// 幂等，只在一处（[_buildScrollContent]）调用。
+  ///
+  /// 【青茄修复·滚动无缝】判据是「当前章在不在窗口里」，不再是「窗口是不是
+  /// 以当前章开头」。窗口现在两头都会长（后面接下一章、前面接上一章），
+  /// 原来按「书 + 章」比对，视口一越过章界当前章就变了，窗口被整块重建，
+  /// 读者被留在新列表的同一个像素偏移上 —— 表现就是跨章时突兀地跳一下。
   void _syncScrollWindow(ReaderChapterLayout layout) {
+    final active = _scrollSegments.indexWhere(
+      (segment) => segment.chapter.itemId == _chapter.itemId,
+    );
     if (_scrollSegments.isEmpty ||
-        _scrollWindowBookChapter != _scrollWindowKey ||
-        _scrollWindowSpec != layout.spec) {
-      // 首次进入 / 换章 / 换字号：窗口从当前章重新长出来。
+        _scrollWindowSpec != layout.spec ||
+        active < 0) {
+      // 首次进入 / 换字号 / 跳到了窗口外的章：窗口从当前章重新长出来。
       _resetScrollWindow(layout, compensate: false);
       _prefetchScrollAfterFrame();
       return;
     }
-    final active = _scrollSegments[_scrollActive];
-    if (identical(active.layout, layout)) return;
-    if (_sameScrollGeometry(active.layout, layout)) {
+    // 视口中心的判定偶尔晚一帧；以当前章为准，别让下标和内容对不上。
+    if (_scrollActive != active) _scrollActive = active;
+    final segment = _scrollSegments[active];
+    if (identical(segment.layout, layout)) return;
+    if (_sameScrollGeometry(segment.layout, layout)) {
       // 只是划线/批注装饰变了：就地替换，位置与段结构都不动。
-      active.layout = layout;
+      segment.layout = layout;
       return;
     }
     // 几何变了（行内批注插入、段评气泡到达）：只能重建，但要补偿偏移。
@@ -1918,17 +2517,84 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
     final position = _scrollController.position;
+    final viewport = position.viewportDimension;
     final last = _scrollSegments.last;
-    final remaining =
-        last.top + last.extent - (position.pixels + position.viewportDimension);
-    if (remaining > position.viewportDimension * 1.5) return;
-    unawaited(_prefetchScrollSegment());
+    final remaining = last.top + last.extent - (position.pixels + viewport);
+    if (remaining <= viewport * 1.5) {
+      unawaited(_prefetchScrollSegment());
+    }
+    // 【青茄修复·滚动无缝】往上同理：窗头上沿离视口不足 1.5 屏，就把上一章
+    // 排好插到窗口最前面。这样拉到章首继续往下拖时，接上的是上一章末尾的
+    // 正文本身，而不是一次「整章加载 → 版面重建 → 跳到别处」。
+    final first = _scrollSegments.first;
+    if (position.pixels - first.top <= viewport * 1.5) {
+      unawaited(_prefetchScrollSegmentBefore());
+    }
   }
 
-  /// 把下一章正文 + 批注排成新段，追加到窗口末尾（绝不改当前章状态）。
+  /// 把第 [index] 章的正文 + 批注排成一段（绝不改当前章状态）。
   ///
   /// 注意：这里不能走 [_prepareLayout]，它会把 `_chapterLayout/_textOffset`
-  /// 等当前章状态一起改掉。布局只用同一个 [ReaderLayoutSpec] 量一遍。
+  /// 等当前章状态一起改掉。布局只用窗口的同一个 [ReaderLayoutSpec] 量一遍。
+  Future<_ScrollSegment?> _measureScrollSegment(
+    int index,
+    ReaderLayoutSpec spec,
+  ) async {
+    final generation = _loadGeneration;
+    final resolver = ReadableChapterResolver(
+      chapters: widget.chapters,
+      loadText: (chapter) async => (await _chapterText(chapter)).text,
+    );
+    final resolved = await resolver.resolve(index: index);
+    if (!mounted || generation != _loadGeneration || resolved == null) {
+      return null;
+    }
+    final chapter = resolved.chapter;
+    final content = resolved.content;
+    List<ReaderAnnotation> annotations;
+    try {
+      annotations = await _annotationStore.load(widget.bookId, chapter.itemId);
+    } catch (_) {
+      annotations = const [];
+    }
+    if (!mounted || generation != _loadGeneration) return null;
+    final layout = ReaderChapterLayout(
+      title: chapter.title,
+      content: content,
+      spec: spec,
+      // 相邻章不画段评气泡：气泡要额外拉 ideas，且会改变高度；
+      // 真正进入该章（或整章加载）时会按完整数据重排。
+      paragraphBubbles: const {},
+      underlinedParagraphs: const {},
+      inlineNotes: [
+        for (final note in annotations)
+          ReaderInlineNote(
+            id: note.key,
+            start: note.start,
+            end: note.end,
+            quote: note.text,
+            thought: note.thought,
+            isExcerpt: !note.isAnnot,
+            category: note.category,
+            tags: note.tags,
+            markerType: note.markerType,
+            markerLabel: note.displayMarkerLabel,
+            markerColorValue: note.effectiveMarkerColorValue,
+            markStyle: note.markStyle,
+            markColorValue: note.effectiveMarkColorValue,
+          ),
+      ],
+    );
+    return _ScrollSegment(
+      chapter: chapter,
+      text: resolved.text,
+      content: content,
+      layout: layout,
+      annotations: annotations,
+    );
+  }
+
+  /// 预取下一章，追加到窗口末尾。
   Future<void> _prefetchScrollSegment() async {
     if (_paged || _scrollBusy || _scrollSegments.isEmpty) return;
     final spec = _scrollWindowSpec;
@@ -1938,62 +2604,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       (chapter) => chapter.itemId == lastChapter.itemId,
     );
     if (lastIndex < 0 || lastIndex + 1 >= widget.chapters.length) return;
-    final next = widget.chapters[lastIndex + 1];
-    if (_scrollSegments.any(
-      (segment) => segment.chapter.itemId == next.itemId,
-    )) {
-      return;
-    }
     _scrollBusy = true;
     final generation = _loadGeneration;
     try {
-      final loaded = await _chapterText(next);
-      if (!mounted || generation != _loadGeneration) return;
-      List<ReaderAnnotation> annotations;
-      try {
-        annotations = await _annotationStore.load(widget.bookId, next.itemId);
-      } catch (_) {
-        annotations = const [];
+      final segment = await _measureScrollSegment(lastIndex + 1, spec);
+      if (segment == null || !mounted || generation != _loadGeneration) {
+        return;
       }
-      if (!mounted || generation != _loadGeneration) return;
-      final content = ChapterContent.fromCacheText(loaded.text);
-      if (content.withoutLeadingTitle(next.title).isEmpty) return;
-      final layout = ReaderChapterLayout(
-        title: next.title,
-        content: content,
-        spec: spec,
-        // 相邻章不画段评气泡：气泡要额外拉 ideas，且会改变高度；
-        // 真正进入该章（或整章加载）时会按完整数据重排。
-        paragraphBubbles: const {},
-        underlinedParagraphs: const {},
-        inlineNotes: [
-          for (final note in annotations)
-            ReaderInlineNote(
-              id: note.key,
-              start: note.start,
-              end: note.end,
-              quote: note.text,
-              thought: note.thought,
-              isExcerpt: !note.isAnnot,
-            ),
-        ],
-      );
-      if (!mounted || generation != _loadGeneration) return;
+      if (_scrollSegments.any(
+        (existing) => existing.chapter.itemId == segment.chapter.itemId,
+      )) {
+        return;
+      }
       // 期间可能换过章或重建过窗口：只有仍以同一章结尾才追加。
       if (_scrollSegments.isEmpty ||
           _scrollSegments.last.chapter.itemId != lastChapter.itemId) {
         return;
       }
       setState(() {
-        _scrollSegments.add(
-          _ScrollSegment(
-            chapter: next,
-            text: loaded.text,
-            content: content,
-            layout: layout,
-            annotations: annotations,
-          ),
-        );
+        _scrollSegments.add(segment);
         // 追加只往后长：已有段的 top 不变，滚动位置天然稳定（不 jumpTo）。
         _layoutScrollTops();
       });
@@ -2001,6 +2630,64 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       // 预取失败保持静默：滚到底时 _next() 还会走一次正常加载并给出提示。
     } finally {
       _scrollBusy = false;
+    }
+  }
+
+  /// 预取上一章，插到窗口最前面（滚到章首继续下拉时的「无缝衔接」）。
+  ///
+  /// 插入会把已有内容整体往下推一个段高，所以同步把滚动偏移加回同样的高度：
+  /// 读者眼前这一段一个字都不动。跳转在 setState 之后、下一帧之前完成，
+  /// 画出来的就是「新内容在上、原内容原位」，看不到中间态。
+  Future<void> _prefetchScrollSegmentBefore() async {
+    if (_paged || _scrollBusyBefore || _scrollSegments.isEmpty) return;
+    final spec = _scrollWindowSpec;
+    if (spec == null) return;
+    final firstChapter = _scrollSegments.first.chapter;
+    final firstIndex = widget.chapters.indexWhere(
+      (chapter) => chapter.itemId == firstChapter.itemId,
+    );
+    if (firstIndex <= 0) return;
+    _scrollBusyBefore = true;
+    final generation = _loadGeneration;
+    try {
+      final segment = await _measureScrollSegment(firstIndex - 1, spec);
+      if (segment == null || !mounted || generation != _loadGeneration) {
+        return;
+      }
+      if (!_scrollController.hasClients) return;
+      if (_scrollSegments.any(
+        (existing) => existing.chapter.itemId == segment.chapter.itemId,
+      )) {
+        return;
+      }
+      // 期间可能换过章或重建过窗口：只有仍以同一章开头才插到最前面。
+      if (_scrollSegments.isEmpty ||
+          _scrollSegments.first.chapter.itemId != firstChapter.itemId) {
+        return;
+      }
+      final target = _scrollController.offset + segment.extent;
+      final maxBefore = _scrollController.position.maxScrollExtent;
+      setState(() {
+        _scrollSegments.insert(0, segment);
+        _scrollActive += 1;
+        _layoutScrollTops();
+      });
+      if (target <= maxBefore) {
+        _scrollController.jumpTo(target);
+      } else {
+        // 章节很短：旧列表的滚动上限装不下补偿后的位置，只能等新内容
+        // 量完再跳（最多一帧的错位）。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _paged || !_scrollController.hasClients) return;
+          _scrollController.jumpTo(
+            target.clamp(0.0, _scrollController.position.maxScrollExtent),
+          );
+        });
+      }
+    } catch (_) {
+      // 预取失败保持静默：真拉到顶时 _prev() 还会走一次整章加载。
+    } finally {
+      _scrollBusyBefore = false;
     }
   }
 
@@ -2063,6 +2750,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _layoutBubblesVisible = _preferences.showParagraphBubbles;
       _selection = null;
       _selectionBarOpen = false;
+      _underlinePanelOpen = false;
       _narrationRange = null;
       _needsRestore = false;
     });
@@ -2194,6 +2882,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         initialRestore ||
         previousMode != _preferences.pageMode ||
         previousSpec != spec;
+    // 排版完成后补一次朗读句高亮：进入阅读页时听书本就暂停着的话，
+    // 没有后续 tick 可等，不补这一下就看不到「读到哪一句」。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(layout, _chapterLayout)) {
+        _syncNarrationHighlight();
+      }
+    });
     final reposition = _layoutRepositioned;
     final revision = ++_layoutRevision;
     final generation = _loadGeneration;
@@ -2378,6 +3073,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await _history.save(entry, createHistory: createHistory);
   }
 
+  /// 本会话里见过的最长一章折算出的页数。
+  ///
+  /// 全书页数只能靠「章数 × 每章页数」估。`自序` 这类很短的章节会把每章
+  /// 页数压到 1，整本书看起来就只有 12 页。记住读到过的最长一章，短章节
+  /// 不会再把全书页数拉回不合理的值。
+  int _maxChapterPages = 0;
+
+  /// 滚动模式没有真实分页：按本章字数折算页数（约 600 字一页），让左下角
+  /// 的「读到 / 共 / 剩」在上下滑动时也成立。
+  int get _estimatedPagesPerChapter {
+    final blocks = _chapterContent.blocks;
+    var chars = 0;
+    for (final block in blocks) {
+      if (block is ChapterParagraph) chars += block.text.length;
+    }
+    if (chars <= 0) return _maxChapterPages;
+    final pages = (chars / 600).ceil().clamp(1, 999);
+    if (pages > _maxChapterPages) _maxChapterPages = pages;
+    return _maxChapterPages;
+  }
+
   double _chapterProgress({double? position, double? maxScroll, int? index}) {
     if (widget.chapters.isEmpty) return 0;
     if (_paged) {
@@ -2537,12 +3253,58 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
+  /// 当前是否停在章节开头（只有这里开工具栏需要给正文让位）。
+  bool get _atChapterTop =>
+      !_paged &&
+      _scrollController.hasClients &&
+      _scrollController.position.pixels <= 2;
+
+  /// 章首给工具栏让出的高度：让正文顶端正好落在工具栏下沿（正文本来就带
+  /// 一段上边距 spec.verticalPadding，所以要把这部分扣掉）。
+  double get _toolbarLift {
+    if (!_liftForToolbar) return 0;
+    final height = _toolbarHeight;
+    if (height == null) return 0;
+    final reserved =
+        _stableInsets.top + (_chapterLayout?.spec.verticalPadding ?? 0);
+    return math.max(0, height - reserved);
+  }
+
+  /// 收回章首的让位高度。让位是从正文顶部加的一条 padding，撤掉时正文会
+  /// 整体上移同样距离；这里把滚动偏移同步减去这段高度把视觉位置抵消掉，
+  /// 所以只有本来就停在章首（偏移为 0、无处可抵）时才真的回位。
+  void _releaseToolbarLift() {
+    if (!_liftForToolbar) return;
+    final lift = _toolbarLift;
+    _liftForToolbar = false;
+    if (lift <= 0 || _paged || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels <= 0.5) return;
+    final target = (position.pixels - lift).clamp(
+      0.0,
+      position.maxScrollExtent,
+    );
+    if ((position.pixels - target).abs() > 0.5) {
+      _scrollController.jumpTo(target);
+    }
+  }
+
+  void _clearControls() {
+    _releaseToolbarLift();
+    _controlsVisible = false;
+  }
+
   void _toggleControls() {
     _stopAutoTurn();
-    if (!_controlsVisible) {
+    final show = !_controlsVisible;
+    if (show) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      _liftForToolbar = _atChapterTop;
+    } else {
+      _releaseToolbarLift();
     }
-    setState(() => _controlsVisible = !_controlsVisible);
+    setState(() => _controlsVisible = show);
+    _syncSystemBars();
     _syncVolumeKeyEnabled();
   }
 
@@ -2592,7 +3354,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _showAppearanceSettings() async {
-    setState(() => _controlsVisible = false);
+    setState(_clearControls);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -2623,10 +3385,18 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         : ReaderThemePreset.dark;
     _previewPreferences(_preferences.copyWith(themePreset: nextPreset));
     unawaited(_savePreferences());
+    // 正文的夜间按钮同时切换整个 App 的深色/亮色（顶栏、我的、书架等一起变）。
+    unawaited(
+      setThemeMode(
+        nextPreset == ReaderThemePreset.dark
+            ? ThemeMode.dark
+            : ThemeMode.light,
+      ),
+    );
   }
 
   Future<void> _showDirectory() async {
-    setState(() => _controlsVisible = false);
+    setState(_clearControls);
     Set<String> cachedIds = {};
     try {
       cachedIds = await _diskCache.cachedChapterIds(widget.bookId);
@@ -2734,6 +3504,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         chapters: widget.chapters,
         startIndex: _index,
         initialContent: content,
+        cover: widget.cover,
         startOffset: offset,
         localOnly: widget.localOnly,
         textLoader: widget.chapterLoader,
@@ -2741,7 +3512,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       );
       await _persistProgress();
       if (!mounted || chapterId != _chapter.itemId) return;
-      setState(() => _controlsVisible = false);
+      setState(_clearControls);
       await AudioPlaybackScope.startSystemTts(context, book);
     } catch (e) {
       if (mounted) _showMessage(SystemTts.errorMessage(e));
@@ -2785,7 +3556,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         startMs = _paragraphStartMs(textId);
       }
       if (!mounted) return;
-      setState(() => _controlsVisible = false);
+      setState(_clearControls);
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => AudioPage(
@@ -2842,7 +3613,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _showCache() {
-    setState(() => _controlsVisible = false);
+    setState(_clearControls);
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -2879,31 +3650,58 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     //      进而让 SafeArea 内的正文视口高度变化，同样触发全章重新分页。
     //      固定成 viewPadding 后，这两个值在键盘升降过程中都不再变化。
     final base = readerMediaQueryWithCutoutInsets(MediaQuery.of(context));
+    final raw = base.viewPadding;
+    // 首帧直接用当前真实安全区，之后只取见过的最大值：否则进入阅读器的
+    // 第一帧会是 0 padding，第二帧再补上状态栏高度，正文先跳一下。
+    _stableInsets = _stableInsetsInitialized
+        ? EdgeInsets.fromLTRB(
+            math.max(_stableInsets.left, raw.left),
+            math.max(_stableInsets.top, raw.top),
+            math.max(_stableInsets.right, raw.right),
+            math.max(_stableInsets.bottom, raw.bottom),
+          )
+        : raw;
+    _stableInsetsInitialized = true;
+    // 【青茄·工具栏覆盖】正文不再为工具栏让位：工具栏与系统栏滑上来盖住
+    // 正文，视口大小全程不变，切换时文字不动。唯一例外是章节第一页——
+    // 此时开头还在屏幕上，额外让出一条工具栏高度，避免开篇文字被盖住。
+    // 这个让位是锁存的（见 _liftForToolbar），滚动过程中不会中途消失。
     return MediaQuery(
       data: base.copyWith(
         viewInsets: EdgeInsets.zero,
-        padding: base.viewPadding,
+        padding: _stableInsets,
       ),
       child: Builder(builder: _buildReader),
     );
   }
 
+  /// 工具栏高度只能实测：它由两行标题、年龄分级角标、系统字体缩放共同决定，
+  /// 写死常数会在不同机型上不是遮住首行就是留出大空白。
+  void _measureToolbar() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controlsVisible) return;
+      final box = _toolbarKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final height = box.size.height;
+      if (_toolbarHeight != null && (height - _toolbarHeight!).abs() < 0.5) {
+        return;
+      }
+      setState(() => _toolbarHeight = height);
+    });
+  }
+
   Widget _buildReader(BuildContext context) {
+    if (_controlsVisible) _measureToolbar();
     final preset = _effectivePreset;
     final windowPadding = MediaQuery.paddingOf(context);
-    final overlayStyle = preset.isDark
-        ? SystemUiOverlayStyle.light
-        : SystemUiOverlayStyle.dark;
+    final overlayStyle = _systemOverlayStyle;
     return PopScope<Object?>(
       canPop: !_controlsVisible,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _controlsVisible) _toggleControls();
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: overlayStyle.copyWith(
-          statusBarColor: preset.backgroundColor,
-          systemNavigationBarColor: preset.backgroundColor,
-        ),
+        value: overlayStyle,
         child: Theme(
           data: preset.theme(Theme.of(context)),
           child: Scaffold(
@@ -2958,14 +3756,25 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                           ),
                         ),
                       Expanded(
-                        child: SizedBox.expand(
-                          key: _viewportKey,
-                          child: _buildContent(preset, windowPadding),
+                        // 章首让位用「平移绘制」实现，不改视口高度：改 padding
+                        // 会让整章重新分页，落点按段落对齐，切工具栏时文字仍
+                        // 会跳几像素。平移只影响绘制，滚动位置完全不动。
+                        child: ClipRect(
+                          child: Transform.translate(
+                            offset: Offset(0, _toolbarLift),
+                            child: SizedBox.expand(
+                              key: _viewportKey,
+                              child: _buildContent(preset, windowPadding),
+                            ),
+                          ),
                         ),
                       ),
                       if (_preferences.showReadingInfo)
                         ListenableBuilder(
-                          listenable: _scrollController,
+                          listenable: Listenable.merge([
+                            _scrollController,
+                            ListeningSession.instance,
+                          ]),
                           builder: (context, _) => ReaderStatusBar(
                             key: const ValueKey('reader-status-bar'),
                             preset: preset,
@@ -2981,12 +3790,23 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                                 ? null
                                 : _pageIndex,
                             pageCount: _chapterLayout?.pages.length,
+                            listeningPill:
+                                ListeningSession.instance.bookId ==
+                                widget.bookId,
+                            estimatedPagesPerChapter:
+                                _estimatedPagesPerChapter,
                           ),
                         ),
                     ],
                   ),
                 ),
-                _menuEdge(top: true, child: _buildToolbar(preset)),
+                _menuEdge(
+                  top: true,
+                  child: _ReaderToolbarPresence(
+                    key: _toolbarKey,
+                    child: _buildToolbar(preset),
+                  ),
+                ),
                 _menuEdge(top: false, child: _buildReaderControls(preset)),
               ],
             ),
@@ -3093,10 +3913,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
                 icon: Icon(LucideIcons.message_circle, color: preset.textColor),
               ),
-            IconButton(
-              tooltip: '收起阅读菜单',
-              onPressed: _toggleControls,
-              icon: Icon(LucideIcons.chevron_up, color: preset.textColor),
+            ValueListenableBuilder<int>(
+              valueListenable: ShelfStore.instance.listenable,
+              builder: (context, _, _) {
+                final inShelf = ShelfStore.instance.containsItem(
+                  _shelfMediaItem,
+                );
+                return IconButton(
+                  key: const ValueKey('reader-toolbar-shelf'),
+                  tooltip: inShelf ? '已在书架' : '加入书架',
+                  onPressed: _toggleShelf,
+                  icon: Icon(
+                    inShelf
+                        ? LucideIcons.bookmark_check
+                        : LucideIcons.bookmark_plus,
+                    color: inShelf ? preset.accentColor : preset.textColor,
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -3142,6 +3976,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           behavior: HitTestBehavior.translucent,
           onTapUp: (details) {
             if (_selection != null) {
+              // 【青茄修复·划线预选】划线面板还开着时，面板里高亮的线型和
+              // 颜色就是用户已经「选好」的预选项。点其他部位不该把这次划线
+              // 悄悄丢掉——按预选落笔再收起，与点「确定」等价；否则用户会
+              // 以为已经划上了。
+              if (_underlinePanelOpen) {
+                unawaited(
+                  _commitSelectedUnderline(
+                    _markChoice.style,
+                    _markChoice.colorValue,
+                  ),
+                );
+                return;
+              }
               // A tap outside the selection cancels it without turning the
               // page — the official reader behaves the same.
               _closeSelectionBar(clearSelection: true);
@@ -3435,7 +4282,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _hideControlsOnDrag() {
     _stopAutoTurn();
     _pauseListenFollow();
-    if (_controlsVisible) setState(() => _controlsVisible = false);
+    if (_controlsVisible) {
+      setState(_clearControls);
+      _syncSystemBars();
+    }
   }
 
   Widget _buildScrollContent(
@@ -3642,6 +4492,35 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ),
     ),
   );
+}
+
+/// 阅读页顶部工具栏的存在性桥接：工具栏动画展开时登记「工具栏可见」，
+/// 收起（被 AnimatedSwitcher 卸载）后恢复为收起态，听书胶囊据此在完整
+/// 胶囊与底部小按钮之间切换。
+class _ReaderToolbarPresence extends StatefulWidget {
+  const _ReaderToolbarPresence({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ReaderToolbarPresence> createState() => _ReaderToolbarPresenceState();
+}
+
+class _ReaderToolbarPresenceState extends State<_ReaderToolbarPresence> {
+  @override
+  void initState() {
+    super.initState();
+    ReadingCapsuleHost.instance.setToolbarVisible(true);
+  }
+
+  @override
+  void dispose() {
+    ReadingCapsuleHost.instance.setToolbarVisible(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _ChapterDirectorySheet extends StatefulWidget {

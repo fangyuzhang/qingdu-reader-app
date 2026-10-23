@@ -25,14 +25,12 @@
 | 首页分类条 | 6 类 → 3 类（推荐 / 小说 / 听书） | `lib/widgets/home/home_tab_bar.dart` |
 | 首页文案 | 去掉「好戏开场」「每一格都藏着一个新世界」等剧集/漫画文案 | `lib/pages/home_page.dart` |
 | 首页推荐流 | 过滤 `video / manju / manga` 三类条目 | `lib/pages/home_page.dart` |
-| 底部导航 | 4 tab → 3 tab（首页 / 书架 / 我的），移除「短剧」 | `lib/main.dart` |
+| 底部导航 | 保留首页 / 书架 / 笔记 / 我的，移除「短剧」；笔记是批注能力的主入口 | `lib/main.dart` |
 | 搜索分类 | 6 类 → 3 类（综合 / 小说 / 听书）；综合结果过滤三类 | `lib/pages/search_page.dart` |
 | 书架 + 浏览历史 | 不再展示 `video / manju / manga` 条目（数据保留在本地，不删库） | `lib/pages/library_page.dart` |
-| 首页 feed 索引 | `HomeNotifier.tabs` 前三项与 UI 分类对齐（全部 / 小说 / 听书），后四项保留给已无入口的 DramaPage 与既有测试 | `lib/pages/home_provider.dart` |
+| 首页 feed 索引 | v5 已删除上游推荐流、旧 HomeNotifier 缓存与短剧 feed；首页只展示本地精选书单 | `lib/pages/home_page.dart`、`assets/config/curated_books.json` |
 
-**没有做的事**：没有删除 `drama_page.dart` / `player_page.dart` / `comic_reader_page.dart`
-等文件，也没有动 Rust 侧。它们已无主导航入口，保留可让二期随时恢复，
-同时避免大范围改动引发回归。
+v5 已进一步删除短剧、漫剧、漫画的客户端页面、组件、下载器、播放器和对应资源；Rust 底层签名/解密链路仍保留，仅服务于小说正文与加密听书，不再提供视频/漫画用户入口。
 
 ## 二、新增的功能
 
@@ -266,5 +264,356 @@ flutter test             # 1954 passed / 10 skipped
 
 ## 7.7 构建与体积
 
-- 440MB 安装体积根因 = 装 debug 包；release 仅 31.8MB（R8 + 字体 tree-shake）
-- 删未用 cupertino_icons；release 无正式签名时回退 debug 签名；新增 `tool/build_release.ps1`
+- 440MB 安装体积根因 = 装 debug 包；release 约 31MB（R8 + 字体 tree-shake）
+- 删未用 cupertino_icons；release 必须使用正式签名，缺少签名材料时构建失败，禁止回退 debug 签名；新增并强化 `tool/build_release.ps1`
+
+---
+
+# 八、v5 批次：产品范围收口与发布验证
+
+- 版本：1.0.122+127；正式签名 release APK，包名 com.fqapp.fqapp，仅 arm64-v8a。
+- 用户入口只保留小说与听书；短剧/漫剧/漫画页面、组件、下载与播放链路、Web 页面和资源已删除。
+- 修复搜索分类过滤的真实逻辑错误：首屏与分页都只接受 book、audio，不再让视频/漫画结果混入综合搜索。
+- 听书关联作品只保留原著小说；加密听书仍使用 CENC/Media3，不误删 libshortplay_crypto.so。
+- 关于页品牌与版本同步；补齐分享桥接服务，清理失效依赖、资源配置和调试文件。
+- 签名改为强校验：正式 keystore 缺失时直接失败；新增项目内 Gradle 缓存与 release 构建参数支持。
+- 发布脚本改为自动探测 Flutter、Android SDK、JDK 与 Build-Tools，新增 `-ValidateOnly` 前置检查，移除了开源构建流程中的本机固定路径和失效文档链接。
+- 验证：flutter analyze 无问题；Flutter 全量 1421 passed / 1 skipped；Web 32 passed；Rust host 9 passed；Android JVM 55 passed；发布脚本前置检查通过；APK 归档到 release-archives/v5/（不改动 v4）。
+- 已知限制：跨章长按选区仍是独立后续需求；FFmpeg CENC 集成测试需要本机安装 ffmpeg；Windows 真实 JNI 有 2 条按设计跳过。
+
+# 九、v5.1 批次：正式包启动失败修复与真机覆盖安装
+
+- 版本：`1.0.123+128`，About 页已同步。
+- 根因：release 包经 R8/ProGuard 混淆后，`shared_preferences` 的 Pigeon JNI 找不到被改名的 `kotlin.coroutines.Continuation` 等运行类型；不是设备空间不足，也不是本地数据库损坏。
+- 修复：在 `android/app/proguard-rules.pro` 保留 Flutter 插件、`kotlin.coroutines`、`kotlin.Result` 和 `kotlin.Unit`，确保 JNI 方法描述符中的类型名不被混淆。
+- 启动错误页：`AppBootstrap` 记录真实异常到应用日志，提示改为“本地数据未被清除”，不再诱导用户清理空间或数据。
+- 测试稳定性：修复 `AppLog.resetForTest()` 在测试异步环境变化后等待旧写入链导致的挂起。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1421 passed / 1 skipped；APK 签名、版本、ABI、原生库和 16 KiB 对齐检查全部通过。
+- 真机：Redmi K20 Pro（`b2f8e975`）已覆盖安装 1.0.123 (128)，首次安装时间未变化，未卸载、未清除数据；进程和 Flutter 引擎正常，关键异常日志为空。
+- 归档：`release-archives/v5.1/`，APK SHA-256 `159a29d082c9315bcd3307714c956de9f50d7922782007c8710aa4bdada8779b`。
+- 剩余人工确认：安装时手机停在系统 PIN 锁屏，未绕过锁屏；解锁后请检查书架、笔记和阅读进度。
+
+# 十、v8 批次：目录占位章节导致正文为空修复
+
+- 版本：`1.0.125+130`，About 页已同步。
+- 根因：部分书源把书名或卷名单独暴露为章节。《老人与海》目录项“老人与海”的接口正文仅有标题 4 个字，真实正文位于下一章，原阅读器据此显示“正文为空”。
+- 修复：阅读器允许标题占位章节进入缓存，识别去掉标题后无正文的章节，并自动向后扫描最多 8 个占位章节；扫描成功后同步目录索引，滚动预取同样跳过占位章节。
+- 回归：`flutter analyze --no-pub` 无问题；chapter/reader 相关 47 项通过；连续滚动、阅读器界面与分页相关 29 项通过、1 项跳过；新增占位章节跳转真实正文测试。
+- 真机：Redmi K20 Pro（b2f8e975）覆盖安装，未卸载、未清数据；《老人与海》占位章节成功显示真实正文并连续翻入下一章；抽查《小王子》《傲慢与偏见》《活着》正文正常，全程未出现“正文为空”。
+- APK：1.0.125 (130)，正式签名、ABI、ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `1b9b77e8e21d51612ff69a5379e9383c6e1372ee8020bab2b0a21236255fb2cb`。
+- 归档：`release-archives/v8/`，包含 APK、校验报告、UIAutomator 证据与真机验收记录。
+# 十一、v9 批次：正文占位页根因治理与全链路收口
+
+- 版本：`1.0.127+132`，About 页已同步。
+- 根因：上游目录会把书名页、卷页、版权页、推荐信等作为普通章节；《老人与海》的书名页正文仅有标题，真实 3189 字正文在下一目录项。原修复只覆盖阅读器，TTS、整本下载和 TXT 导出仍各自处理，容易再次出现空正文或导出异常。
+- 统一解析：新增 `ReadableChapterResolver`，阅读器、系统 TTS、整本下载和 TXT 导出全部复用它；只跳过“去掉标题后无内容”的标题占位页，保留版权页、短正文和图片页，真正空响应与网络/解密错误继续明确报错。
+- 离线与导出：占位页统一以结构化缓存格式落盘，离线打开可继续解析到下一真实章节；结构化缓存导出时只写可读正文，不再泄漏缓存 JSON；空响应不再写成可反复命中的空缓存。
+- 旧缓存自愈：升级前已写入的“结构化空缓存”不再被视为权威离线内容，阅读器会自动重新联网拉取并用真实正文覆盖，避免老用户升级后仍永久停在“正文为空”。
+- 目录元数据：章节模型与缓存目录保留 `chapter_word_number`、`chapter_type`，用于诊断和后续源特定规则，但不按字数少直接删章。
+- 审查范围：抽查《老人与海》《小王子》《傲慢与偏见》《西游记》《活着》等目录与正文样本；确认占位页、真实短页、图片页及网络失败必须使用不同处理语义，并以共享层固化。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1452 项通过、1 项跳过；Rust 真实内核集成测试单独复验 9 项通过。
+- APK：`1.0.127 (132)` 正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验全部通过；SHA-256 `05a7857b5555c86e9857c86d0b6fe298882af145bc3f4aa5125307b52e282836`。
+- 真机安装：Redmi K20 Pro（`b2f8e975`）覆盖安装成功，`firstInstallTime=2026-10-19 23:07:26` 未变，数据未清；新版本 `versionCode=132`、`versionName=1.0.127`，App 与 Rust 内核正常启动，日志未见崩溃、未处理异常或 ANR。
+- 真机页面验收：解锁后确认《老人与海》从详情页进入书名占位章时自动显示后续真实正文，目录跨章跳转正常；抽查《小王子》《傲慢与偏见》《西游记》正文或版权页均非空。笔记时间戳、分类、多标签、组合筛选面板及实线/虚线/波浪线/荧光笔面板也已在真机确认。
+- 真机证据：详情页、占位章后正文、14 章目录、跨章跳转、其他书籍、笔记筛选、划线面板与听书界面均已保存截图/UI XML；logcat 未见崩溃、未处理异常或 ANR。
+- 归档：`release-archives/v9/`，包含 APK、校验报告、全量测试日志、安装与锁屏状态证据、验收记录。
+
+# 十二、v10 批次：首页推荐轮换与按书查看笔记
+
+- 版本：`1.0.128+133`，About 页已同步。
+- 首页推荐：原「推荐」页每个分类固定展示同一批 6 本，除今日荐读外长期不变。现在基础顺序按日期稳定轮换，每天自动呈现不同组合；新增「换一批」按钮，下拉刷新也会换一组。每个分类推荐位展示 4 本，点「全部」仍可查看该分类完整书单。
+- 笔记按书查看：笔记页新增「时间线 / 按书查看」切换。按书模式按最近笔记时间列出所有写过笔记的书籍，显示笔记数、批注/书摘数、涉及章节和最近内容；点击一本书即可进入该书全部笔记的时间线，并自动应用书籍筛选。
+- 兼容：按书模式会保留时间、分类、标签和批注/书摘筛选；进入按书视图时清空单书筛选，避免只看到当前一本书而无法切换。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1455 项通过、1 项跳过；首页/笔记/批注/统计相关补充回归 81 项通过。
+- APK：`1.0.128 (133)` 正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验全部通过；SHA-256 `f064ca9c3dc033a4c57f3c16ee93f8cbd5cadd93e1417996da4a0b0392d9f489`。
+- 真机：Redmi K20 Pro（`b2f8e975`）覆盖安装成功，首次安装时间未变、数据保留；首页「换一批」前后今日荐读由《城南旧事》轮换为《枪炮、病菌与钢铁》，分类推荐位同步变化；笔记页可切到「按书查看」，按书显示笔记数/批注数/书摘数/章节数，点击《小王子》后进入该书两条笔记的时间线。logcat 未见崩溃、未处理异常或 ANR。
+- 归档：`release-archives/v10/`，包含 APK、校验报告、全量测试日志、真机截图与 UI XML、验收记录。
+
+# 十三、v11 批次：分类「全部」接入书城多页书目
+
+- 版本：`1.0.129+134`，About 页已同步。
+- 问题：首页分类“全部”原先只读取内置书单中的 6 本，刷新只会重排同一组数据。
+- 修复：新增 `CategoryBrowsePage`，从书城按分类相关的多个关键词并行检索并去重；首次进入一次合并多页结果，支持“加载更多”和“换一批”。
+- 交互：首页顶部分类标签、分类入口按钮和每个分类栏的“全部”都会进入完整分类页；内置 6 本仍作为“精选”数量展示。
+- 容错：单个关键词失败不会拖垮整页；全部失败时给出明确重试入口。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1457 项通过、1 项跳过；分类页与首页定向回归 26 项通过。
+- 真机：Redmi K20 Pro（`b2f8e975`）覆盖安装 1.0.129 (134)，未卸载、未清数据。古典名著首次载入 40 本，“换一批”后变为 44 本；世界文学 41 本、历史人文 32 本、科普百科 40 本、科幻想象 44 本、成长青春 45 本、诗歌散文 44 本，均不再是固定的 6 本。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验全部通过；SHA-256 `f61dea85123d5dd9cdd643ec8ea43aabd702feb449676c4a89076877c1907384`。
+- 归档：`release-archives/v11/`。
+
+# 十四、v12 批次：分类页加载提速（缓存 + 渐进渲染）
+
+- 版本：源码改动，未构建 APK、未提交。
+- 问题：首页点“古典名著 / 世界文学…”等分类并查看全部时，分类页固定先转圈约两秒。原因是进入页面要并发搜索 5 个相关关键词，且必须等全部返回才渲染。
+- 批次缓存：新增 `CategoryBrowseCache`（内存 + SharedPreferences），按“分类 + 偏移”缓存每批结果。30 分钟内再次进入同一分类直接命中缓存，不请求上游；超过 30 分钟则先用旧结果铺屏、后台刷新（stale-while-revalidate）。最多保留 24 批，避免本地存储膨胀。
+- 渐进渲染：`_fetchBatch` 改为哪个关键词先返回就先上屏，不必等 5 条全部结束；上游结果到齐后整批覆盖，顺序与去重规则不变。
+- 首屏兜底：冷启动第一次进入时，先用书单里已解析好的本地条目铺满首屏（点击仍走详情页），上游结果返回后覆盖，避免纯白转圈。
+- 交互：加载更多也会优先命中缓存；顶部/下拉“换一批”始终强制联网，保证能换到新内容。
+- 验证：`flutter analyze --no-pub` 无问题；`category_browse_page_test`、`home_page_test`、`curated_resolver_test` 共 45 项通过，其中新增“缓存命中秒开且不请求上游”“首个关键词返回即渲染”两项用例。
+- 真机：Redmi K20 Pro（`b2f8e975`）覆盖安装验证：古典名著首次进入 1 秒内 37 本，二次进入 0.4 秒 38 本，「换一批」45 本正常。
+
+# 十五、v13 批次：分类页不再「自己刷新」、详情页与阅读页去等待
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同一版本号覆盖安装），未提交。
+- 问题一：点进分类页后什么都没操作，格子自己整片换了一遍。原因是缓存过期时先铺旧结果、网络返回后 `_showBatch` 整体替换，整片封面同帧重解码、滚动位置跳动。
+- 修一：首屏结果改为**追加式合入**（`_adopt`），并对同 id / 同名去重；只有用户主动点「换一批」才整体替换。屏幕不再无端闪一下。
+- 问题二：详情页要等 detail 与 directory 两个请求都回来才铺正文，约 1 秒；第二次进同一本书依旧白等。
+- 修二：新增 `DetailSnapshotCache`（加密 Hive 盒 `detail_snapshot_v1`，12 小时 TTL，最多 16 本）。启动首帧后预热打开；命中快照直接同帧渲染，网络结果静默覆盖。目录区在等待时只显示一行「正在加载目录」，不再整块转圈。
+- 修二补充：详情与目录改为**先到先上屏**——简介、标签、作者不必陪目录一起等；底部「继续阅读」等目录到位后自然出现。
+- 问题三：点「继续阅读」进正文，有插图的章节要多等约 1 秒。
+- 修三：`_loadChapterText` 不再等待整本目录落盘（`_ensureCatalog`）与章节写入，二者转后台且带版本校验，避免旧文字覆盖新图文；偏好与阅读进度改为与正文并行读取。
+- 修三补充：正文解析出来即预热插图（`precacheImage`，与插图组件同一缓存键，最多 6 张）；预取下一章时顺带预热下一章插图。详情页也会在已知续读章节且本地有正文时，提前把该章前 4 张插图拉进缓存。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1454 项通过。新增用例：`detail_snapshot_cache_test`（落盘重开、TTL、淘汰）与分类页「过时缓存留在原位，新结果追加而不是整片替换」。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `5cd72e4d68a9c0fc3b45313ee28ed77759fa816e0a0f820a072bc2bfe43bf2e6`；WSL 原生构建 47.6 秒。
+- 真机：Redmi K20 Pro（`b2f8e975`）覆盖安装并拉起，待人工核验三处：分类页进入不再闪刷、详情页首屏、图文正文进入速度。
+
+# 十六、v14 批次：真机实测后的二次提速
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 做法：先在关键路径上加临时 `PERF` 计时探针，用 adb 点按真机取数，再按数据改，最后删掉探针。
+- 实测基线（Redmi K20 Pro，`b2f8e975`）：
+  - 分类页缓存命中首屏 +15ms；「换一批」联网首条约 +1.0s、整批 +1.3s。
+  - 详情页首次进入：detail 与 directory 同在 +473ms 到达；二次进入快照 +1ms。
+  - 阅读页首次打开一章：正文 +843ms；正文到位后又被空的划线/批注/段评层触发整章重排，多花约 100ms。二次进入同上路径为 +51ms。
+- 优化一（最大收益）：详情页停留期间预热「继续阅读」那一章的正文——本地没有就直接取一次并写进章节缓存，再顺带预热前 4 张插图；没有阅读记录时预热第一章。实测点进去从 843ms 降到 **+23ms**，正文与插图同时到位。
+- 优化二：没有划线、没有批注、没有段评气泡时，加载完成不再 +1 排版版本号，省掉每次换章一次多余的整章重排（单章约 50–100ms）。
+- 优化三：分类页批次缓存 TTL 由 30 分钟放宽到 6 小时（「换一批」和下拉刷新仍强制联网），避免用户隔半小时再进分类又要等一次上游。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1454 项通过（分类「过时缓存」用例同步改为 7 小时前写入）。
+- APK：`2f0154f2d39ed5dc781811e25e6e01a344e585aa3d51fadfee8fe96e3f06c4a5`，正式签名、ABI、原生库与 16 KiB 对齐校验通过；WSL 原生构建 46.3 秒。
+- 真机：覆盖安装成功（`lastUpdateTime=2026-10-22 13:03:59`），分类→详情→继续阅读全链路冒烟正常，logcat 无崩溃/未处理异常。
+
+# 十七、v15 批次：把剩下的等待藏起来（骨架屏 + 首页预热 + 插图解码分级）
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 前提：v14 之后各处等待已从「秒级」降到「几百毫秒」，用户仍反馈有轻微卡顿。这一批不再追极限，而是把剩余等待**变得不可感知**，取舍是接受部分预加载。
+- 优化一（插图解码尺寸分级）：正文里的插图最宽也就一屏，之前内联和全屏都按 2048×4096 解码，等于每张图多解 2~3 倍像素。新增 `ReaderImageSizing`：正文内联按 1200×2400 解码，只有点开全屏放大才用 2048×4096（`ReaderIllustration.highResolution`）。`reader_page.dart` 的插图预热与 `detail_page.dart` 的续读章节预热同步改用 `ReaderImageSizing.provider(...)`，保证预热缓存键与组件实际使用的完全一致，否则尺寸不同就是另一份缓存、预热白做。
+- 优化二（详情页骨架屏）：首开要等一次上游往返（实测约 473ms，网络差更久），之前只有一个 22px 转圈，观感是「卡住 → 突然弹出」。新增 `lib/widgets/detail/detail_skeleton.dart`：作者行、数据卡、简介行、标签、编号行、目录预览都按真实版式摆灰色占位条，900ms 呼吸动画；`MediaQuery.disableAnimations`（含墨水屏）时静止。骨架 `ExcludeSemantics` + `IgnorePointer`，不干扰读屏也不吃点击；「从缓存阅读」按钮移到骨架下方，`detail_read_cached` 这个 key 与错误卡片依旧互斥。
+- 优化三（首页分类首批预热）：分类页首批要并发搜 5 个关键词，用户点「古典名著 → 全部」时先看到的仍是等待。新增 `lib/services/category_browse_warmup.dart`：首页渲染完 1.5 秒后，按分类顺序把前 3 个分类的首批（5 个关键词并发、按 id 与书名去重、只留 book/audio）写进 `CategoryBrowseCache`，已在有效期内则跳过。关键词表从 `category_browse_page.dart` 的私有常量抽到这里，页面改为 `CategoryBrowseWarmup.queriesFor(...)`，两处不会漂移。预热失败（整批空）不写空缓存；`catalog` / `categoryLoader` 被注入即测试或离线环境，一次请求都不发。
+- 验证：`flutter analyze --no-pub` 无问题；Flutter 全量测试 1460 项通过。新增 `test/category_browse_warmup_test.dart`（去重与过滤、limit 与新鲜缓存跳过、整批失败不写空缓存、页面销毁即停、未知分类回落显示名）与详情页「首开加载态是和真实版式同构的骨架屏」用例。
+- 踩坑记录：本机 `dart format` 默认按 tall style（Dart ≥3.7）重排，直接 `dart format lib test` 一次改写了 66 个无关文件。本仓库历史代码是旧风格（短风格），格式化必须带 `--language-version=3.6`，例如 `dart format --language-version=3.6 lib/pages/reader_page.dart`。误改的 66 个文件已还原为 HEAD 内容（逐文件校验 `git diff -w` 为空后才动），最终改动仍只落在 5 个源码文件 + 2 个新文件 + 2 个测试文件上。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `4a3a915cfc3fae0b74a31e417dfdb152f25121cd539e374aba3307c9365b0346`；WSL 原生构建 45.6 秒；38.3 MB。
+- 真机：覆盖安装成功（`lastUpdateTime=2026-10-22 13:22:50`）。冒烟：首页正常；点「古典名著 → 全部」0.45 秒内整屏 43 本已铺好，3 秒后画面与首帧完全一致（不再「自己刷新」）；详情页命中快照即时渲染；logcat crash 缓冲为空。
+
+# 十八、v16 批次：上下滚动模式向前跨章无缝
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 问题：上下滑动模式下，处在某章开头继续往下拖，本应接上上一章末尾；实际先卡一下，然后跳到上一章的**其他位置**。左右翻页（分页模式）没有这个问题。
+- 根因（两处叠加）：
+  - 滚动窗口只会**向后**长（预取下一章追加到尾部），向上跨章走 `_prev(startAtEnd: true)`，而窗口里没有上一章，于是回退到「整章加载 + 版面重建」，就是那一下卡顿。
+  - 窗口判据旧的是 `_scrollWindowBookChapter != _scrollWindowKey`（以「当前章」为键）。视口一越过章界，当前章变了，整个窗口被重建；读者被留在新列表的同一像素偏移上，于是落到上一章的别处。
+- 修一：窗口判据改成「当前章是否在窗口里」（`indexWhere` 找当前章，`_scrollActive` 以当前章为准），跨章不再整块重建窗口。
+- 修二：新增 `_prefetchScrollSegmentBefore()`——把上一章排好插到窗口最前面，`_scrollActive += 1`，同时 `jumpTo(offset + segment.extent)` 补偿新增高度；章节极短、旧 `maxScrollExtent` 装不下补偿位置时，post-frame 再跳一次。失败静默，真拉到顶时仍由 `_prev()` 兜底整章加载。
+- 修三：`_maybeScrollPrefetch()` 增加向上触发——窗头上沿离视口不足 1.5 屏就把上一章排好插入，于是拖到章首时内容已经在手里。
+- 附带重构：把原 `_prefetchScrollSegment` 里的「加载 + 排版」抽成 `_measureScrollSegment(index, spec)`，前后两个方向共用同一套测量逻辑；`_scrollBusyBefore` 与 `_scrollBusy` 分开，前后预取互不阻塞。
+- 验证：`flutter analyze` 无问题；Flutter 全量测试 **1462** 项通过。`test/reader_seamless_scroll_test.dart` 新增 2 个用例：章首往下拖直接接上一章末尾且不重新加载整章（`firstChapterLoads == 1`）、跨章向前滚时窗口只增不减（`maxScrollExtent` 单调不减）。
+- 格式化的新坑：`reader_page.dart` 里已用上 null-aware elements（`?currentChild`）、需要 Dart ≥3.8，`--language-version=3.6` 会直接解析失败。本批改为「默认 `dart format` 跑一份副本、`diff` 确认新增代码无差异」来校验，不动历史旧风格段落。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `ee872b2888cc09a74fb261e7d2b2a42ab8bebb86d76eb4b08776b9a0b6f05723`；WSL 原生构建 41.8 秒；38.3 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）：切到「上下滚动」后从 `目录 → 第一回` 进入章首，往下拖一屏，上一章《关于本书的整理情况》的结尾（`人民文学出版社编辑部 / 一九七三年八月`）直接接在标题上方出现，无卡顿、无跳动；继续往上两屏顺畅进入上一章正文；反向下滑两屏回到同一像素位置（前后截图完全一致）。`lastUpdateTime=2026-10-22 13:53:43`。
+
+# 十九、v17 批次：笔记重构（封面视图 + 自定义批注类型 + 划线查看）+ 划线预选修复
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 笔记页「按书查看」改成与首页一致的封面网格：复用 `homeCardWidth` / `homeGridDelegate` 与 `StoryCover`（5:7 封面、右上角笔记数角标、标题两行、统计行），不再是文字列表。
+- 笔记页新增第三个视图「划线」：把 `ReaderRangeUnderline`（范围划线）与 `ReaderUnderline`（早期整段划线）合并成一条按时间倒序的列表，带线型标签（实线/虚线/波浪线/荧光笔）、书名、时间、原文两行与章节名；二级 chip 切换「全部 / 划线 / 荧光笔」，再按书 chip 过滤；点一条可直接跳到原文那一句（`startOffset`）。
+- 自定义批注类型：新增 `lib/services/reader_marker_type_store.dart`（加密 Hive 盒 `reader_marker_types_v1`，单条 `types` 列表，最多 24 条、最近优先、同名覆盖），编辑器里的「批注标记」变成「内置 4 预设 + 用户自定义 + 已落库角标」三点色 chip；「新类型」可现场命名 + 选色，保存时自动记忆。笔记页顶部与筛选面板都按「批注类型」维度筛选（`NoteTimelineFilters.markerKey`）。
+- 划线预选 bug：之前在正文里点「划线」出现预选项后，若用户点别处，预选被静默丢弃。现在 `reader_page.dart` 的 `onTapUp` 在 `_underlinePanelOpen` 时先按当前 `_markChoice`（线型 + 颜色）落笔再收起面板；面板标题行补「确定 / 取消」两个显式按钮。
+- 界面整理：视图切换条改为三项（时间线 / 按书查看 / 划线）；顶部筛选区重排为「内容 chip 行（全部/批注/书摘 + 筛选）+ 批注类型横向 chip」；空态按模式区分；划线记录的书名先取笔记里的书名，再回落到阅读历史与首页书单解析缓存（`CuratedResolver.cached`），封面同样从历史/书单缓存补，查不到才用几何封面兜底。
+- 验证：`flutter analyze` 无问题；Flutter 全量测试 **1472** 项通过（10 跳过）。新增 `test/notes_page_test.dart`（4 例：类型 chip 筛选、划线视图 + 荧光笔/划线切换、按书封面卡片、划线空态）、`test/reader_marker_type_store_test.dart`（4 例：catalog 去重、fromMap 兜底、add 排序/覆盖/上限、remove）、`test/reader_paragraph_actions_test.dart` 新增 2 例（点正文别处按预选落笔、面板内「取消」不落笔）。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `544d844eb58df9e40fe3118693644f43a96dd657cded86348c2652f106fdb446`；38.3 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）冒烟：笔记页三视图正常，「按书查看」四本书封面与首页一致（西游记/三体/小王子/草房子），批注类型 chip 筛选生效；「划线」视图 6 条记录书名/章节名齐全；正文长按 → 划线出现预选面板（含确定/取消），点正文别处后按预选「虚线 + 琥珀」落笔并提示「已划线」，笔记页记录数 5 → 6；批注编辑器里「新类型」+ 取色可用。
+
+# 二十、v18 批次：把听书页的配色语言铺到其余界面
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 参照对象：听书详情页（`lib/widgets/audio/audio_sections.dart`）的取色规律——卡片用 `palette.soft` 铺底 + 12px 圆角；未选 chip 是比底色更深一层的 `line@35%`，选中才抬成 `surface` 并加一圈 `accentText@55%` 细描边、文字转主色；正文文字 ink、说明文字 muted、强调数字/进度用 accent。
+- `HomePalette` 新增三个统一 token：`chipFill`（未选 chip 底色，墨水屏回落纯白）、`chipSelectedFill`（选中 chip 底色）、`chipBorder(selected)`（选中主色描边 / 未选透明），墨水屏下退化为白底 + 黑色描边，不引入灰阶。
+- 笔记页：视图切换、内容 chip、批注类型 chip、划线线型 chip、按书 chip 全部改用新 chip token；「筛选笔记」弹层从米黄纸面改成 `palette.canvas` 深色面板（标题 ink、说明 muted、应用按钮主色、下拉与输入框 `soft` 填充 + 细描边）；筛选计数角标由橙色改为品牌绿；时间线里引用原文的暖棕色文字改为 muted。
+- 章节缓存页（`cached_books_page.dart`）：原来整套 Material `Card` / `ListTile` 默认样式，改为 `palette.canvas` 背景 + `soft` 汇总卡 + 「细描边 + 圆角 14」的书籍行；封面改用首页同款 `StoryCover`（无封面时几何兜底），导出/删除图标换成 Lucide 并统一 muted 色，进度环用主色；空态换成 `soft` 圆底 + Lucide 图标。
+- 系统朗读设置（`system_tts_settings_page.dart`）：说明卡 `soft`、引擎下拉与语速卡「surface + 细描边」、语速值做成主色小徽标、Slider 用主色（轨道 `line`）、底部按钮改主色描边。
+- 听书模式页（`listen_mode_page.dart`，当前仅测试引用）：`#121212` 背景改 `palette.canvas`，橙色 `#FA6725` 控件全部换成品牌绿，倍速药丸沿用新 chip 规则。
+- 阅读统计页（`stats_page.dart`）：笔记相关的红色 `#D64545` 改用品牌点缀色 `AppTheme.highlight`，与全局色板一致。
+- 验证：`flutter analyze` 无问题；Flutter 全量测试 **1472** 项通过（10 跳过）；`notes_page_test`、`cached_books_page_test`、`cached_books_page_export_test`、`stats_page_widget_test`、`listen_mode_page_test`、`system_tts_test`、`audio_listening_boundaries_test` 均通过。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `09933a5704ccc20b614526c512cbc40a484a618f21943fd8169a6a5939c01585`；38.5 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）冒烟：章节缓存页 27 本封面卡片与听书页同一套暗底 + 细描边质感；笔记页 chip 选中态变成亮底 + 绿色描边；筛选面板为深色 sheet，选中分类/类型/标签与「应用」按钮都是品牌绿；`lastUpdateTime=2026-10-22 17:52:51`。
+
+# 二十一、v18.1：我的 / 设置 / 阅读统计收口到同一色系
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 「我的」快捷入口：笔记 / 章节缓存 / 应用设置 / 关于我们原本是红蓝绿紫四色图标，改为统一的 `palette.soft` 卡片 + `accent@14%` 图标底 + 主色图标，靠图标形状和文字区分入口；「设置」胶囊保持 soft + 细描边。
+- 「我的」统计卡片（`stats_page.dart` 内嵌）：`_Card` 从 `scheme.surface + outlineVariant` 改为 `palette.soft` 无描边；指标块从 `surfaceContainerLow` 改为比卡片更深一层的 `line@45%~55%`，数值 ink、标签 muted，标题竖条改品牌绿。
+- 阅读统计页顺手修一个显示缺陷：今日/本月/总计的数值原先被省略号截断（「3 小时 17…」），改为 `FittedBox` 缩放，能完整显示「3 小时 17 分钟」。
+- 设置页分类图标：原来 6 个硬编码色（青绿/珊瑚/紫/蓝/绿/靛）且与分类顺序错位，改为按标题取色——外观/数据用品牌绿，听书用品牌点缀色珊瑚橙，服务/关于退到 muted，形成层级；图标底统一 `accent@13%`、圆角 11。
+- 验证：`flutter analyze` 无问题；Flutter 全量测试 **1472** 项通过（10 跳过）。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `15b65a77da9531fc34c9f4f2a69db1b0cc5858a0cff8a35ad5f6e424e5d1d13d`；38.5 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）冒烟：我的页四个入口同色系、统计数字完整显示；设置页图标层级（绿 / 珊瑚 / 灰）符合预期；`lastUpdateTime=2026-10-22 18:37:43`。
+
+# 二十二、v19 批次：全应用锁定竖屏
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 问题：手机横过来时，App 整体跟着转成横向排版（首页、分类、详情、阅读正文都会重排），横屏在小说阅读场景里没有收益，只带来一次重排抖动。
+- 双层兜底：
+  - Flutter 层：`lib/main.dart` 在 `WidgetsFlutterBinding.ensureInitialized()` 之后调用 `SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp])`，全局只接受竖屏。
+  - 系统层：`android/app/src/main/AndroidManifest.xml` 的 `MainActivity` 增加 `android:screenOrientation="portrait"`，让 Activity 在启动瞬间就是竖屏，不会先转一次再被 Flutter 拉回来。
+- 影响面：只锁方向，不改布局、不改交互；平板上仍按竖屏呈现；阅读页左右翻页手势、面板弹出都不受影响。
+- 验证：`flutter analyze lib/main.dart` 无问题；Flutter 全量测试 **1472** 项通过（10 跳过）。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `68df01270a1b20885ad6a23ae36c7e29fbd934582695ed3908c1b858d406b7f1`；38.5 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）冒烟：`settings put system user_rotation 1` 强制系统转 90° 后，截图仍是 540×1170 竖屏，首页完整显示；`dumpsys window` 里 `mCurrentAppOrientation=SCREEN_ORIENTATION_PORTRAIT`；核验后已恢复 `accelerometer_rotation=1` 并删除 `user_rotation`。`lastUpdateTime=2026-10-22 18:42:46`。
+
+# 二十三、v20 批次：听书详情/正文联动 + 可拖动胶囊 + 句级高亮
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 听书详情页正文区改版（`lib/widgets/audio/audio_sections.dart` 新增 `AudioNarrationView`，替换原 `AudioExcerpt`）：
+  - 有字幕轨时只显示「上一句（灰）/ 当前句（主色竖条 + 加粗，key `audio_narration_current`）/ 下一句（灰）」，随播放位置实时滚动，不再一次性铺一大段，用户能一眼看出正在念哪一句。
+  - 没有字幕轨的录音回退成 3 行章节摘要（key `audio_narration_excerpt`），不会再空一块。
+  - 整卡 `onDoubleTap` → 直接进正文（`_openReaderFromAudio`），底部提示从「双击查看全部」改为「双击进入正文」，右侧保留「进入正文 >」按钮。
+- 正文页朗读句高亮（`lib/pages/reader_page.dart` + `lib/widgets/reader/reader_chapter_layout.dart`）：
+  - 新增 `narrationTextRange(layout, text)`：`ListeningSession.narrationText`（当前字幕句）先在正文里整句精确匹配，再忽略空白/标点匹配，最后退到前 12 字前缀；命中就只给那一句上色。
+  - 新增 `narrationBlockAtProgress(layout, progress)` 兜底：整句跨段落或对不上原文时，按朗读进度落到所在段落整段高亮，至少让读者知道读到哪一段。
+  - 暂停朗读时高亮保留（读者常停下来对照原文），只有停止听书（`ListeningSession.clear()`）、切章或换书才清空；排版完成后补一次 `_syncNarrationHighlight`，所以「暂停着进正文」也能立刻看到高亮。
+  - `AudioPlaybackController` 每次发布会话状态时带上 `narrationText: _subtitles.cueAt(position)?.text`，`ListeningSession` 新增该字段并纳入结构变化判定。
+- 听书悬浮胶囊（新文件 `lib/widgets/audio/listening_capsule.dart`，`audio_playback_scope.dart` 内替换原底部通栏 mini bar）：
+  - 232×48 胶囊，`palette.soft` 底 + `palette.line` 描边 + 阴影，浮在 Overlay 上（在阅读页里也不占正文行高）。
+  - 可自由拖动：`Positioned` + `onPanUpdate`，限制在可视区内；修复了快速滑动时用同一帧旧坐标导致「手指走完胶囊只挪一点」的 bug（改成以最新落点累加 delta）。
+  - 保留暂停/播放（`audio-mini-toggle`）与叉号关闭（`audio-mini-close`），点标题回听书页（`audio-mini-open`）。
+  - 新增「听书设置」（`audio-mini-settings`）：定时关闭 / 语速 / 音色三行，和听书页共用 `_showListeningSettings`；系统朗读则进 `SystemTtsSettingsPage`。胶囊在 Navigator 之外，弹层用 `widget.navigatorKey.currentState?.overlay?.context`。
+- 验证：`flutter analyze` 无问题；Flutter 全量测试 **1483** 项通过（10 跳过）。新增 `test/audio_narration_view_test.dart`（3 例）、`test/audio_playback_scope_test.dart` 补 2 例（三行设置项、胶囊可拖动）、`test/listening_sentence_highlight_test.dart` 补 5 例（`narrationTextRange` 3 例 + `narrationBlockAtProgress` 2 例）、`test/reader_page_test.dart` 补「有声书朗读时正文段落会被高亮」（滚动模式下长章节，含暂停保留、停止后清除）。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `4079ef3e355796e345459eba8f326ce8328256588a786db8500c300bfda5ae67`；38.5 MB。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 听书详情页卡片显示「上一句 / 当前句（绿竖条加粗）/ 下一句」，念到新句时卡片实时换行（截图 19:46）。
+  - 点「进入正文」直接落到正在朗读的《冬阳 童年 骆驼队》，正文里「但是拉骆驼的说，他们从门头沟来……」整句带琥珀色底（截图 19:51）。
+  - 暂停后进正文，高亮仍在；胶囊显示播放箭头。
+  - 胶囊拖动：从左下拖到右中并保持，位置被记住（截图 19:39/19:40 前后对比）。
+  - 胶囊「听书设置」弹出「定时关闭 / 语速 / 音色」三行，音色显示当前「甜美少女音」。
+  - `lastUpdateTime=2026-10-22 19:55:06`（含格式化后的最终包）。
+
+# 二十四、v21 批次：听书页重构（固定布局 + 可滚正文 + 从本句听 + 页数）
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 问题：详情页只显示三行字幕，句子长短不同会让那块区域高度跳动，把下方播放控件顶来顶去；同时一眼只能看三句，无法像读正文一样回看。
+- 布局（`lib/pages/audio_page.dart` + `lib/widgets/audio/audio_sections.dart`）：
+  - 删除 `AudioNarrationView` 三行卡片与旧 `AudioToneSection` 音色大卡（含 `_AudioToneChip`、`AudioRelatedRow` 死代码）。
+  - 新增 `AudioNowPlayingHeader`：固定高 84，左侧 60×80 小封面，右侧当前章节（两行截断）+「书名 · 第 n / N 章」+ 目录/进正文按钮。
+  - 新增 `AudioNarrationBody`：整章逐句铺开，`SingleChildScrollView` 上下滚动，当前句主色竖条 + 淡底 + 加粗，已读句变淡；自动跟随当前句（`ensureVisible`，用户手动拖动后暂停跟随 8 秒）；无字幕轨回退章节摘要段落；不加载任何图片。
+  - 页面改为固定 Column：头部 → `Expanded(正文)` → 页数/全书进度 → 状态行（固定 50 高，错误文案与「重试」并排，不再撑出边界）→ 操作行 → 进度条 → 传输控件 → 紧凑音色条。句子长短、标题长短都不再推挤下方控件。
+  - 正文下方左侧新增「第 X / Y 页」（按字幕字数折算），右侧保留「全书 NN.N%」。
+  - 长按任意一句弹出「从本句听」，跳到该句时间点并开始播放。
+  - 音色条压成一行只显示当前音色（如「甜美少女音」），右侧保留「边听边读」；点它仍打开原「声音设置」弹层。
+- 修复：
+  - 进度条 `Slider` 在「弹层关闭 + 换版本同帧」时触发 Flutter 语义断言（`identical(childRenderObject, parentRenderObject)`），用 `MergeSemantics` 包住修复（固定布局让 Slider 始终可见后才暴露）。
+  - 头部「目录」按钮 tooltip 改为「打开目录」，避免与底部传输栏的「目录」重名。
+  - 迷你胶囊显示判定改为「只被真正的页面路由盖住才显示」：新增 `AudioRouteWatcher`（`NavigatorObserver`），弹窗/菜单/底部面板不再让胶囊冒出来盖住听书页控件；`ModalRoute.isCurrentOf` 仅作为未接入观察者时的回退。
+- 测试：`flutter analyze` 无问题；Flutter 全量测试 **1486** 项通过（10 跳过）。更新 `test/audio_narration_view_test.dart`、`test/audio_linked_voices_test.dart`、`test/audio_page_test.dart`、`test/audio_related_navigation_test.dart`、`test/review_fix_b12_test.dart`、`test/ui_review_regressions_test.dart` 以适配新布局与相关作品移入「播放设置」弹层；`test/audio_playback_scope_test.dart` 新增「弹层不唤醒胶囊」用例。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `12fdebdbf925fe116e7be933b6dcca53668f30bc58dc8eb22d6a7c764db2caba`；36.7 MiB。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：小封面 + 右侧「冬阳 童年 骆驼队 / 城南旧事 · 第 7 / 16 章」；正文可上下滚动，底部「第 14 / 32 页」「全书 43.6%」；长按句子出现「从本句听」，点击后跳到 03:59 并开始播放、当前句高亮跟随；滚动/长按时下方控件位置不变；打开「播放设置」弹层时迷你胶囊不再出现。
+
+# 二十五、v22 批次：听书胶囊双形态 + 护眼弹窗置顶 + 切章音频链路
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 听书胶囊显示逻辑（`lib/widgets/audio/audio_playback_scope.dart`、`lib/widgets/audio/listening_capsule.dart`、`lib/pages/reader_page.dart`）：
+  - 新增 `ReadingCapsuleHost`：阅读页进入/退出、工具栏显隐、对话框打开三类信号共同决定胶囊形态。
+  - 工具栏展开 → 完整可拖动胶囊（232×48）随工具栏一起出现；工具栏收起 → 底部收紧成 128×38 小按钮，文案「停止听书 / 继续听书」，点击即暂停或继续。
+  - `_ReaderToolbarPresence` 负责把工具栏可见性写回 host；非阅读页仍保留完整胶囊。
+- 护眼提醒层级（`lib/pages/reader_page.dart`）：
+  - `_showEyeCareReminder()` 用 `try/finally` 置 `ReadingCapsuleHost.instance.setDialogOpen(true/false)`；弹窗期间两种胶囊都不渲染（`suppressed = host.dialogOpen`），弹窗完整覆盖页面元素与胶囊。
+  - `ReaderPage.eyeCareInterval` 为 45 分钟连续阅读。
+- 切章音频无法播放（根因 + 修复）：
+  - 真机 logcat 定位：城南旧事第 8 章阅读版 playinfo 返回 `QUERY_CHAPTER_LOCK_ERROR`（付费锁章），`/api/v1/audio/play` 兜底也被上游 401/403/429 拒绝；三国演义前折页/书名页/版权页本身无音源（`未获取到音频地址`）。**不是播放器重建问题，是上游对部分章节不提供音频**，不绕过付费机制。
+  - `lib/services/api_client.dart`：新增 `audioPlaySource()`（`/api/v1/audio/play` 旧 mget 桥）。
+  - `lib/services/audio_playback_controller.dart`：`_loadSourceWithRetry` 在锁章/无音源时尝试 legacy 源；`_audioFailureText()` 区分「本章为付费内容，暂不可听。」与「本章暂无音频内容。」；`_openChapter` 新增 `skipEmptyDirection` / `skipEmptyRemaining`（上限 12），只对「无音源」沿同方向跳过前置页，锁章不跳过；新增 `_switchChapter(int direction)` 统一上一章/下一章、系统媒体 next/prev、自动下一章。
+  - `lib/pages/audio_page.dart`：上一章/下一章、目录跳章走页面级 `_switchChapter` / `_openChapterFromCatalog`；用户主动切章遇「付费/暂无音频」时自动转系统朗读（`_autoTtsPending` / `_autoTtsChapter`），不再停在死页；状态行提供「系统朗读」+「重试」。
+  - `lib/services/system_tts.dart`：修复 `SystemTtsBook.load` 把空 `initialContent` 当正文导致「本章没有可朗读的文字」；新增 `SystemTtsPlayback.started`，首个章节首句交给引擎后完成，关闭时也完成。
+  - `audio_playback_scope.dart`：`startSystemTts` 等 `session.started`（最长 40 秒），失败或 `session.error != null` 时关闭并抛错，听书页不再误关闭。
+- 收起态小按钮兜底：音频未就绪（锁章/加载失败）时点小按钮直接进听书页，不再出现「点了没反应」的死按钮。
+- 兜底跳转（`lib/pages/audio_page.dart`）：自动转系统朗读成功后不再退回详情页，改为 `pushReplacement` 到同一章的正文页 —— 朗读句高亮、胶囊控件都在正文里，听书中途不会掉出界面。
+- 测试：`flutter analyze --no-pub` 无问题；Flutter 全量测试 **1492** 项通过（10 跳过）。新增 `test/audio_page_test.dart`「无音源前置页自动跳过」「锁章不跳过」，`test/system_tts_test.dart`「空 initialContent 仍加载章节正文」，`test/reader_eye_care_test.dart` 通过。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `397e5e5ccbe090eb653678aaa8f29c9a496708fdbe767589c9f8ce9431d04626`；38,458,951 字节（36.7 MiB）。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 工具栏展开显示完整胶囊；收起后底部为「停止听书」小按钮，点击暂停变「继续听书」，再点恢复播放。
+  - 系统朗读进行中把护眼提醒改短触发：弹窗完整压在正文与胶囊之上，底部胶囊不可见；点「再看 15 分钟」后胶囊恢复；验证包已改回 45 分钟。
+  - 听书页第 7 章点「下一章」→ 第 8 章付费锁定 → 自动转系统朗读并落到第 8 章正文页（不再退回详情页），段落高亮 + 底部「停止听书」，点按可暂停/继续。
+  - 城南旧事第 8 章提示「本章为付费内容，暂不可听。」并可点「系统朗读」；第 8 章「下一章」自动转系统朗读落到第 9 章「我们看海去」，当前句高亮。
+  - 三国演义第 3 章「下一章」跳过第 4/5 章（前折页、书名页），落在第 6 章「版权页」并播放 04:04 音频。
+
+# 二十六、v23 批次：系统朗读听书页与有声书同构 + 分句高亮 + 正文小窗渐隐 + 页数/胶囊落位
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 系统朗读与作品自带音频共用同一套听书详情页（`lib/widgets/audio/system_tts_controls.dart`、`lib/widgets/audio/audio_sections.dart`）：
+  - `SystemTtsPlaybackPage` 与 `AudioPage` 同构：顶部 60×80 小封面 + 右侧当前章节（两行截断）+「书名 · 第 n / N 章」、整章逐句可滚正文（不加载任何图片）、页码与全书进度、固定 46 高状态行（「正在朗读 · 第 i / N 句」/ 错误 + 重试）、目录 / 上一章 / 播放 / 下一章 / 朗读设置、底部音色条 +「边听边读」。
+  - `SystemTtsPlayback` 新增 `text` / `sentences` / `sentenceIndex` / `sentenceRange` / `speakFrom`；每次只把一个分句交给系统 TTS 引擎，`narrationText` 同步发布，正文高亮与朗读严格同句。
+  - 删除系统朗读胶囊「更多」里未实现的「使用作品自带音频」入口，只保留「朗读设置 / 关闭朗读」。
+- 正文高亮改为按句（`lib/widgets/reader/reader_chapter_layout.dart`、`lib/pages/reader_page.dart`）：
+  - 新增 `narrationTextRangeNear`，阅读页优先使用 TTS 发布的句子范围；系统朗读不再一次性高亮整段或多段。
+- 正文小窗渐隐（`NarrationFade`）：
+  - 高度 26 → 44，渐变 `colors: [edge, edge, transparent]`、`stops: [0, 0.28, 1]`，首行/末行以淡出收尾，不再被硬切只露半行。
+  - 正文内边距 `20,6,20,12` → `20,18,20,20`，上下留出渐隐呼吸区。
+- 正文左下角页码（`lib/widgets/reader/reader_status_bar.dart`）：
+  - 由时间改为「读到 X 页 · 共 Y 页 · 剩 Z 页」（key `reader-page-progress`），右侧仍为「全书 NN.N%」；听书时状态行给胶囊预留一条带子。
+- 收起态胶囊落位（`lib/widgets/audio/audio_playback_scope.dart`）：
+  - 底部「继续听书 / 停止听书」小按钮改为 `bottom: padding.bottom + 4`，整颗落在状态行内，不再一半压正文、一半压系统手势条。
+- 胶囊层级补修（同文件）：
+  - `AudioRouteWatcher` 新增 `popupOpen`（栈顶为 `PopupRoute` 即弹层）；弹窗/底部面板/菜单打开期间胶囊整体隐藏——阅读页「听书 / 系统朗读」选择面板不再被胶囊盖住。
+- 测试：`flutter analyze --no-pub` 无问题；`audio_playback_scope_test`、`audio_page_test`、`listening_sentence_highlight_test`、`system_tts_test` 共 **85** 项通过。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `55b42d4bb69ec97eaa10a482da8809c1854a47ebaf919ae853e698b0119d2c94`；38,524,635 字节（36.7 MiB）。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 正文 → 听书 → 「听书 / 系统朗读」面板：胶囊已隐身，两行选项完整可见可点。
+  - 系统朗读正文高亮逐句跟随（「胡同里踢球，」「天气又干又冷。」），不再整段/多段。
+  - 点胶囊进入的详情页与作品自带音频页同一套布局：封面 + 章节、可滚正文、左下「第 1 / 6 页」+ 右「全书 31.4%」、「正在朗读 · 第 4 / 90 句」、传输控件与音色条。
+  - 详情页「下一章」：第 6 → 7 章，正文加载完成且朗读继续（第 3 / 57 句）。
+  - 正文左下角显示「读到 36 页 · 共 112 页 · 剩 76 页」。
+  - 正文小窗上下边缘文字为渐隐淡出，无硬切半行；透明胶囊不再压在传输控件上。
+- 已知口径差异（不阻塞验收）：听书详情页的「第 X / Y 页」按自身字幕字数估算（前言 1/6），与正文页 `_maxChapterPages` 的分页估算不完全一致。
+
+# 二十七、v24 批次：沉浸式阅读 + 状态行改造 + 按钮/菜单重排 + 听书跟随修复
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 听书底部按钮删除（`lib/widgets/audio/listening_capsule.dart`、`audio_playback_scope.dart`）：
+  - 删掉收起态的 `ListeningCapsuleCollapsed` 小药丸；工具栏收起时不再出现「继续听书 / 停止听书」，只保留可拖动的完整胶囊。
+- 状态行改造（`lib/widgets/reader/reader_status_bar.dart`）：
+  - 左下角改为「当前页/总页 百分比」，如 `9/1048 0.8%`，不再显示「读到 / 共 / 剩」长文案。
+  - 右下角改为电量：电池图标 + `100%`，充电时用 `battery_charging` 图标。
+  - 行高按 compact / 分页行 / 电池行固定预留，切换日夜不再改变正文可用高度（修「上下滑动模式首次切日夜正文跳一下」）。
+- 沉浸式系统栏（`lib/pages/reader_page.dart`）：
+  - 工具栏收起且页面在前台时 `SystemUiMode.immersiveSticky`，隐藏状态栏与小白条手势导航；工具栏出现 / 弹层打开 / 离开页面时恢复 `edgeToEdge`，并在退出阅读时兜底还原。
+- 行内批注落位（`lib/widgets/reader/reader_chapter_layout.dart`）：
+  - 批注块按「批注行的行尾」切分正文：该行之后插入批注卡片，后续正文从下一行继续，不再一律挂到整段末尾。
+- 听书跟随（`lib/pages/reader_page.dart`）：
+  - 按排版里的真实行位置换算目标，朗读行顶部落在视口约 1/3；`animateTo` 380ms `easeOutCubic` 缓动，替换原来逐 tick `jumpTo` 的「一点点突然下降」。
+  - 目标位置夹紧后仍保证高亮行在视口内，章末也不会把正在读的行送出屏幕。
+- 阅读工具栏（`lib/pages/reader_page.dart`）：
+  - 去掉右上角「收起阅读菜单」折线按钮，改为「加入书架 / 已在书架」（`reader-toolbar-shelf`），与详情页、听书页文案统一。
+- 详情页按钮互换（`lib/pages/detail_page.dart`、`lib/widgets/detail/detail_read_bar.dart`）：
+  - 底栏左侧「下载」改为「加入书架」，右上角「加入书架」改为「下载」；
+  - 「加入书架」作为次级主操作加大：图标 22、字号 11.5、内边距 8/4。
+- 选区菜单（`lib/widgets/reader/reader_paragraph_menu.dart`）：
+  - 左侧常驻「从本段开始听书」（单独加宽 84），不再取决于当前段是否有时间轴，四个常规动作（复制 / 划线 / 批注 / 书摘）仍在其右。
+- 关闭听书后的返回（`lib/pages/audio_page.dart`）：
+  - 不再渲染「本次播放已关闭」整页黑屏；关闭听书后按返回直接回到小说详情。
+- 测试：`flutter analyze --no-pub` 无问题；`reader_interface_test`、`reader_annotation_layout_test`、`audio_playback_scope_test`、`detail_page_test` 共 51 项通过。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `d64dd77fcc33f39201f27bd023fcc95cad778ce118b42956171b177088d561b6`；38,524,631 字节（36.7 MiB）。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 正文沉浸态：顶部系统状态栏与底部手势条都隐藏；点开工具栏两者恢复。
+  - 左下角 `9/1048 0.8%`，右下角电池 `100%`。
+  - 日夜来回切换后正文行位置与切换前一致（逐行像素比对 offset=0）。
+  - 工具栏右上角为书架图标，无折线收起按钮。
+  - 长按正文弹出「从本段开始听书 / 复制 / 划线 / 批注 / 书摘」五个动作。
+  - 系统朗读时高亮句位于屏幕中部可见区域；工具栏收起后底部没有「停止听书」按钮。
+  - 打开听书详情 → 返回 → 胶囊关闭听书 → 再返回，直接回到小说详情，无黑屏页。
+
+# 二十八、v25 批次：工具栏显隐不再推动正文（覆盖式工具栏）
+
+- 版本：源码改动 + 真机验证包（`1.0.129 (134)` 同版本号覆盖安装），未提交。
+- 问题：点开/收起工具栏时正文整体上下跳；根因是工具栏显隐会切换系统栏（`immersiveSticky` ↔ `edgeToEdge`），`viewPadding` 随之归零再恢复，SafeArea 内的正文视口高度变了一次，整章重新分页。
+- 冻结安全区（`lib/pages/reader_page.dart`）：
+  - `_stableInsets` 首帧取真实 `viewPadding`，之后只取见过的最大值；`MediaQuery.padding` 始终喂这个冻结值。系统栏显隐不再改变正文视口高度，工具栏只是滑上来盖住正文。
+- 章首让位（唯一例外）：
+  - 工具栏高度不再写死 56，改为用 `GlobalKey` 实测（`_toolbarHeight`）；`_toolbarLift = 工具栏高度 - 状态栏安全区 - 正文上边距`，让首行正好落在工具栏下沿。
+  - 让位用 `ClipRect + Transform.translate` 平移绘制，不改视口高度：改 padding 会触发整章重新分页、按段落对齐回填，关工具栏时文字仍会跳几像素。
+  - 让位是「打开那一刻锁存」的（`_liftForToolbar`）：章首展开后往下滚不会再掉回去；中途收起时把滚动偏移同步减去这段高度，正文视觉位置分毫不动（真机逐行像素比对 offset=0）。
+  - 分页（左右滑动）模式不做让位，整页平移会切掉页面最后一行；该模式本来也不会推动正文。
+- 工具栏自身：不再被让位 padding 影响（否则 SafeArea 会把让位吃掉，量出的高度越量越大，正文被越推越远）。
+- 测试：`flutter analyze` 无问题；`reader_interface_test` 新增「章首让位只发生一次、滚动中不掉、关闭时零位移」用例，与 `reader_annotation_layout_test` 共 22 项通过；`reader_system_bars_test` 的 2 条「开菜单后视口不变」断言按新语义放宽为「视口尺寸不变且不越安全区」。
+- APK：正式签名、ABI、原生库及 ZIP/ELF 16 KiB 对齐校验通过；SHA-256 `840078ba1bcd93ff42d5eb3a5f02548958f78ae8ab910604ca7bb6aa9717660d`；38,524,635 字节。
+- 真机（Redmi K20 Pro `b2f8e975`）核验（逐行像素比对）：
+  - 上下滑动、章节中段：反复开/关工具栏，正文行坐标完全一致（offset=0），状态栏与手势条只在工具栏出现时显示。
+  - 左右翻页：同样反复开/关，正文零位移。
+  - 章首：展开工具栏后首行「版权信息」落在工具栏下沿（实测工具栏 272px，首行 299px），不再被遮；关掉后整页回到原像素位置。

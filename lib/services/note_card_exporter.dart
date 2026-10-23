@@ -27,8 +27,6 @@ class NoteCardExporter {
   static const _bgBottom = Color(0xFFF3E9D6);
   static const _ink = Color(0xFF3D3427);
   static const _muted = Color(0xFF8A7B62);
-  static const _accent = Color(0xFFD64545);
-  static const _excerpt = Color(0xFF3DA88A);
 
   /// 导出并返回 PNG 绝对路径。
   static Future<String> export({
@@ -85,12 +83,16 @@ class NoteCardExporter {
       final source = [
         if (note.bookTitle.isNotEmpty) note.bookTitle,
         if (note.chapterTitle.isNotEmpty) note.chapterTitle,
+        if (note.category.isNotEmpty) '分类：${note.category}',
+        if (note.tags.isNotEmpty)
+          '标签：${note.tags.map((tag) => '#$tag').join(' ')}',
+        _noteTime(note.createdAt),
       ].join(' · ');
       blocks.add(
         _NoteBlock(
           quote: quote,
           thought: thought,
-          isExcerpt: !note.isAnnot,
+          accent: Color(note.effectiveMarkerColorValue),
           // 来源行也参与测量：否则它会被画到下一块的地盘上。
           source: source.isEmpty
               ? null
@@ -128,11 +130,10 @@ class NoteCardExporter {
     canvas.drawRect(
       rect,
       Paint()
-        ..shader = ui.Gradient.linear(
-          rect.topCenter,
-          rect.bottomCenter,
-          [_bgTop, _bgBottom],
-        ),
+        ..shader = ui.Gradient.linear(rect.topCenter, rect.bottomCenter, [
+          _bgTop,
+          _bgBottom,
+        ]),
     );
 
     var y = _padding;
@@ -142,8 +143,7 @@ class NoteCardExporter {
     y += subtitle.height + _gap;
 
     for (final block in blocks) {
-      final badgePaint = Paint()
-        ..color = block.isExcerpt ? _excerpt : _accent;
+      final badgePaint = Paint()..color = block.accent;
       // 左侧强调竖线 + 小角标，呼应正文里的批注块
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -189,10 +189,7 @@ class NoteCardExporter {
     }
     final stamp = now.millisecondsSinceEpoch;
     final file = File('${outDir.path}/notes_$stamp.png');
-    await file.writeAsBytes(
-      Uint8List.view(bytes.buffer),
-      flush: true,
-    );
+    await file.writeAsBytes(Uint8List.view(bytes.buffer), flush: true);
     return file.path;
   }
 
@@ -205,22 +202,23 @@ class NoteCardExporter {
     double height = 1.5,
     int? maxLines,
   }) {
-    final builder = ui.ParagraphBuilder(
-      ui.ParagraphStyle(
-        fontSize: size,
-        height: height,
-        textAlign: TextAlign.left,
-        maxLines: maxLines,
-        ellipsis: maxLines == null ? null : '…',
-      ),
-    )..pushStyle(
-        ui.TextStyle(
-          color: color,
-          fontSize: size,
-          height: height,
-          fontWeight: weight,
-        ),
-      );
+    final builder =
+        ui.ParagraphBuilder(
+          ui.ParagraphStyle(
+            fontSize: size,
+            height: height,
+            textAlign: TextAlign.left,
+            maxLines: maxLines,
+            ellipsis: maxLines == null ? null : '…',
+          ),
+        )..pushStyle(
+          ui.TextStyle(
+            color: color,
+            fontSize: size,
+            height: height,
+            fontWeight: weight,
+          ),
+        );
     builder.addText(text);
     return builder.build()..layout(ui.ParagraphConstraints(width: width));
   }
@@ -230,13 +228,13 @@ class _NoteBlock {
   _NoteBlock({
     required this.quote,
     required this.thought,
-    required this.isExcerpt,
+    required this.accent,
     required this.source,
   });
 
   final ui.Paragraph quote;
   final ui.Paragraph? thought;
-  final bool isExcerpt;
+  final Color accent;
 
   /// 来源行（书名 · 章节）；没有书名时为 null。
   final ui.Paragraph? source;
@@ -247,4 +245,12 @@ class _NoteBlock {
       10 +
       (thought == null ? 0 : thought!.height + 6) +
       (source == null ? 0 : source!.height + 4);
+}
+
+String _noteTime(int milliseconds) {
+  if (milliseconds <= 0) return '时间未知';
+  final date = DateTime.fromMillisecondsSinceEpoch(milliseconds);
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${date.year}.${two(date.month)}.${two(date.day)} '
+      '${two(date.hour)}:${two(date.minute)}';
 }

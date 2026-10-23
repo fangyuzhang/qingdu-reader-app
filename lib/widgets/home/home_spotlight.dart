@@ -9,11 +9,7 @@ import 'home_media_card.dart';
 class HomeSpotlight extends StatefulWidget {
   final List<MediaItem> items;
   final ValueChanged<MediaItem> onOpen;
-  const HomeSpotlight({
-    super.key,
-    required this.items,
-    required this.onOpen,
-  });
+  const HomeSpotlight({super.key, required this.items, required this.onOpen});
 
   @override
   State<HomeSpotlight> createState() => _HomeSpotlightState();
@@ -105,7 +101,10 @@ class _HomeSpotlightState extends State<HomeSpotlight> {
                     if (scale < 1.5) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: HomePalette.accent.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
@@ -280,13 +279,7 @@ class _SpotlightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final action = switch (item.kind) {
-      'video' => '开始追剧',
-      'manju' => '观看漫剧',
-      'audio' => '开始听书',
-      'manga' => '翻开漫画',
-      _ => '立即阅读',
-    };
+    final action = item.kind == 'audio' ? '开始听书' : '立即阅读';
     return HomePressable(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),

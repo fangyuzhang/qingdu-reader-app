@@ -186,6 +186,42 @@ void main() {
       expect(chapters.single.volumeName, '第一卷：默认');
     });
 
+    test('bridge chapters keep raw word-count and chapter-type metadata', () {
+      final payload = {
+        'data': {
+          'item_data_list': [
+            {
+              'item_id': 'cover',
+              'title': '老人与海',
+              'version': 'cover_1_hash',
+              'chapter_word_number': 4,
+              'chapter_type': 0,
+            },
+            {
+              'item_id': 'body',
+              'title': '1',
+              'version': 'body_1_hash',
+              'chapter_word_number': '3189',
+              'chapter_type': 2,
+            },
+          ],
+          'data': {
+            'chapterListWithVolume': [
+              [
+                {'itemId': 'cover', 'title': '老人与海'},
+                {'itemId': 'body', 'title': '1'},
+              ],
+            ],
+          },
+        },
+      };
+
+      final chapters = parseDirectory(payload).expand((v) => v).toList();
+
+      expect(chapters.map((chapter) => chapter.wordCount), [4, 3189]);
+      expect(chapters.map((chapter) => chapter.chapterType), [0, 2]);
+    });
+
     test('drama episodes keep their numbered volume', () {
       final chapters = parseDirectory({
         'data': {
@@ -216,6 +252,29 @@ void main() {
         'abc_1_def',
         'ghi_1_jkl',
       ]);
+    });
+
+    test('catalogue word-count metadata survives a cache round trip', () {
+      final chapters = parseDirectory({
+        'data': {
+          'item_data_list': [
+            {
+              'item_id': 'c1',
+              'title': '书名',
+              'version': 'abc',
+              'chapter_word_number': 2,
+              'chapter_type': 1,
+            },
+          ],
+        },
+      }).expand((v) => v).toList();
+      final restored = CachedBook.fromMap(
+        CachedBook(id: 'book', title: 't', chapters: chapters).toMap(),
+      );
+
+      expect(restored, isNotNull);
+      expect(restored!.chapters.single.wordCount, 2);
+      expect(restored.chapters.single.chapterType, 1);
     });
 
     test('a cache written before the version was kept restores empty', () {

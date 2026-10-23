@@ -3,9 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/services/native_player.dart';
-import 'package:fqapp/widgets/video_player_chrome.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _methods = MethodChannel('fqapp/native_player');
@@ -36,9 +34,6 @@ void main() {
   });
 
   Future<void> cleanUp(WidgetTester tester, NativePlayer player) async {
-    if (find.byType(VideoPlayerChrome).evaluate().isNotEmpty) {
-      await tester.pumpWidget(const SizedBox.shrink());
-    }
     if (createGate != null && !createGate!.isCompleted) {
       createGate!.complete({'playerId': 71});
     }
@@ -246,77 +241,45 @@ void main() {
     expect(player.playWhenReady, false);
   });
 
-  for (final paused in [false, true]) {
-    nativeTest(
-      'buffering survives backgrounding only when playback is requested (paused: $paused)',
-      (tester, player) async {
-        await _createPlayer(tester, player);
-        await player.play();
-        await _sendEvent({'playerId': 71, 'type': 'buffering', 'value': true});
-        await _sendEvent({'playerId': 71, 'type': 'playing', 'value': false});
-        await tester.pumpWidget(_playerApp(player));
-        await tester.pumpAndSettle();
-        expect(find.byTooltip('暂停'), findsOneWidget);
-        if (paused) {
-          // A buffering video must still offer pause and honor it on return.
-          await tester.tap(find.byTooltip('暂停'));
-          await tester.pump();
-          expect(player.playWhenReady, false);
-          expect(find.byTooltip('播放'), findsOneWidget);
-        }
-        calls.clear();
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-        await tester.pump();
-        expect(player.playWhenReady, false);
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        );
-        await tester.pump();
-        expect(player.playWhenReady, !paused);
-        expect(
-          calls.where((call) => call.method == 'play'),
-          hasLength(paused ? 0 : 1),
-        );
-      },
-    );
-  }
-
-  nativeTest('seeking during buffering resumes the requested playback', (
+  nativeTest('buffering does not clear the requested playback intent', (
     tester,
     player,
   ) async {
     await _createPlayer(tester, player);
     await player.play();
     await _sendEvent({'playerId': 71, 'type': 'buffering', 'value': true});
-    await tester.pumpWidget(_playerApp(player));
-    await tester.pumpAndSettle();
-    calls.clear();
-    final track = tester.getRect(find.byKey(const ValueKey('video-seek')));
-    await tester.dragFrom(
-      track.centerLeft + const Offset(20, 0),
-      const Offset(80, 0),
-    );
-    await tester.pumpAndSettle();
-    expect(calls.where((call) => call.method == 'seek'), hasLength(1));
-    expect(calls.where((call) => call.method == 'play'), hasLength(1));
-    expect(player.playWhenReady, true);
+    await _sendEvent({'playerId': 71, 'type': 'playing', 'value': false});
+    expect(player.buffering, isTrue);
+    expect(player.playing, isFalse);
+    expect(player.playWhenReady, isTrue);
   });
 
-  nativeTest('completed playback is not resumed on foreground', (
+  nativeTest('seeking during buffering sends only the seek command', (
     tester,
     player,
   ) async {
     await _createPlayer(tester, player);
     await player.play();
-    await _sendEvent({'playerId': 71, 'type': 'completed', 'value': true});
-    await tester.pumpWidget(_playerApp(player));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('播放'), findsOneWidget);
+    await _sendEvent({'playerId': 71, 'type': 'buffering', 'value': true});
     calls.clear();
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await player.seek(const Duration(seconds: 30));
     await tester.pump();
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(calls.where((call) => call.method == 'seek'), hasLength(1));
+    expect(calls.where((call) => call.method == 'play'), isEmpty);
+    expect(player.playWhenReady, isTrue);
+    expect(player.position, const Duration(seconds: 30));
+  });
+
+  nativeTest('completed playback is exposed without an extra play command', (
+    tester,
+    player,
+  ) async {
+    await _createPlayer(tester, player);
+    await player.play();
+    calls.clear();
+    await _sendEvent({'playerId': 71, 'type': 'completed', 'value': true});
     await tester.pump();
+    expect(player.completed, isTrue);
     expect(calls.where((call) => call.method == 'play'), isEmpty);
   });
 
@@ -377,45 +340,45 @@ void main() {
     },
   );
 
-  nativeTest(
-    'textureChanged resets a pre-swap rotation correction (#36)',
-    (tester, player) async {
-      final creation = player.create(
-        'https://example.invalid/swap-rotation.mp4',
-        '',
-      );
-      await tester.pump();
-      await _sendEvent({'playerId': 71, 'type': 'created', 'value': 9});
-      await tester.pump();
-      expect(await creation, 9);
-      // The size event landed before the SurfaceTexture swap, so it still
-      // carries the pre-swap correction for the rotated source.
-      await _sendEvent({
-        'playerId': 71,
-        'type': 'videoSize',
-        'width': 1920,
-        'height': 1080,
-        'rotationCorrection': 90,
-      });
-      await tester.pump();
-      expect(player.videoRotationCorrection, 90);
-      // The swap moves output to a SurfaceTexture, which applies the format
-      // rotation itself: the correction must drop to 0, or the texture gets
-      // rotated a second time and stretches up to fullscreen. The geometry
-      // re-emit is what refreshes the feed's rotation notifier.
-      final sizes = <Size>[];
-      final sub = player.videoSizeStream.listen(sizes.add);
-      await _sendEvent({'playerId': 71, 'type': 'textureChanged', 'value': 12});
-      await tester.pump();
-      expect(player.textureId, 12);
-      expect(player.videoRotationCorrection, 0);
-      expect(sizes, [const Size(1920, 1080)]);
-      // No awaited cancel: awaiting a lone broadcast cancel() stalls in the
-      // test's fake-async zone. dispose() closes the controller, which drops
-      // the subscription; production cancels via the shared Future.wait path.
-      unawaited(sub.cancel());
-    },
-  );
+  nativeTest('textureChanged resets a pre-swap rotation correction (#36)', (
+    tester,
+    player,
+  ) async {
+    final creation = player.create(
+      'https://example.invalid/swap-rotation.mp4',
+      '',
+    );
+    await tester.pump();
+    await _sendEvent({'playerId': 71, 'type': 'created', 'value': 9});
+    await tester.pump();
+    expect(await creation, 9);
+    // The size event landed before the SurfaceTexture swap, so it still
+    // carries the pre-swap correction for the rotated source.
+    await _sendEvent({
+      'playerId': 71,
+      'type': 'videoSize',
+      'width': 1920,
+      'height': 1080,
+      'rotationCorrection': 90,
+    });
+    await tester.pump();
+    expect(player.videoRotationCorrection, 90);
+    // The swap moves output to a SurfaceTexture, which applies the format
+    // rotation itself: the correction must drop to 0, or the texture gets
+    // rotated a second time and stretches up to fullscreen. The geometry
+    // re-emit is what refreshes the feed's rotation notifier.
+    final sizes = <Size>[];
+    final sub = player.videoSizeStream.listen(sizes.add);
+    await _sendEvent({'playerId': 71, 'type': 'textureChanged', 'value': 12});
+    await tester.pump();
+    expect(player.textureId, 12);
+    expect(player.videoRotationCorrection, 0);
+    expect(sizes, [const Size(1920, 1080)]);
+    // No awaited cancel: awaiting a lone broadcast cancel() stalls in the
+    // test's fake-async zone. dispose() closes the controller, which drops
+    // the subscription; production cancels via the shared Future.wait path.
+    unawaited(sub.cancel());
+  });
 
   nativeTest(
     'textureChanged arriving before the create reply wins over created',
@@ -443,19 +406,6 @@ Future<void> _createPlayer(WidgetTester tester, NativePlayer player) async {
   await tester.pump();
   await creation;
 }
-
-Widget _playerApp(NativePlayer player) => MaterialApp(
-  home: VideoPlayerChrome(
-    player: player,
-    episodes: [Chapter(itemId: '1', title: '第一集', volumeName: '')],
-    currentIndex: 0,
-    duration: player.duration,
-    playing: player.playing,
-    onSelectEpisode: (_) async {},
-    onError: (error) => throw error,
-    child: const ColoredBox(color: Colors.black),
-  ),
-);
 
 Future<void> _sendEvent(Map<String, dynamic> event) =>
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

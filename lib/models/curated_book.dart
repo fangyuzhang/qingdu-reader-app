@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -116,16 +117,45 @@ class CuratedCatalog {
   List<CuratedBook> booksOf(String key) =>
       books.where((b) => b.category == key).toList(growable: false);
 
-  /// 按日期稳定轮换的「今日荐读」：同一天永远是同一本，跨天自动换。
-  CuratedBook? pickOfDay({DateTime? now}) {
+  /// 按日期稳定轮换的「今日荐读」。
+  ///
+  /// 同一天的基础顺序固定，跨天自动换；[batch] 用于用户点「换一批」。
+  /// 这避免了首页静态书单永远从同一本开始的问题。
+  CuratedBook? pickOfDay({DateTime? now, int batch = 0}) {
     if (books.isEmpty) return null;
-    final day = now ?? DateTime.now();
-    final epoch = DateTime(
-      day.year,
-      day.month,
-      day.day,
-    ).difference(DateTime(2024, 1, 1)).inDays;
-    return books[epoch.abs() % books.length];
+    final order = _dailyOrder(books, now ?? DateTime.now());
+    return order[batch.abs() % order.length];
+  }
+
+  /// 首页推荐位的一批书：每日顺序不同，手动换一批时滚动到下一组。
+  ///
+  /// [limit] 小于分类总量时只返回一部分；显式进入分类页仍能看全量。
+  List<CuratedBook> recommendationBatchOf(
+    String key, {
+    DateTime? now,
+    int batch = 0,
+    int limit = 4,
+  }) {
+    final all = booksOf(key);
+    if (all.isEmpty || limit <= 0) return const [];
+    if (all.length <= limit) return all;
+    final order = _dailyOrder(all, now ?? DateTime.now());
+    final start = (batch.abs() * limit) % order.length;
+    return List<CuratedBook>.generate(
+      limit,
+      (index) => order[(start + index) % order.length],
+      growable: false,
+    );
+  }
+
+  /// A stable per-day shuffle. `Random` is seeded exclusively by the calendar
+  /// day, so repeated builds and pull-to-refresh return the same base order.
+  static List<CuratedBook> _dailyOrder(List<CuratedBook> source, DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    final epoch = today.difference(DateTime(2024, 1, 1)).inDays;
+    final order = List<CuratedBook>.of(source);
+    order.shuffle(math.Random(0x6D2B79F5 ^ epoch));
+    return order;
   }
 
   static const empty = CuratedCatalog(categories: [], books: []);

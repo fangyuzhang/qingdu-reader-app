@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/curated_book.dart';
+import '../services/category_browse_warmup.dart';
 import '../services/curated_resolver.dart';
 import '../widgets/curated/curated_book_cover.dart';
 import '../widgets/home/home_design.dart';
+import 'category_browse_page.dart';
 import 'curated_book_page.dart';
 import 'search_page.dart';
 
@@ -21,10 +23,13 @@ import 'search_page.dart';
 /// * 【青茄修复·新增】点书直接进阅读器（书单条目先解析成书城书籍）；
 ///   长按卡片才进荐读页，荐语入口仍然保留。
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.catalog});
+  const HomePage({super.key, this.catalog, this.categoryLoader});
 
   /// 测试可注入固定书单，避免依赖资源加载。
   final CuratedCatalog? catalog;
+
+  /// 分类“全部”页的书城加载器；测试注入后可完全离线运行。
+  final HomeCategoryBooksLoader? categoryLoader;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -39,6 +44,9 @@ class _HomePageState extends State<HomePage> {
   CuratedCatalog _catalog = CuratedCatalog.empty;
   bool _loading = true;
   String _category = _allKey;
+
+  /// 首页推荐批次。基础顺序按日期稳定轮换，这个值只响应用户「换一批」。
+  int _recommendationBatch = 0;
 
   /// 正在解析/打开某本书：给一层很轻的遮罩，避免重复点击和闪屏。
   bool _opening = false;
@@ -63,7 +71,7 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool rotateRecommendations = false}) async {
     final catalog = widget.catalog ?? await CuratedLibrary.load();
     // 先读回上次解析的封面/书源，首帧就能显示真实封面。
     await CuratedResolver.instance.load();
@@ -71,13 +79,48 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _catalog = catalog;
       _loading = false;
+      if (rotateRecommendations) _recommendationBatch++;
     });
-    // 后台补齐缺失封面，失败静默。
-    // 【青茄修复·首屏封面】今日荐读排到队列最前：prefetch 并发 2、按
-    // 入队顺序解析，首屏那本永远最先拿到真实封面；其余书按书单顺序
-    // 跟在后面慢慢补。重复条目由 prefetch 内部去重。
-    final priorityBooks = [?catalog.pickOfDay(), ...catalog.books];
-    unawaited(CuratedResolver.instance.prefetch(priorityBooks));
+    _prefetchRecommendations();
+    _warmCategories();
+  }
+
+  /// 首页稳定后悄悄把前 3 个分类的首批抓进缓存。
+  ///
+  /// 用户点「古典名著 → 全部」时就能同一帧铺满。只在真实运行时预热：
+  /// 注入 [HomePage.catalog] 或 [HomePage.categoryLoader] 即测试/离线环境，
+  /// 走本地书单，不该发任何请求，也不该留下悬挂的定时器。
+  void _warmCategories() {
+    if (widget.catalog != null || widget.categoryLoader != null) return;
+    final categories = <String, String>{
+      for (final category in _catalog.categories)
+        if (category.key.isNotEmpty) category.key: category.label,
+    };
+    if (categories.isEmpty) return;
+    unawaited(
+      CategoryBrowseWarmup.warm(
+        categories: categories,
+        shouldContinue: () => mounted,
+      ),
+    );
+  }
+
+  /// 用户点「换一批」或下拉刷新时，只换推荐位，不改变书单数据。
+  void _nextRecommendationBatch() {
+    setState(() => _recommendationBatch++);
+    _prefetchRecommendations();
+  }
+
+  void _prefetchRecommendations() {
+    if (_catalog.books.isEmpty) return;
+    // 当前今日荐读与各分类推荐位排在最前，先补齐首屏封面；其余书随后补。
+    final priority = <CuratedBook>[
+      ?_catalog.pickOfDay(batch: _recommendationBatch),
+      for (final category in _catalog.categories)
+        ..._recommendedBooksOf(category),
+      ..._catalog.books,
+    ];
+    unawaited(CuratedResolver.instance.prefetch(priority));
   }
 
   @override
@@ -100,7 +143,7 @@ class _HomePageState extends State<HomePage> {
                     child: RefreshIndicator(
                       color: HomePalette.accent,
                       backgroundColor: palette.surface,
-                      onRefresh: () => _load(),
+                      onRefresh: () => _load(rotateRecommendations: true),
                       child: CustomScrollView(
                         key: const Key('home_curated'),
                         physics: const BouncingScrollPhysics(
@@ -229,8 +272,48 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- 今日荐读 ----------------
 
+  Widget _recommendationHeading(HomePalette palette) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 14, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '今日精选',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: palette.ink,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '每天自动轮换，也可以手动换一批',
+                  style: TextStyle(fontSize: 11.5, color: palette.muted),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            key: const Key('home-recommendation-refresh'),
+            onPressed: _nextRecommendationBatch,
+            icon: const Icon(LucideIcons.refresh_cw, size: 15),
+            label: const Text('换一批'),
+            style: TextButton.styleFrom(
+              foregroundColor: HomePalette.accent,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _todayPick(HomePalette palette) {
-    final book = _catalog.pickOfDay();
+    final book = _catalog.pickOfDay(batch: _recommendationBatch);
     if (book == null) return const SizedBox.shrink();
     final category = _catalog.categoryOf(book.category);
     final gradient =
@@ -239,7 +322,7 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
       child: HomeEntrance(
         child: GestureDetector(
-          // 长按才进荐读页：点一下直接读书，荐语入口不丢。
+          // 长按进荐读页；点一下先看书籍详情与目录，不直接跳正文。
           onLongPress: () => _openCuratedPage(book),
           child: HomePressable(
             key: const Key('home-today-pick'),
@@ -304,6 +387,7 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 8),
                               Text(
                                 book.title,
+                                key: const Key('home-today-pick-title'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -339,7 +423,7 @@ class _HomePageState extends State<HomePage> {
                               Row(
                                 children: [
                                   Text(
-                                    '开始阅读',
+                                    '查看详情',
                                     style: TextStyle(
                                       color: Colors.white.withValues(
                                         alpha: 0.95,
@@ -393,7 +477,14 @@ class _HomePageState extends State<HomePage> {
           final selected = _category == key;
           return GestureDetector(
             key: Key('home-category-$key'),
-            onTap: () => setState(() => _category = key),
+            onTap: () {
+              final category = _catalog.categoryOf(key);
+              if (category != null) {
+                _openCategory(category);
+              } else {
+                setState(() => _category = key);
+              }
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(horizontal: 13),
@@ -429,6 +520,7 @@ class _HomePageState extends State<HomePage> {
     if (_category == _listenKey) return _listenSlivers(palette);
     if (_category == _allKey) {
       return [
+        SliverToBoxAdapter(child: _recommendationHeading(palette)),
         SliverToBoxAdapter(child: _todayPick(palette)),
         SliverToBoxAdapter(child: _categoryButtons(palette)),
         ..._contentSlivers(palette),
@@ -460,7 +552,7 @@ class _HomePageState extends State<HomePage> {
               borderRadius: BorderRadius.circular(12),
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => setState(() => _category = category.key),
+                onTap: () => _openCategory(category),
                 child: Container(
                   alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -487,7 +579,7 @@ class _HomePageState extends State<HomePage> {
                         ),
                         const SizedBox(height: 1),
                         Text(
-                          '${_catalog.booksOf(category.key).length} 本',
+                          '精选 ${_catalog.booksOf(category.key).length} 本',
                           style: TextStyle(
                             fontSize: 10.5,
                             color: palette.muted,
@@ -560,6 +652,9 @@ class _HomePageState extends State<HomePage> {
     ];
   }
 
+  List<CuratedBook> _recommendedBooksOf(CuratedCategory category) =>
+      _catalog.recommendationBatchOf(category.key, batch: _recommendationBatch);
+
   List<Widget> _contentSlivers(HomePalette palette) {
     if (_category != _allKey) {
       final category = _catalog.categoryOf(_category);
@@ -603,7 +698,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _categorySection(HomePalette palette, CuratedCategory category) {
-    final books = _catalog.booksOf(category.key);
+    final books = _recommendedBooksOf(category);
     final width = MediaQuery.sizeOf(context).width;
     final tileWidth = ((width - 20 * 2 - 12 * 2) / 2.6).clamp(96.0, 132.0);
     // 横滑列表高度必须跟随字号：固定 44px 的文字块在 1.8x 字号下会溢出。
@@ -650,7 +745,8 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => setState(() => _category = category.key),
+                  key: Key('home-category-all-${category.key}'),
+                  onTap: () => _openCategory(category),
                   child: Row(
                     children: [
                       Text(
@@ -677,6 +773,7 @@ class _HomePageState extends State<HomePage> {
               itemCount: books.length,
               separatorBuilder: (_, _) => const SizedBox(width: 12),
               itemBuilder: (context, index) => CuratedBookTile(
+                key: Key('home-recommend-${category.key}-${books[index].id}'),
                 book: books[index],
                 category: category,
                 width: tileWidth,
@@ -719,8 +816,9 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 6),
             Text(
-              '共 ${_catalog.books.length} 本，按类型整理，标注 12+/15+ 适龄提示。'
-              '青茄只做推荐与阅读工具，不内置正文；点一下直接开始阅读，长按可以看荐语。',
+              '共 ${_catalog.books.length} 本编辑精选。首页每天自动轮换推荐，也可点「换一批」；'
+              '每个分类先展示 4 本，点「全部」进入书城分类页，可继续加载更多并换一批。'
+              '点书先看详情与目录，长按可以看荐语。',
               style: TextStyle(
                 fontSize: 11.5,
                 height: 1.6,
@@ -755,6 +853,17 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- 跳转 ----------------
 
+  void _openCategory(CuratedCategory category) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CategoryBrowsePage(
+          category: category,
+          loader: widget.categoryLoader,
+        ),
+      ),
+    );
+  }
+
   void _openSearch() {
     Navigator.of(
       context,
@@ -765,10 +874,9 @@ class _HomePageState extends State<HomePage> {
   String? _coverOf(CuratedBook book) =>
       CuratedResolver.instance.cached(book.id)?.cover;
 
-  /// 点书：先解析成书城书籍，再直达阅读器；失败回退到搜索页。
+  /// 点书：先解析成书城书籍并打开详情与目录；失败回退到搜索页。
   ///
-  /// 【青茄修复·新增】原来这里进的是荐读页，用户还要自己搜一遍；
-  /// 现在「点一下 = 开始读」，长按才看荐语。
+  /// 只有用户在详情页点章节或「开始阅读」后才进入正文。
   Future<void> _openBook(CuratedBook book) async {
     if (_opening) return;
     await openCuratedReading(

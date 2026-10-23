@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fqapp/models/audio_extra.dart';
 import 'package:fqapp/models/chapter_media.dart';
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/audio_page.dart';
+import 'package:fqapp/services/api_client.dart';
 import 'package:fqapp/services/audio_preferences.dart';
 import 'package:fqapp/services/native_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +18,67 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     AudioPreferences.instance.resetForTest();
+  });
+
+  testWidgets('a locked chapter says so and offers listening with system TTS', (
+    tester,
+  ) async {
+    final session = _Session(
+      loader: (id, {toneId}) async =>
+          throw const ApiException('QUERY_CHAPTER_LOCK_ERROR'),
+    );
+    await _mount(tester, session);
+    expect(find.text('本章为付费内容，暂不可听。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('audio-use-system-tts')), findsOneWidget);
+  });
+
+  testWidgets('switching chapters skips front matter without any audio', (
+    tester,
+  ) async {
+    // 版权页 / 前折页这类只有图片的前置章节在上游没有音源：点「下一章」
+    // 应该继续往后走，落在真正有音频的正文上，而不是停在死页。
+    final session = _Session(
+      chapters: [
+        for (var index = 1; index <= 4; index++)
+          Chapter(itemId: '$index', title: '第$index章', volumeName: '第一卷'),
+      ],
+      loader: (id, {toneId}) async {
+        if (id == '2' || id == '3') {
+          throw const FormatException('未获取到音频地址');
+        }
+        return _source(id, toneId);
+      },
+    );
+    await _mount(tester, session);
+    await tester.tap(find.byTooltip('下一章'));
+    await _flush(tester);
+    await _flush(tester);
+    expect(session.requests, ['1:0', '2:0', '3:0', '4:0']);
+    expect(find.text('本章暂无音频内容。'), findsNothing);
+    expect(
+      session.players.last.calls.first,
+      'create:https://example.invalid/4-0.mp3',
+    );
+    expect(session.store.entry?['chapterId'], '4');
+  });
+
+  testWidgets('a locked next chapter is shown, never skipped', (tester) async {
+    final session = _Session(
+      chapters: [
+        for (var index = 1; index <= 3; index++)
+          Chapter(itemId: '$index', title: '第$index章', volumeName: '第一卷'),
+      ],
+      loader: (id, {toneId}) async {
+        if (id == '2') throw const ApiException('QUERY_CHAPTER_LOCK_ERROR');
+        return _source(id, toneId);
+      },
+    );
+    await _mount(tester, session);
+    await tester.tap(find.byTooltip('下一章'));
+    await _flush(tester);
+    await _flush(tester);
+    expect(session.requests, ['1:0', '2:0']);
+    expect(find.text('本章为付费内容，暂不可听。'), findsOneWidget);
   });
 
   testWidgets(
@@ -426,9 +489,11 @@ void main() {
       ),
     );
     await _mount(tester, session);
-    expect(find.text('真人讲书'), findsWidgets);
     expect(find.text('主播：老恒'), findsOneWidget);
     expect(find.text('暂无可选音色'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('audio-voice')));
+    await tester.pumpAndSettle();
+    expect(find.text('真人讲书'), findsWidgets);
   });
 
   testWidgets('a chosen speed is applied to later chapters and saved', (
@@ -515,20 +580,23 @@ void main() {
     AppLifecycleState.hidden,
     AppLifecycleState.paused,
   ]) {
-    testWidgets('$lifecycle keeps playing in background and saves before the timer', (
-      tester,
-    ) async {
-      final session = _Session();
-      await _mount(tester, session);
-      session.players.single.emitPosition(const Duration(seconds: 37));
-      tester.binding.handleAppLifecycleStateChanged(lifecycle);
-      await _flush(tester);
-      expect(session.players.single.isPlaying, true);
-      expect(session.store.entry?['position'], 37);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await _flush(tester);
-      expect(session.players.single.isPlaying, true);
-    });
+    testWidgets(
+      '$lifecycle keeps playing in background and saves before the timer',
+      (tester) async {
+        final session = _Session();
+        await _mount(tester, session);
+        session.players.single.emitPosition(const Duration(seconds: 37));
+        tester.binding.handleAppLifecycleStateChanged(lifecycle);
+        await _flush(tester);
+        expect(session.players.single.isPlaying, true);
+        expect(session.store.entry?['position'], 37);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await _flush(tester);
+        expect(session.players.single.isPlaying, true);
+      },
+    );
 
     testWidgets('$lifecycle pauses when background playback is disabled', (
       tester,
@@ -570,9 +638,7 @@ void main() {
     expect(session.players.single.isPlaying, true);
   });
 
-  testWidgets('becoming noisy pauses playback immediately', (
-    tester,
-  ) async {
+  testWidgets('becoming noisy pauses playback immediately', (tester) async {
     final session = _Session();
     await _mount(tester, session);
     expect(session.players.single.isPlaying, true);
@@ -774,6 +840,49 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a closed session leaves the listening page instead of a black screen',
+    (tester) async {
+      final session = _Session();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  key: const Key('open-audio'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => session.page()),
+                  ),
+                  child: const Text('打开听书'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const Key('open-audio')));
+      await _flush(tester);
+      expect(find.byType(AudioPage), findsOneWidget);
+
+      // 系统通知栏「停止」：controller 收到 stop 后关闭会话。
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+            'fqapp/native_player',
+            const StandardMethodCodec().encodeMethodCall(
+              const MethodCall('onNotificationAction', {'action': 'stop'}),
+            ),
+            (_) {},
+          );
+      await _flush(tester);
+      await tester.pumpAndSettle();
+
+      expect(find.text('本次播放已关闭'), findsNothing);
+      expect(find.byType(AudioPage), findsNothing);
+      expect(find.text('打开听书'), findsOneWidget);
+    },
+  );
+
   testWidgets('an empty directory shows an empty state without a player', (
     tester,
   ) async {
@@ -937,25 +1046,25 @@ class _Session {
                Chapter(itemId: '$index', title: '第$index章', volumeName: '第一卷'),
            ];
 
-  Widget app() => MaterialApp(
-    home: AudioPage(
-      bookId: 'book',
-      title: '测试听书',
-      chapters: chapters,
-      startPosition: startPosition,
-      historyStore: store,
-      sourceLoader: (id, {toneId}) {
-        requests.add('$id:$toneId');
-        return loader?.call(id, toneId: toneId) ??
-            Future.value(_source(id, toneId));
-      },
-      voicesLoader: voices ?? () async => const [],
-      extrasLoader: extras,
-      playerFactory: () {
-        final player = factory?.call() ?? _AudioPlayer();
-        players.add(player);
-        return player;
-      },
-    ),
+  Widget app() => MaterialApp(home: page());
+
+  AudioPage page() => AudioPage(
+    bookId: 'book',
+    title: '测试听书',
+    chapters: chapters,
+    startPosition: startPosition,
+    historyStore: store,
+    sourceLoader: (id, {toneId}) {
+      requests.add('$id:$toneId');
+      return loader?.call(id, toneId: toneId) ??
+          Future.value(_source(id, toneId));
+    },
+    voicesLoader: voices ?? () async => const [],
+    extrasLoader: extras,
+    playerFactory: () {
+      final player = factory?.call() ?? _AudioPlayer();
+      players.add(player);
+      return player;
+    },
   );
 }

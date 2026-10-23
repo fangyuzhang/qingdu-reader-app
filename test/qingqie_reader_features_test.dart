@@ -9,6 +9,15 @@ import 'package:fqapp/services/shelf_store.dart';
 import 'package:fqapp/widgets/content_rating_chip.dart';
 
 /// 【青茄重构·新增】分级 / 书架分组 / 笔记页的单元与组件测试。
+class _NotesMemoryStore extends ReaderAnnotationStore {
+  _NotesMemoryStore(this.notes);
+
+  final List<ReaderAnnotation> notes;
+
+  @override
+  Future<List<ReaderAnnotation>> loadAll() async => notes;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -82,8 +91,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('笔记'), findsOneWidget);
     expect(find.textContaining('还没有'), findsOneWidget);
-    // 三个筛选 chip 都在（全部/批注/书摘）
-    expect(find.byType(ChoiceChip), findsNWidgets(3));
+    // 三个内容 chip（全部/批注/书摘）+ 批注类型 chip（全部类型 + 四个预设）
+    expect(find.byType(ChoiceChip), findsNWidgets(8));
   });
 
   testWidgets('分级标签渲染 12+ 与 15+', (tester) async {
@@ -120,4 +129,145 @@ void main() {
     expect(round.chapterTitle, '第一章');
     expect(round.key, note.key);
   });
+
+  testWidgets('按书查看可列出各书笔记并打开一本书的全部笔记', (tester) async {
+    final firstTime = DateTime(2026, 10, 20, 8, 5);
+    final secondTime = DateTime(2026, 10, 19, 21, 30);
+    final thirdTime = DateTime(2026, 10, 18, 9, 10);
+    final store = _NotesMemoryStore([
+      ReaderAnnotation(
+        bookId: 'book-a',
+        chapterId: 'a1',
+        start: 1,
+        end: 3,
+        text: 'A one',
+        thought: 'A thought one',
+        createdAt: firstTime.millisecondsSinceEpoch,
+        bookTitle: 'Book A',
+        chapterTitle: 'Chapter 1',
+      ),
+      ReaderAnnotation(
+        bookId: 'book-b',
+        chapterId: 'b1',
+        start: 4,
+        end: 7,
+        text: 'B one',
+        thought: 'B thought one',
+        createdAt: secondTime.millisecondsSinceEpoch,
+        bookTitle: 'Book B',
+        chapterTitle: 'Chapter 1',
+      ),
+      ReaderAnnotation(
+        bookId: 'book-a',
+        chapterId: 'a2',
+        start: 8,
+        end: 11,
+        text: 'A two',
+        thought: 'A thought two',
+        createdAt: thirdTime.millisecondsSinceEpoch,
+        bookTitle: 'Book A',
+        chapterTitle: 'Chapter 2',
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(home: NotesPage(store: store)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('notes-view-books')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('notes-books')), findsOneWidget);
+    expect(find.byKey(const ValueKey('notes-book-book-a')), findsOneWidget);
+    expect(find.byKey(const ValueKey('notes-book-book-b')), findsOneWidget);
+    expect(find.text('2 条笔记 · 2 批注 · 0 书摘 · 2 个章节'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('notes-book-book-a')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('notes-timeline')), findsOneWidget);
+    expect(find.text('书：Book A'), findsOneWidget);
+    expect(find.text('A one'), findsOneWidget);
+    expect(find.text('A two'), findsOneWidget);
+    expect(find.text('B one'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'notes timeline shows timestamps and reset clears the book dropdown',
+    (tester) async {
+      final firstTime = DateTime(2026, 10, 20, 8, 5);
+      final secondTime = DateTime(2026, 10, 19, 21, 30);
+      final store = _NotesMemoryStore([
+        ReaderAnnotation(
+          bookId: 'book-a',
+          chapterId: 'c1',
+          start: 1,
+          end: 3,
+          text: 'first source',
+          thought: 'first thought',
+          createdAt: firstTime.millisecondsSinceEpoch,
+          bookTitle: 'Book A',
+          chapterTitle: 'Chapter 1',
+          category: 'growth',
+          tags: const ['character'],
+        ),
+        ReaderAnnotation(
+          bookId: 'book-b',
+          chapterId: 'c2',
+          start: 4,
+          end: 7,
+          text: 'second source',
+          thought: 'second thought',
+          type: ReaderAnnotation.kTypeExcerpt,
+          createdAt: secondTime.millisecondsSinceEpoch,
+          bookTitle: 'Book B',
+          chapterTitle: 'Chapter 2',
+          category: 'history',
+          tags: const ['structure'],
+        ),
+      ]);
+
+      await tester.pumpWidget(MaterialApp(home: NotesPage(store: store)));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('notes-timeline')), findsOneWidget);
+      expect(find.text('2026-10-20 08:05'), findsOneWidget);
+      expect(find.text('2026-10-19 21:30'), findsOneWidget);
+      expect(
+        find.byKey(ValueKey('note-timeline-${store.notes.first.key}')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('notes-filter-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String?>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Book A').last);
+      await tester.pumpAndSettle();
+
+      var field = tester.widget<DropdownButtonFormField<String?>>(
+        find.byType(DropdownButtonFormField<String?>),
+      );
+      expect(field.initialValue, 'book-a');
+
+      await tester.tap(find.byKey(const ValueKey('notes-filter-reset')));
+      await tester.pumpAndSettle();
+      field = tester.widget<DropdownButtonFormField<String?>>(
+        find.byType(DropdownButtonFormField<String?>),
+      );
+      expect(field.initialValue, isNull);
+      expect(find.text('\u5168\u90e8\u4e66\u7c4d'), findsWidgets);
+
+      await tester.tap(find.byKey(const ValueKey('notes-filter-apply')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(ValueKey('note-timeline-${store.notes.first.key}')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('note-timeline-${store.notes.last.key}')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

@@ -341,9 +341,15 @@ fn symlink_file(target: &std::path::Path, link: &std::path::Path) -> std::io::Re
     std::os::unix::fs::symlink(target, link)
 }
 
+fn symlink_is_unavailable(error: &std::io::Error) -> bool {
+    // Windows reports missing Developer Mode as ERROR_PRIVILEGE_NOT_HELD
+    // (1314) with ErrorKind::Other instead of ErrorKind::PermissionDenied.
+    error.kind() == std::io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(1314)
+}
+
 /// Fixture with the boundary cases: an index symlinked out of the root, a
 /// symlink that stays inside it, an empty media file, and a plain subdirectory.
-async fn boundary_fixture() -> (TempDir, std::sync::Arc<fqapi_core::endpoints::Server>) {
+async fn boundary_fixture() -> Option<(TempDir, std::sync::Arc<fqapi_core::endpoints::Server>)> {
     let dir = TempDir::new("boundary");
     let server = build_server(
         &dir,
@@ -361,19 +367,30 @@ async fn boundary_fixture() -> (TempDir, std::sync::Arc<fqapi_core::endpoints::S
 
     let linked = dir.join("src/linked");
     std::fs::create_dir_all(&linked).expect("linked dir");
-    symlink_file(&dir.join("outside.txt"), &linked.join("index.html")).unwrap_or_else(|e| {
-        panic!("this test needs symlink support (Windows: enable Developer Mode): {e}")
-    });
+    if let Err(error) = symlink_file(&dir.join("outside.txt"), &linked.join("index.html")) {
+        if symlink_is_unavailable(&error) {
+            eprintln!("skipping symlink boundary tests: symlink creation is unavailable: {error}");
+            return None;
+        }
+        panic!("could not create the out-of-root symlink: {error}");
+    }
 
-    symlink_file(&dir.join("src/ok.txt"), &dir.join("src/inside-link.txt"))
-        .unwrap_or_else(|e| panic!("this test needs symlink support: {e}"));
+    if let Err(error) = symlink_file(&dir.join("src/ok.txt"), &dir.join("src/inside-link.txt")) {
+        if symlink_is_unavailable(&error) {
+            eprintln!("skipping symlink boundary tests: symlink creation is unavailable: {error}");
+            return None;
+        }
+        panic!("could not create the in-root symlink: {error}");
+    }
 
-    (dir, server)
+    Some((dir, server))
 }
 
 #[tokio::test]
 async fn directory_index_inside_the_root_is_served() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
     let (status, body, _) = body_string(&server, &get("/src/sub/", &[])).await;
     assert_eq!(status, 200);
     assert_eq!(body, "<html>sub</html>");
@@ -381,7 +398,9 @@ async fn directory_index_inside_the_root_is_served() {
 
 #[tokio::test]
 async fn an_index_symlinked_out_of_the_root_is_refused() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
 
     for path in ["/src/linked/", "/src/linked/index.html"] {
         let (status, body, _) = body_string(&server, &get(path, &[])).await;
@@ -395,7 +414,9 @@ async fn an_index_symlinked_out_of_the_root_is_refused() {
 
 #[tokio::test]
 async fn a_symlink_that_stays_inside_the_root_is_still_served() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
     let (status, body, _) = body_string(&server, &get("/src/inside-link.txt", &[])).await;
     assert_eq!(status, 200);
     assert_eq!(body, "0123456789");
@@ -403,7 +424,9 @@ async fn a_symlink_that_stays_inside_the_root_is_still_served() {
 
 #[tokio::test]
 async fn empty_file_ranges_are_ignored_with_consistent_headers() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
 
     for range in ["bytes=0-", "bytes=0-0", "bytes=-1", "bytes=99-"] {
         let (status, body, headers) =
@@ -437,7 +460,9 @@ async fn empty_file_ranges_are_ignored_with_consistent_headers() {
 
 #[tokio::test]
 async fn declared_length_always_matches_the_body() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
 
     let cases: [(&str, u16, usize); 4] = [
         ("bytes=2-5", 206, 4),
@@ -463,7 +488,9 @@ async fn declared_length_always_matches_the_body() {
 
 #[tokio::test]
 async fn loopback_adapter_refuses_a_symlinked_index_and_serves_empty_files() {
-    let (_dir, server) = boundary_fixture().await;
+    let Some((_dir, server)) = boundary_fixture().await else {
+        return;
+    };
     let lb = start_loopback(server).await;
 
     let (status, _, body) = http_get(&lb, "/src/linked/", None).await;

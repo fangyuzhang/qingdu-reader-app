@@ -267,6 +267,28 @@ void main() {
     );
   }
 
+  test('allowEmpty returns a title-only chapter instead of failing', () async {
+    final api = ApiClient(
+      baseUrl: 'http://backend.test',
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/novel')) {
+          return _json({
+            'code': 0,
+            'data': {'content_decrypted': true, 'content': ''},
+          });
+        }
+        return _json({
+          'code': 200,
+          'data': {'content': '老人与海'},
+        });
+      }),
+    );
+
+    final content = await api.chapterContent('placeholder', allowEmpty: true);
+    expect(content.withoutLeadingTitle('老人与海').isEmpty, isTrue);
+    expect(content.hasReadableBody('老人与海'), isFalse);
+  });
+
   test('API image-only chapters do not fall back to the text source', () async {
     var count = 0;
     final api = ApiClient(
@@ -326,21 +348,22 @@ void main() {
         '本节目由番茄畅听出品。',
         '浓雾中，一辆破旧的大巴缓缓驶来。',
       ]);
-      expect(
-        body.blocks.whereType<ChapterParagraph>().map((p) => p.startMs),
-        [1760, 17030],
-      );
+      expect(body.blocks.whereType<ChapterParagraph>().map((p) => p.startMs), [
+        1760,
+        17030,
+      ]);
     });
 
     test('plain text can never claim a checked timeline', () {
       // There is no markup to read, so such a chapter must be looked at again
       // if it is ever fetched as markup.
       expect(ChapterContent.fromPlainText('第一段').timelineChecked, isFalse);
-
     });
 
     test('chapters without audio carry no start times', () {
-      final content = parseChapterContent('<p idx="0">第一段</p><p idx="1">第二段</p>');
+      final content = parseChapterContent(
+        '<p idx="0">第一段</p><p idx="1">第二段</p>',
+      );
       expect(content.timelineChecked, isTrue);
       expect(
         content.blocks.whereType<ChapterParagraph>().every(

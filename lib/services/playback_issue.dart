@@ -6,16 +6,16 @@ import 'package:http/http.dart' as http;
 import 'api_client.dart';
 import 'native_player.dart';
 
-/// User-facing explanations only. Raw exceptions can contain signed video URLs
+/// User-facing explanations only. Raw exceptions can contain signed media URLs
 /// or backend response bodies and must never become the on-screen message.
 enum PlaybackIssue {
   network('网络连接异常', '请检查 Wi-Fi 或移动网络，连接正常后重试。'),
-  timeout('加载超时', '网络或视频响应较慢，请稍后重试。'),
-  unavailable('视频暂时无法播放', '播放地址可能已失效，可以重试获取新地址，或切换其他剧集。'),
-  service('播放服务暂时不可用', '请稍后重试，或先观看其他剧集。'),
-  decoding('视频解析失败', '视频格式可能不受支持，可以重试或切换其他剧集。'),
-  unknown('播放失败', '请重试，或切换其他剧集。'),
-  empty('暂无可播放剧集', '返回后试试其他作品。');
+  timeout('加载超时', '网络或播放响应较慢，请稍后重试。'),
+  unavailable('内容暂时无法播放', '播放地址可能已失效，可以重试获取新地址，或切换其他章节。'),
+  service('播放服务暂时不可用', '请稍后重试，或先收听其他内容。'),
+  decoding('音频解析失败', '音频格式可能不受支持，可以重试或切换其他章节。'),
+  unknown('播放失败', '请重试，或切换其他章节。'),
+  empty('暂无可播放章节', '返回后试试其他作品。');
 
   final String title;
   final String message;

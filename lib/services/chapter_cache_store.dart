@@ -24,6 +24,7 @@ abstract interface class ChapterCache {
   });
   Future<void> saveBook(CachedBook book);
   Future<Set<String>> cachedChapterIds(String bookId);
+
   /// [bookId] 的缓存目录，只在它确实还有缓存章节时返回；目录本身被清掉时用
   /// 缓存章节重建。null 表示这本书没有可离线阅读的正文。
   ///
@@ -61,6 +62,8 @@ class CachedBook {
           // Older catalogues restore an empty version; opening paragraph
           // comments resolves it from the online directory on demand.
           'version': chapter.version,
+          'wordCount': ?chapter.wordCount,
+          'chapterType': ?chapter.chapterType,
         },
     ],
   };
@@ -80,6 +83,12 @@ class CachedBook {
           title: value['title']?.toString() ?? '',
           volumeName: value['volumeName']?.toString() ?? '',
           version: value['version']?.toString() ?? '',
+          wordCount: value['wordCount'] is int
+              ? value['wordCount'] as int
+              : null,
+          chapterType: value['chapterType'] is int
+              ? value['chapterType'] as int
+              : null,
         ),
       );
     }

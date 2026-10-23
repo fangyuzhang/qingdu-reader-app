@@ -579,8 +579,8 @@ void main() {
     });
   });
 
-  group('书架离线直读', () {
-    testWidgets('导入章节的小说开启自动续读，普通书籍仍走原入口', (tester) async {
+  group('书架点书先看详情', () {
+    testWidgets('导入章节的小说也停留在详情页并保留续读位置', (tester) async {
       await tester.runAsync(() async {
         await ShelfStore.instance.add(_item('101', title: '已导入的小说'));
         await LibraryStore.instance.mergeFanqie([
@@ -606,7 +606,6 @@ void main() {
       await tester.pump();
       await tester.pump();
       final detail = tester.widget<DetailPage>(find.byType(DetailPage));
-      expect(detail.autoOpenReader, true);
       expect(detail.item.id, '101');
       expect(
         (await LibraryStore.instance.historyEntry('101'))?['chapterId'],
@@ -615,7 +614,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
-    testWidgets('无网且本地有缓存时，点书直接进阅读器而不是详情页', (tester) async {
+    testWidgets('无网且本地有缓存时，点书仍先进入详情页', (tester) async {
       await tester.runAsync(() async {
         await ShelfStore.instance.add(_item('offline-book', title: '离线直读的书'));
       });
@@ -635,10 +634,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('离线直读的书'));
-      await tester.pumpAndSettle();
-      expect(find.byType(ReaderPage, skipOffstage: false), findsOneWidget);
-      // 详情页要联网取目录，离线时正是它把「已下载」变成读不了。
-      expect(find.byType(DetailPage, skipOffstage: false), findsNothing);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DetailPage, skipOffstage: false), findsOneWidget);
+      expect(find.byType(ReaderPage, skipOffstage: false), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 

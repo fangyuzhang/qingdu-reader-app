@@ -74,11 +74,11 @@ void main() {
     final subtitles = Completer<SubtitleTrack>();
     await _mount(tester, _AudioSession((_, _) => subtitles.future).app());
     await _openReadAlong(tester);
-    expect(find.text('本章暂无同步字幕'), findsOneWidget);
+    expect(_sheetEmpty(), findsOneWidget);
     subtitles.complete(_track);
     await _flush(tester);
     expect(_currentSubtitle(tester), '第一句同步字幕');
-    expect(find.text('本章暂无同步字幕'), findsNothing);
+    expect(_sheetEmpty(), findsNothing);
   });
 
   testWidgets(
@@ -98,7 +98,7 @@ void main() {
       await _flush(tester);
       expect(session.players, hasLength(2));
       expect(find.text('第二句同步字幕'), findsNothing);
-      expect(find.text('本章暂无同步字幕'), findsOneWidget);
+      expect(_sheetEmpty(), findsOneWidget);
       expect(
         tester
             .widget<Text>(
@@ -128,7 +128,7 @@ void main() {
     );
     await _mount(tester, session.app());
     await _openReadAlong(tester);
-    expect(find.text('本章暂无同步字幕'), findsOneWidget);
+    expect(_sheetEmpty(), findsOneWidget);
     expect(session.players.single.isPlaying, isTrue);
     expect(tester.takeException(), isNull);
   });
@@ -330,11 +330,16 @@ void main() {
   });
 }
 
+Finder _sheetEmpty() => find.descendant(
+  of: find.byType(BottomSheet),
+  matching: find.text('本章暂无同步字幕'),
+);
+
 String? _currentSubtitle(WidgetTester tester) =>
     tester.widget<Text>(find.byKey(const Key('audio_subtitle_current'))).data;
 
 Future<void> _openReadAlong(WidgetTester tester) async {
-  final entry = find.byKey(const Key('audio_read_along'));
+  final entry = find.byKey(const Key('audio-read-along-bar'));
   await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pumpAndSettle();

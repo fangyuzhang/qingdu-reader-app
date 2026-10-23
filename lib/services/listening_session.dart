@@ -43,6 +43,10 @@ class ListeningSession extends ChangeNotifier {
   /// something structural changed (chapter, playing).
   ({int start, int end})? sentenceRange;
 
+  /// 有声书当前正在念的那一句原文。有声书只有音频时间轴、没有字符坐标，
+  /// 阅读页用这句话去正文里找位置再高亮；系统朗读走 [sentenceRange]。
+  String? narrationText;
+
   void update({
     required String bookId,
     required String chapterId,
@@ -52,12 +56,14 @@ class ListeningSession extends ChangeNotifier {
     required bool playing,
     double? textProgress,
     ({int start, int end})? sentenceRange,
+    String? narrationText,
   }) {
     final structural =
         this.bookId != bookId ||
         this.chapterId != chapterId ||
         this.playing != playing ||
-        this.sentenceRange != sentenceRange;
+        this.sentenceRange != sentenceRange ||
+        this.narrationText != narrationText;
     this.bookId = bookId;
     this.chapterId = chapterId;
     this.chapterTitle = chapterTitle;
@@ -66,6 +72,7 @@ class ListeningSession extends ChangeNotifier {
     this.playing = playing;
     this.textProgress = textProgress;
     this.sentenceRange = sentenceRange;
+    this.narrationText = narrationText;
     final now = DateTime.now();
     if (structural ||
         now.difference(_lastNotify) >= const Duration(seconds: 1)) {
@@ -85,6 +92,7 @@ class ListeningSession extends ChangeNotifier {
     playing = false;
     textProgress = null;
     sentenceRange = null;
+    narrationText = null;
     notifyListeners();
   }
 }

@@ -62,7 +62,7 @@ class HomeHero extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'fqapp',
+                      '青茄阅读',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -128,7 +128,7 @@ class HomeHero extends StatelessWidget {
                 child: HomePressable(
                   key: const Key('home_search_button'),
                   onTap: onSearch,
-                  semanticLabel: '搜索小说、短剧、漫剧、漫画和听书',
+                  semanticLabel: '搜索小说或听书',
                   child: Container(
                     height: 44,
                     padding: const EdgeInsets.symmetric(horizontal: 14),

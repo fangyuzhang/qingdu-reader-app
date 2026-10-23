@@ -23,10 +23,10 @@ void main() {
       );
       // TTS text: '第一句。第二句。\n第三句。' — title stripped.
       // Layout: title block [0,3), separator, body starts at 4.
-      expect(
-        narrationLayoutRange(layout, (start: 0, end: 4)),
-        (start: 4, end: 8),
-      );
+      expect(narrationLayoutRange(layout, (start: 0, end: 4)), (
+        start: 4,
+        end: 8,
+      ));
     });
 
     test('range spanning the paragraph separator covers both blocks', () {
@@ -38,10 +38,10 @@ void main() {
         ],
       );
       // TTS [5, 11): '二句。\n第三' — crosses the '\n' at TTS offset 8.
-      expect(
-        narrationLayoutRange(layout, (start: 5, end: 11)),
-        (start: 9, end: 15),
-      );
+      expect(narrationLayoutRange(layout, (start: 5, end: 11)), (
+        start: 9,
+        end: 15,
+      ));
     });
 
     test('separator-only range maps to nothing', () {
@@ -67,14 +67,14 @@ void main() {
       );
       // Layout: title [0,3), '\n', image placeholder [4,5), '\n', body at 6.
       // TTS: '第一句。第二句。\n第三句。' — the image is invisible to TTS.
-      expect(
-        narrationLayoutRange(layout, (start: 0, end: 4)),
-        (start: 6, end: 10),
-      );
-      expect(
-        narrationLayoutRange(layout, (start: 9, end: 12)),
-        (start: 15, end: 18),
-      );
+      expect(narrationLayoutRange(layout, (start: 0, end: 4)), (
+        start: 6,
+        end: 10,
+      ));
+      expect(narrationLayoutRange(layout, (start: 9, end: 12)), (
+        start: 15,
+        end: 18,
+      ));
     });
 
     test('empty title contributes no offset', () {
@@ -82,10 +82,10 @@ void main() {
         title: '',
         blocks: [const ChapterParagraph('第一句。', paraIndex: 0)],
       );
-      expect(
-        narrationLayoutRange(layout, (start: 0, end: 4)),
-        (start: 0, end: 4),
-      );
+      expect(narrationLayoutRange(layout, (start: 0, end: 4)), (
+        start: 0,
+        end: 4,
+      ));
     });
 
     test('out-of-range TTS range maps to nothing', () {
@@ -97,15 +97,94 @@ void main() {
     });
   });
 
+  group('narrationTextRange (有声书当前句 -> 排版区间)', () {
+    test('finds the narrated sentence inside its paragraph', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [const ChapterParagraph('第一句。第二句。', paraIndex: 0)],
+      );
+      // 标题 [0,3)，分隔符，正文从 4 起：'第一句。' 是 [4,8)，'第二句。' 是 [8,12)。
+      expect(narrationTextRange(layout, '第二句。'), (start: 8, end: 12));
+    });
+
+    test('falls back to a prefix when the cue text differs slightly', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [const ChapterParagraph('这是一句很长的话，后面还有内容。', paraIndex: 0)],
+      );
+      final range = narrationTextRange(layout, '这是一句很长的话 后面还有');
+      expect(range, isNotNull);
+      expect(range!.start, 4);
+      expect(range.end, greaterThan(range.start));
+    });
+
+    test('an unknown sentence maps to nothing instead of the wrong block', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [const ChapterParagraph('第一句。', paraIndex: 0)],
+      );
+      expect(narrationTextRange(layout, '完全不相干的一句话'), isNull);
+    });
+  });
+
+  group('narrationTextRangeNear (系统朗读分句就近定位)', () {
+    test('picks the occurrence closest to the reported offset', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [
+          const ChapterParagraph('他说：走了。', paraIndex: 0),
+          const ChapterParagraph('后来他说：走了。', paraIndex: 1),
+        ],
+      );
+      // 第二段里的那句离 hint 更近，应选中它而不是第一段的同款短句。
+      final hint = narrationTextRange(layout, '后来他说：走了。')!.start;
+      final hit = narrationTextRangeNear(layout, '他说：走了。', hint);
+      expect(hit, isNotNull);
+      expect(hit!.start, greaterThan(hint));
+    });
+
+    test('never widens to the whole paragraph', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [
+          const ChapterParagraph('第一句，第二句，第三句。', paraIndex: 0),
+        ],
+      );
+      final hit = narrationTextRangeNear(layout, '第二句，', 4)!;
+      expect(hit.end - hit.start, '第二句，'.length);
+    });
+  });
+
+  group('narrationBlockAtProgress (有声书兜底整段高亮)', () {
+    test('lands on the paragraph that covers the narrated fraction', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [
+          const ChapterParagraph('第一段。', paraIndex: 0),
+          const ChapterParagraph('第二段。', paraIndex: 1),
+        ],
+      );
+      // 正文从 4 起：'第一段。' [4,8)，分隔符，'第二段。' [9,13)。
+      expect(narrationBlockAtProgress(layout, 0), (start: 4, end: 8));
+      expect(narrationBlockAtProgress(layout, 1), (start: 9, end: 13));
+    });
+
+    test('a chapter without body paragraphs highlights nothing', () {
+      final layout = _layout(
+        title: '第一章',
+        blocks: [const ChapterImage(url: 'https://example.invalid/1.png')],
+      );
+      expect(narrationBlockAtProgress(layout, 0.5), isNull);
+    });
+  });
+
   group('ReaderBlockMarkLayer narration wash', () {
     testWidgets('passes the block-local narration range to the painter', (
       tester,
     ) async {
       final layout = _layout(
         title: '第一章',
-        blocks: [
-          const ChapterParagraph('第一句。第二句。第三句。', paraIndex: 0),
-        ],
+        blocks: [const ChapterParagraph('第一句。第二句。第三句。', paraIndex: 0)],
       );
       final block = layout.blocks[1];
       final scope = ReaderSelectionScope(

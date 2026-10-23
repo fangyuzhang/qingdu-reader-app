@@ -220,10 +220,8 @@ function searchPayload(tab, title, count = 1) {
 }
 
 test('all embedded scripts, filters and JSON configs parse', () => {
-  for (const folder of ['assets/web', 'assets/plugins']) {
-    for (const name of fs.readdirSync(path.join(root, folder)).filter(name => name.endsWith('.html'))) {
-      inlineScripts(`${folder}/${name}`).forEach(script => new vm.Script(script, { filename: `${folder}/${name}` }));
-    }
+  for (const name of fs.readdirSync(path.join(root, 'assets/web')).filter(name => name.endsWith('.html'))) {
+    inlineScripts(`assets/web/${name}`).forEach(script => new vm.Script(script, { filename: `assets/web/${name}` }));
   }
   for (const name of fs.readdirSync(path.join(root, 'assets/filters'))) {
     new vm.Script(fs.readFileSync(path.join(root, 'assets/filters', name), 'utf8'), { filename: name });
@@ -233,7 +231,18 @@ test('all embedded scripts, filters and JSON configs parse', () => {
   }
 });
 
-for (const name of ['index', 'detail', 'read', 'comic', 'listen', 'video']) {
+test('retired video, comic and plugin pages are not shipped', () => {
+  for (const relative of [
+    'assets/web/video.html',
+    'assets/web/comic.html',
+    'assets/plugins/player.html',
+    'assets/plugins/manga_reader.html',
+  ]) {
+    assert.equal(fs.existsSync(path.join(root, relative)), false, `${relative} must stay retired`);
+  }
+});
+
+for (const name of ['index', 'detail', 'read', 'listen']) {
   test(`${name} remains usable when browser storage access is denied`, () => {
     const p = page(`assets/web/${name}.html`, { storageBlocked: true });
     assert.ok(p.elements.get('themeToggle').listeners.get('click')?.length);
@@ -403,21 +412,7 @@ test('reader retains body text that starts with the chapter title', () => {
   assert.deepEqual(Array.from(p.run('normalizeTextParagraphs(bodyText, "序")')), ['序幕之后，故事才开始。']);
 });
 
-test('comic ignores a late chapter response', async () => {
-  const p = page('assets/web/comic.html');
-  p.run('chapters = [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }]; extractImages = html => [html]');
-  const first = p.run('loadChapter()');
-  const second = p.run('goToIndex(1)');
-  const [a, b] = contentRequests(p);
-  p.respond(b, { code: 200, data: { images: 'https://example.test/b.jpg' } });
-  await second;
-  p.respond(a, { code: 200, data: { images: 'https://example.test/a.jpg' } });
-  await first;
-  assert.equal(p.elements.get('imageList').querySelector('img').src, 'https://example.test/b.jpg');
-});
-
 for (const [file, collection, load, mediaId, responseKey, storageType] of [
-  ['video', 'episodes', 'loadEpisode', 'videoPlayer', 'video_url', 'video'],
   ['listen', 'chapters', 'loadChapter', 'audioPlayer', 'audio_url', 'audio'],
 ]) {
   const setup = () => {
@@ -537,87 +532,6 @@ test('late audio fallback cannot replace the selected chapter or its progress', 
   assert.equal(p.run('itemId'), 'b');
   assert.equal(p.run('activeItemId'), 'b');
   assert.equal(audio.listeners.get('loadedmetadata')?.length || 0, 0);
-});
-
-test('plugin video selection tracks the requested ID and ignores late responses', async () => {
-  const p = page('assets/plugins/player.html');
-  p.run('player.playlist = [{ item_id: "a", title: "Alpha" }, { item_id: "b", title: "Beta" }]');
-  const first = p.run('player.loadVideo("a")');
-  const second = p.run('player.loadVideo("b")');
-  assert.equal(p.run('player.currentItemId'), 'b');
-  p.respond(p.requests[1], { video_info: { data: { video_list: { video_1: { main_url: 'https://example.test/b' } } } } });
-  await second;
-  p.respond(p.requests[0], { video_info: { data: { video_list: { video_1: { main_url: 'https://example.test/a' } } } } });
-  await first;
-  assert.equal(p.elements.get('video-player').src, 'https://example.test/b');
-  assert.equal(p.run('player.currentIndex'), 1);
-});
-
-test('plugin player restores long-press speed on cancellation and handles play rejection', async () => {
-  const p = page('assets/plugins/player.html');
-  p.run('player.currentSpeedIndex = 1; player.isLongPressing = true; player.startFastForward()');
-  p.elements.get('interaction-layer').dispatch('touchcancel');
-  assert.equal(p.elements.get('video-player').playbackRate, 1.25);
-  assert.equal(p.run('player.isLongPressing'), false);
-  p.elements.get('video-player').play = () => Promise.reject(new Error('blocked'));
-  p.run('player.togglePlay()');
-  await Promise.resolve();
-  assert.match(p.elements.get('toast').textContent, /Playback failed/);
-});
-
-test('plugin manga selection can supersede a pending chapter without losing its identity', async () => {
-  const p = page('assets/plugins/manga_reader.html');
-  p.run('reader.chapters = [{ item_id: "a", title: "Alpha" }, { item_id: "b", title: "Beta" }]');
-  const first = p.run('reader.loadChapter("a")');
-  const second = p.run('reader.loadChapter("b")');
-  assert.equal(p.run('reader.currentItemId'), 'b');
-  p.respond(p.requests[0], { success: true, data: { images: ['https://example.test/a.jpg'] } });
-  await first;
-  assert.equal(p.run('reader.changingChapter'), true);
-  p.respond(p.requests[1], { success: true, data: { images: ['https://example.test/b.jpg'] } });
-  await second;
-  assert.equal(p.elements.get('image-scroll-area').querySelector('img').src, 'https://example.test/b.jpg');
-  assert.equal(p.run('reader.currentChapterIndex'), 1);
-});
-
-for (const boundary of ['next', 'previous']) {
-  test(`plugin manga cancels pending ${boundary} navigation when the reader scrolls away`, () => {
-    const p = page('assets/plugins/manga_reader.html');
-    p.run('reader.chapters = [{ item_id: "a", title: "Alpha" }, { item_id: "b", title: "Beta" }]; reader.currentChapterIndex = 1; reader.ignoreScrollBoundary = false');
-    if (boundary === 'next') p.run('reader.currentChapterIndex = 0');
-    const container = p.elements.get('image-container');
-    container.scrollTop = boundary === 'next' ? 9400 : 0;
-    container.dispatch('scroll');
-    assert.equal(p.timers.size, 1);
-    container.scrollTop = 4000;
-    container.dispatch('scroll');
-    for (const callback of [...p.timers.values()]) callback();
-    assert.equal(p.requests.length, 0);
-    assert.equal(p.run('reader.currentChapterIndex'), boundary === 'next' ? 0 : 1);
-  });
-}
-
-test('plugin manga still advances when it remains at the end', () => {
-  const p = page('assets/plugins/manga_reader.html');
-  p.run('reader.chapters = [{ item_id: "a", title: "Alpha" }, { item_id: "b", title: "Beta" }]; reader.currentChapterIndex = 0');
-  const container = p.elements.get('image-container');
-  container.scrollTop = 9400;
-  container.dispatch('scroll');
-  for (const callback of [...p.timers.values()]) callback();
-  assert.equal(p.requests.length, 1);
-  assert.equal(p.run('reader.currentItemId'), 'b');
-});
-
-test('plugin manga rechecks the end after late image layout changes', () => {
-  const p = page('assets/plugins/manga_reader.html');
-  p.run('reader.chapters = [{ item_id: "a", title: "Alpha" }, { item_id: "b", title: "Beta" }]; reader.currentChapterIndex = 0');
-  const container = p.elements.get('image-container');
-  container.scrollTop = 9400;
-  container.dispatch('scroll');
-  container.scrollHeight = 20000;
-  for (const callback of [...p.timers.values()]) callback();
-  assert.equal(p.requests.length, 0);
-  assert.equal(p.run('reader.currentChapterIndex'), 0);
 });
 
 test('download text keeps nested paragraphs once and retains text beginning with the title', () => {
@@ -742,7 +656,6 @@ test('audio fallback rejects a singleton row without a chapter identity', async 
 
 for (const [name, key, mediaId] of [
   ['listen', 'novelapi_audio_speed_v3', 'audioPlayer'],
-  ['video', 'novelapi_video_speed_v3', 'videoPlayer'],
 ]) {
   test(`${name} recovers invalid persisted speeds without blocking initialization`, () => {
     for (const value of ['bad', 'Infinity', '-1', '100', '0']) {

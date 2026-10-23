@@ -6,12 +6,12 @@ import 'package:fqapp/widgets/bookshelf_card.dart';
 import 'package:fqapp/widgets/shelf/shelf_design.dart';
 
 void main() {
-  test('每种内容类型都有中文标签', () {
+  test('only supported shelf kinds have product labels', () {
     expect(bookshelfKindLabel('book'), '小说');
-    expect(bookshelfKindLabel('video'), '短剧');
+    expect(bookshelfKindLabel('video'), 'video');
     expect(bookshelfKindLabel('audio'), '听书');
-    expect(bookshelfKindLabel('manga'), '漫画');
-    expect(bookshelfKindLabel('manju'), '漫剧');
+    expect(bookshelfKindLabel('manga'), 'manga');
+    expect(bookshelfKindLabel('manju'), 'manju');
     // 未知类型退回原始值，不抛异常。
     expect(bookshelfKindLabel('unknown'), 'unknown');
   });

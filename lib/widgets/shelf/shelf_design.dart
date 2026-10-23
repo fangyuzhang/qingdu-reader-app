@@ -141,23 +141,11 @@ enum BookshelfLayout {
   final IconData menuIcon;
 }
 
-const _kindLabels = {
-  'book': '小说',
-  'video': '短剧',
-  'manju': '漫剧',
-  'manga': '漫画',
-  'audio': '听书',
-};
+const _kindLabels = {'book': '小说', 'audio': '听书'};
 
 /// 内容类型色。用于双列卡片的类型小标签（12% 透明度底色）与无封面占位，
 /// 是「数据真实存在」的类型标识色，不属于主题色，明暗两套同值。
-const _kindColors = {
-  'book': Color(0xFF4A90D9),
-  'video': Color(0xFFE8532D),
-  'manju': Color(0xFFAA5A92),
-  'manga': Color(0xFF34A853),
-  'audio': Color(0xFF9C6ADE),
-};
+const _kindColors = {'book': Color(0xFF4A90D9), 'audio': Color(0xFF9C6ADE)};
 
 String bookshelfKindLabel(String kind) => _kindLabels[kind] ?? kind;
 

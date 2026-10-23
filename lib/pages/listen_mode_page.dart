@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/home/home_design.dart';
+
 import '../models/media_item.dart';
 import '../services/api_client.dart';
 import '../services/audio_preferences.dart';
@@ -10,7 +12,7 @@ import '../services/native_player.dart';
 import '../services/player_preferences.dart';
 
 /// 听书模式页（官方 `jm3.d0.y()` 的 `ShortSeriesLaunchArgs.setIsListenMode`
-/// 语义）：独立于视频播放页的音频页——封面、剧名/集名、进度条、上一集/
+/// 语义）：独立于阅读页的音频页——封面、书名/章节、进度条、上一章/
 /// 播放暂停/下一集与选集入口，播完自动连播到下一集。
 ///
 /// 与官方的差异（取证与取舍 — 见
@@ -18,7 +20,7 @@ import '../services/player_preferences.dart';
 /// 官方是独立 Activity + 服务端听书数据链路；本页复用现有取流缓存，自建
 /// [NativePlayer] 实例只听不看。后台续听靠 `ListenKeepAliveService` 前台
 /// 服务保活（MIUI 会冻结无前台组件的后台进程）；在后台听书开关开启时
-/// 后台照常出声。退出时回传最终进度，宿主把它写回视频播放页。
+/// 后台照常出声。退出时回传最终进度，宿主把它写回听书页。
 class ListenModePage extends StatefulWidget {
   const ListenModePage({
     super.key,
@@ -59,6 +61,7 @@ class _ListenModePageState extends State<ListenModePage>
 
   static const _rates = <double>[0.75, 1.0, 1.25, 1.5, 2.0];
   double _rate = 1.0;
+
   /// 拖动进度条时用于合并回写：只有最后一次拖动落地才同步通知。
   int _seekSyncGeneration = 0;
 
@@ -258,6 +261,7 @@ class _ListenModePageState extends State<ListenModePage>
     final playing = player?.playWhenReady ?? false;
     final position = player?.position ?? Duration.zero;
     final duration = player?.duration ?? Duration.zero;
+    final palette = HomePalette.of(context);
     // 返回时把「听到哪一集 + 进度」一起交给宿主：听书页可能已自动连播
     // 跨集，宿主要跟到那一集续看（官方 sync_progress_strategy_listen_mode）。
     return PopScope(
@@ -266,135 +270,136 @@ class _ListenModePageState extends State<ListenModePage>
         if (!didPop) _exitWithResult();
       },
       child: Scaffold(
-      key: const ValueKey('listen-page'),
-      backgroundColor: const Color(0xFF121212),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          key: const ValueKey('listen-page-back'),
-          onPressed: _exitWithResult,
-          icon: const Icon(Icons.arrow_back),
+        key: const ValueKey('listen-page'),
+        backgroundColor: palette.canvas,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          foregroundColor: palette.ink,
+          elevation: 0,
+          leading: IconButton(
+            key: const ValueKey('listen-page-back'),
+            onPressed: _exitWithResult,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          title: Text(
+            widget.seriesTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        title: Text(
-          widget.seriesTitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    ApiClient.instance.absoluteUrl(widget.coverUrl),
-                    key: const ValueKey('listen-cover'),
-                    width: 220,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) =>
-                        const SizedBox(width: 220, height: 220),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.network(
+                      ApiClient.instance.absoluteUrl(widget.coverUrl),
+                      key: const ValueKey('listen-cover'),
+                      width: 220,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const SizedBox(width: 220, height: 220),
+                    ),
                   ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '第 ${_index + 1} 集 · ${_episodeTitle(_index)}',
-                    key: const ValueKey('listen-episode-title'),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_fmt(position)} / ${_fmt(duration)}',
-                    key: const ValueKey('listen-time'),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0x99FFFFFF),
-                    ),
-                  ),
-                  Slider(
-                    key: const ValueKey('listen-seek'),
-                    value: duration.inMilliseconds <= 0
-                        ? 0
-                        : (position.inMilliseconds / duration.inMilliseconds)
-                              .clamp(0.0, 1.0),
-                    onChanged: duration.inMilliseconds <= 0 ? null : _seekTo,
-                    activeColor: const Color(0xFFFA6725),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        key: const ValueKey('listen-prev'),
-                        onPressed: _index > 0 ? () => unawaited(_step(-1)) : null,
-                        icon: const Icon(Icons.skip_previous, size: 40),
-                        color: Colors.white,
-                        disabledColor: const Color(0x33FFFFFF),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '第 ${_index + 1} 集 · ${_episodeTitle(_index)}',
+                      key: const ValueKey('listen-episode-title'),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: palette.ink,
                       ),
-                      const SizedBox(width: 24),
-                      IconButton(
-                        key: const ValueKey('listen-play'),
-                        onPressed: player == null
-                            ? null
-                            : () => unawaited(_togglePlay()),
-                        icon: Icon(
-                          playing
-                              ? Icons.pause_circle_filled
-                              : Icons.play_circle_filled,
-                          size: 64,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_fmt(position)} / ${_fmt(duration)}',
+                      key: const ValueKey('listen-time'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: palette.muted),
+                    ),
+                    Slider(
+                      key: const ValueKey('listen-seek'),
+                      value: duration.inMilliseconds <= 0
+                          ? 0
+                          : (position.inMilliseconds / duration.inMilliseconds)
+                                .clamp(0.0, 1.0),
+                      onChanged: duration.inMilliseconds <= 0 ? null : _seekTo,
+                      activeColor: HomePalette.accent,
+                      inactiveColor: palette.line,
+                      thumbColor: HomePalette.accent,
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          key: const ValueKey('listen-prev'),
+                          onPressed: _index > 0
+                              ? () => unawaited(_step(-1))
+                              : null,
+                          icon: const Icon(Icons.skip_previous, size: 40),
+                          color: palette.ink,
+                          disabledColor: palette.muted.withValues(alpha: 0.35),
                         ),
-                        color: const Color(0xFFFA6725),
-                      ),
-                      const SizedBox(width: 24),
-                      IconButton(
-                        key: const ValueKey('listen-next'),
-                        onPressed: _index < widget.episodes.length - 1
-                            ? () => unawaited(_step(1))
-                            : null,
-                        icon: const Icon(Icons.skip_next, size: 40),
-                        color: Colors.white,
-                        disabledColor: const Color(0x33FFFFFF),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 8,
-                    children: [
-                      for (final rate in _rates)
-                        _ratePill(context, rate),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 24),
+                        IconButton(
+                          key: const ValueKey('listen-play'),
+                          onPressed: player == null
+                              ? null
+                              : () => unawaited(_togglePlay()),
+                          icon: Icon(
+                            playing
+                                ? Icons.pause_circle_filled
+                                : Icons.play_circle_filled,
+                            size: 64,
+                          ),
+                          color: HomePalette.accent,
+                        ),
+                        const SizedBox(width: 24),
+                        IconButton(
+                          key: const ValueKey('listen-next'),
+                          onPressed: _index < widget.episodes.length - 1
+                              ? () => unawaited(_step(1))
+                              : null,
+                          icon: const Icon(Icons.skip_next, size: 40),
+                          color: palette.ink,
+                          disabledColor: palette.muted.withValues(alpha: 0.35),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      children: [
+                        for (final rate in _rates) _ratePill(context, rate),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-          ],
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
 
   Widget _ratePill(BuildContext context, double rate) {
+    final palette = HomePalette.of(context);
     final selected = rate == _rate;
     return InkWell(
       key: ValueKey('listen-rate-$rate'),
@@ -409,14 +414,23 @@ class _ListenModePageState extends State<ListenModePage>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFFA6725) : const Color(0x14FFFFFF),
+          color: selected
+              ? palette.surface
+              : palette.line.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? palette.accentText.withValues(alpha: 0.55)
+                : Colors.transparent,
+            width: selected ? 1.2 : 0,
+          ),
         ),
         child: Text(
           '${rate == rate.roundToDouble() ? rate.toInt() : rate}x',
           style: TextStyle(
             fontSize: 12,
-            color: selected ? Colors.white : const Color(0x99FFFFFF),
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? palette.accentText : palette.muted,
           ),
         ),
       ),

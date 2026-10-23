@@ -6,20 +6,8 @@ import '../../services/poster_cache.dart';
 import '../models/media_item.dart';
 import 'cover_tag_chip.dart';
 
-const kindLabels = {
-  'book': '小说',
-  'video': '短剧',
-  'manju': '漫剧',
-  'manga': '漫画',
-  'audio': '听书',
-};
-const kindColors = {
-  'book': Color(0xFF4A90D9),
-  'video': Color(0xFFE8532D),
-  'manju': Color(0xFFAA5A92),
-  'manga': Color(0xFF34A853),
-  'audio': Color(0xFF9C6ADE),
-};
+const kindLabels = {'book': '小说', 'audio': '听书'};
+const kindColors = {'book': Color(0xFF2FA98C), 'audio': Color(0xFF8B5CF6)};
 
 /// Baseline grid used by tests and callers without a BuildContext. A maximum
 /// tile width makes it naturally expand from two columns on narrow windows to

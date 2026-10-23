@@ -10,16 +10,14 @@ import '../models/chapter_summary.dart';
 import '../models/media_item.dart';
 import '../services/content_rating.dart';
 import '../models/media_description.dart';
-import '../models/series_detail.dart';
 import '../services/api_client.dart';
 import '../services/audio_history.dart';
-import '../services/book_open_preferences.dart';
 import '../services/chapter_cache_store.dart';
 import '../services/chapter_download.dart';
+import '../services/chapter_text_formatter.dart';
 import '../services/connectivity_status.dart';
+import '../services/detail_snapshot_cache.dart';
 import '../services/library_store.dart';
-import '../services/media_history_store.dart';
-import '../services/player_history.dart';
 import '../services/reader_history.dart';
 import '../services/shelf_store.dart';
 import '../services/user_facing_error.dart';
@@ -32,14 +30,13 @@ import '../widgets/detail/detail_read_bar.dart';
 import '../widgets/detail/detail_reviews.dart';
 import '../widgets/detail/detail_reviews_sheet.dart';
 import '../widgets/detail/detail_sections.dart';
+import '../widgets/detail/detail_skeleton.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
-import '../widgets/media_card.dart';
+import '../widgets/reader/reader_illustration.dart';
 import 'audio_page.dart';
 import 'author_page.dart';
 import 'cached_book_reader.dart';
-import 'comic_reader_page.dart';
-import 'player_page.dart';
 import 'reader_page.dart';
 
 /// Optional decorations for the detail page (currently the review block).
@@ -106,9 +103,6 @@ class DetailPage extends StatefulWidget {
   /// rest; leaving it null for an offline caller disables the excerpts.
   final ChapterPreviewLoader? previewLoader;
 
-  /// Series detail (cast list) for short dramas and manju. Only consulted for
-  /// video kinds; other content has no cast.
-  final Future<SeriesDetail> Function(String seriesId)? seriesLoader;
   final ReaderStore? readerStore;
 
   /// Offline chapter cache behind the download action. Injectable so tests can
@@ -129,18 +123,11 @@ class DetailPage extends StatefulWidget {
     this.directoryLoader,
     this.extrasLoader,
     this.previewLoader,
-    this.seriesLoader,
     this.readerStore,
     this.chapterCache,
     this.chapterLoader,
     this.connectivity,
-    this.autoOpenReader = false,
   });
-
-  /// 「点击书籍直接进入阅读」（issue #19 第 3 条）：详情页加载出目录后，
-  /// 直接按上次进度进阅读器，并用 pushReplacement 顶掉详情页。仅小说/漫画
-  /// 走这条路；听书/短剧仍停留在详情页，加载失败时也停留在详情页。
-  final bool autoOpenReader;
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -149,7 +136,6 @@ class DetailPage extends StatefulWidget {
 class _DetailPageState extends State<DetailPage> {
   Map<String, dynamic>? _detail;
   BookDetail? _bookDetail;
-  SeriesDetail _series = SeriesDetail.empty;
   BookCommentPage _comments = const BookCommentPage();
   bool _commentsLoadingMore = false;
   ChapterSummary _chapterPreviews = ChapterSummary.empty;
@@ -164,39 +150,58 @@ class _DetailPageState extends State<DetailPage> {
   int _historyGeneration = 0;
   int? _resumeIndex;
   bool _opening = false;
-  bool _autoOpened = false;
   ChapterDownload? _download;
+
+  /// 目录还在路上（详情已经铺出来了，底部阅读条等它）。
+  bool _directoryLoading = false;
+
+  /// 本章正文/插图预热只跑一次，避免详情页反复刷新时重复请求。
+  bool _prewarming = false;
 
   /// 目录联网失败时查到的本地整本缓存；非空即给出「从缓存阅读」入口。
   CachedBook? _cachedBook;
 
-  bool get _supported => kindLabels.containsKey(widget.item.kind);
-  bool get _isVideo => isVideoKind(widget.item.kind);
+  DetailSnapshotCache get _snapshots => DetailSnapshotCache.instance;
+
+  /// 测试与预览注入了自己的 loader，视为离线且不落盘，避免用例之间互相污染。
+  bool get _useSnapshots =>
+      widget.detailLoader == null && widget.directoryLoader == null;
+
+  DetailSnapshot? _readSnapshot() {
+    if (!_useSnapshots || !_supported || _contentId.isEmpty) return null;
+    return _snapshots.read(_contentId);
+  }
+
+  /// 正文缓存；注入 loader 的离线调用方不碰真实存储。
+  ChapterCache? get _chapterCacheStore {
+    final injected = widget.chapterCache;
+    if (injected != null) return injected;
+    if (widget.detailLoader != null || widget.directoryLoader != null) {
+      return null;
+    }
+    return ChapterCacheStore.instance;
+  }
+
+  bool get _supported =>
+      widget.item.kind == 'book' || widget.item.kind == 'audio';
   bool get _isAudio => widget.item.kind == 'audio';
-  bool get _isManga => widget.item.kind == 'manga';
   bool get _isBook => widget.item.kind == 'book';
   String get _contentId => widget.item.seriesId ?? widget.item.id;
-  String get _chapterUnit => _isVideo
-      ? '集'
-      : _isManga
-      ? '话'
-      : '章';
-  String get _readLabel => switch (widget.item.kind) {
-    'video' || 'manju' => _resumeIndex == null ? '开始观看' : '继续观看',
-    'audio' => _resumeIndex == null ? '开始收听' : '继续收听',
-    _ => _resumeIndex == null ? '开始阅读' : '继续阅读',
-  };
+  String get _chapterUnit => '章';
+  String get _readLabel => _isAudio
+      ? (_resumeIndex == null ? '开始收听' : '继续收听')
+      : (_resumeIndex == null ? '开始阅读' : '继续阅读');
 
   /// 是否已在本地书架。以 [ShelfStore] 为准，写入后由它的 listenable 触发重绘；
-  /// 短剧/漫剧官方用的是「追剧」，这里统一沿用「加入书架」，与听书页和书架页
+  /// 书架统一使用「加入书架」，与听书页和书架页的文案保持一致。
   /// 的文案保持一致。
   bool get _inShelf => ShelfStore.instance.containsItem(widget.item);
 
   Future<void> _toggleShelf() async {
     if (!ShelfStore.instance.isReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('本地书架暂不可用，请重试')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('本地书架暂不可用，请重试')));
       return;
     }
     final added = await ShelfStore.instance.toggle(widget.item);
@@ -212,7 +217,7 @@ class _DetailPageState extends State<DetailPage> {
   @override
   void initState() {
     super.initState();
-    _tab = _isVideo ? '短剧' : kindLabels[widget.item.kind] ?? '小说';
+    _tab = _isAudio ? '听书' : '小说';
     _scroll.addListener(_onScroll);
     // A whole-book download outlives this page: coming back re-attaches to the
     // same batch instead of starting a second one.
@@ -250,25 +255,32 @@ class _DetailPageState extends State<DetailPage> {
     final generation = ++_loadGeneration;
     ++_openGeneration;
     ++_historyGeneration;
-    if (mounted) {
+    // 上次的详情快照：命中就同帧铺满，网络结果随后静默覆盖，屏幕不再闪一下。
+    final snapshot = _readSnapshot();
+    if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _loading = true;
         _error = null;
-        _detail = null;
-        _bookDetail = null;
-        _series = SeriesDetail.empty;
+      _opening = false;
         _comments = const BookCommentPage();
-        _allChapters = const [];
         _chapterPreviews = ChapterSummary.empty;
-        _opening = false;
         _resumeIndex = null;
         _cachedBook = null;
+      _detail = snapshot?.detail;
+      _bookDetail = snapshot?.detail == null
+          ? null
+          : BookDetail.fromPayload(snapshot!.detail!);
+      _allChapters = snapshot?.chapters ?? const [];
+      _loading = _detail == null && _allChapters.isEmpty;
+      _directoryLoading = _supported;
       });
-    }
+    if (snapshot != null) unawaited(_refreshResume());
 
     if (!_supported) {
       if (!mounted || generation != _loadGeneration) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _directoryLoading = false;
+      });
       return;
     }
 
@@ -276,10 +288,8 @@ class _DetailPageState extends State<DetailPage> {
     // 对着转圈等到目录请求超时。联网时直接返回，在线路径一次缓存都不查。
     unawaited(_resolveCachedCatalogue(generation));
 
-    // Detail and directory are independent. Short-drama IDs sometimes do
-    // not have a legacy book-detail record, but their episode list is still
-    // perfectly playable. Start both before awaiting either so the page waits
-    // for the slower request, not the sum of both request times.
+    // Detail and directory are independent; start both before awaiting either so
+    // the page waits for the slower request instead of their sum.
     final detailFuture = _capture(
       (widget.detailLoader ?? ApiClient.instance.detail)(_contentId, tab: _tab),
     );
@@ -291,72 +301,64 @@ class _DetailPageState extends State<DetailPage> {
     );
     // Reviews are cosmetic: they load alongside and never gate the page.
     final extrasFuture = _capture(_loadExtras(_contentId));
-    // Short-drama cast lives on a series endpoint the reading API does not
-    // expose, so it is fetched separately and only for video kinds.
-    final seriesFuture = _isVideo
-        ? _capture((widget.seriesLoader ?? _defaultSeries)(_contentId))
-        : null;
+    // 详情先到先上屏：简介、标签、作者不必陪着目录一起等。
     final detailResult = await detailFuture;
-    final directoryResult = await directoryFuture;
     if (!mounted || generation != _loadGeneration) return;
-
     final detail = detailResult.value;
-    var volumes = directoryResult.value ?? <List<Chapter>>[];
-
-    // A search result can represent a single episode rather than a series.
-    // Keep it playable even when the pseries directory endpoint rejects that
-    // ID; the video endpoint accepts the episode ID directly.
-    if (_isVideo && volumes.isEmpty && widget.item.episodeId != null) {
-      volumes = [
-        [
-          Chapter(
-            itemId: widget.item.episodeId!,
-            title: widget.item.title,
-            volumeName: '剧集',
-          ),
-        ],
-      ];
+    if (detail != null) {
+      setState(() {
+        _detail = detail;
+        _bookDetail = BookDetail.fromPayload(detail);
+        _loading = false;
+      });
     }
 
+    final directoryResult = await directoryFuture;
+    if (!mounted || generation != _loadGeneration) return;
+    final volumes = directoryResult.value ?? <List<Chapter>>[];
+
     if (volumes.isEmpty && directoryResult.error != null) {
-      // 联网取目录失败：先看本地有没有整本缓存。有就把「从缓存阅读」的入口
-      // 摆出来，而不是只给一个离线时永远不会成功的重试按钮。
+      // 联网取目录失败：先看本地有没有整本缓存。有缓存时仍保留详情与目录，
+      // 用户必须明确点章节或底部阅读按钮才进入正文。
       final cached = _isBook ? await _cachedCatalogue() : null;
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
+        _directoryLoading = false;
         _cachedBook = cached;
-        _error = userFacingError(directoryResult.error!);
+        if (cached != null) _allChapters = cached.chapters;
+        _error = cached == null
+            ? userFacingError(directoryResult.error!)
+            : null;
         _loading = false;
       });
+      unawaited(_refreshResume());
       return;
     }
+
+    final chapters = volumes.expand((volume) => volume).toList(growable: false);
     setState(() {
-      _detail = detail;
+      _directoryLoading = false;
       // The rich metadata rides on the same detail response the page already
       // fetches, so no extra request is needed for the masthead or stats row.
-      _bookDetail = detail == null ? null : BookDetail.fromPayload(detail);
-      _allChapters = volumes.expand((volume) => volume).toList(growable: false);
+      _detail = detail ?? _detail;
+      _bookDetail = _detail == null ? null : BookDetail.fromPayload(_detail!);
+      _allChapters = chapters;
       // A missing optional detail response should not hide a usable list.
-      _error = detail == null && detailResult.error != null && volumes.isEmpty
+      _error = detail == null && detailResult.error != null && chapters.isEmpty
           ? userFacingError(detailResult.error!)
           : null;
       _loading = false;
     });
+    if (_useSnapshots) {
+      _snapshots.write(_contentId, detail: _detail, chapters: chapters);
+    }
     unawaited(_refreshResume());
-    unawaited(_maybeAutoOpenReader());
     unawaited(_loadChapterPreviews(generation));
 
     final extras = await extrasFuture;
     if (!mounted || generation != _loadGeneration) return;
     if (extras.value case final DetailExtras loaded) {
       setState(() => _comments = loaded.comments);
-    }
-
-    if (seriesFuture == null) return;
-    final series = await seriesFuture;
-    if (!mounted || generation != _loadGeneration) return;
-    if (series.value case final SeriesDetail loaded) {
-      setState(() => _series = loaded);
     }
   }
 
@@ -465,18 +467,10 @@ class _DetailPageState extends State<DetailPage> {
         ApiClient.instance.chapterSummaries(_contentId, itemIds);
   }
 
-  /// Same offline rule as [_loadExtras]: an injected loader means the caller
-  /// drives its own data.
-  Future<SeriesDetail> _defaultSeries(String seriesId) {
-    if (widget.detailLoader != null || widget.directoryLoader != null) {
-      return Future.value(SeriesDetail.empty);
-    }
-    return ApiClient.instance.seriesDetail(seriesId);
-  }
-
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
+    final download = _downloadProgress;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value:
           (palette.dark
@@ -527,19 +521,43 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
           actions: [
-            ValueListenableBuilder<int>(
-              valueListenable: ShelfStore.instance.listenable,
-              builder: (context, _, _) => IconButton(
-                key: const Key('detail_shelf_button'),
-                tooltip: _inShelf ? '已在书架' : '加入书架',
-                onPressed: _loading || !_supported ? null : _toggleShelf,
+            // 整本下载：进度直接占用图标位置，再点一次停止。
+            if (_isBook)
+              IconButton(
+                key: const Key('detail_download_button'),
+                tooltip: download == null ? '下载全本' : '停止下载',
+                onPressed: _loading || !_supported || _allChapters.isEmpty
+                    ? null
+                    : _toggleDownload,
                 style: IconButton.styleFrom(
-                  foregroundColor: _inShelf ? HomePalette.accent : palette.ink,
+                  foregroundColor: palette.ink,
                   disabledForegroundColor: palette.muted,
                 ),
-                icon: Icon(
-                  _inShelf ? LucideIcons.bookmark_check : LucideIcons.bookmark_plus,
-                  size: 20,
+                icon: download == null
+                    ? const Icon(LucideIcons.download, size: 20)
+                    : SizedBox.square(
+                        dimension: 26,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: download.total == 0
+                                  ? 0
+                                  : download.completed / download.total,
+                              strokeWidth: 2,
+                              color: HomePalette.accent,
+                            ),
+                            Text(
+                              '${download.completed}/${download.total}',
+                              key: const Key('detail_download_progress'),
+                              style: const TextStyle(
+                                fontSize: 9,
+                                height: 1,
+                                fontWeight: FontWeight.w700,
+                                color: HomePalette.accent,
+                              ),
+                            ),
+                          ],
                 ),
               ),
             ),
@@ -586,12 +604,14 @@ class _DetailPageState extends State<DetailPage> {
                       child: !_supported
                           ? _stateCard(
                               icon: LucideIcons.file_question_mark,
-                              title: '暂不支持此内容类型',
-                              message: '可以返回继续发现其他故事。',
+                              title: '青茄阅读仅提供小说与听书',
+                              message: '请返回继续挑选小说或听书。',
                             )
-                          : _loading
+                          : _detail == null &&
+                                _allChapters.isEmpty &&
+                                _error == null
                           ? _loadingView(palette)
-                          : _error != null
+                          : _error != null && _allChapters.isEmpty
                           ? _stateCard(
                               icon: LucideIcons.wifi_off,
                               title: '暂时没能加载章节',
@@ -612,7 +632,9 @@ class _DetailPageState extends State<DetailPage> {
           ),
         ),
         bottomNavigationBar: _supported && _allChapters.isNotEmpty
-            ? DetailReadBar(
+            ? ValueListenableBuilder<int>(
+                valueListenable: ShelfStore.instance.listenable,
+                builder: (context, _, _) => DetailReadBar(
                 label: _readLabel,
                 icon: homeKindIcon(widget.item.kind),
                 opening: _opening,
@@ -621,8 +643,9 @@ class _DetailPageState extends State<DetailPage> {
                     : _allChapters[_resumeIndex!].title,
                 onRead: _openLastPosition,
                 onListen: _isBook ? _openListening : null,
-                onDownload: _isBook ? _toggleDownload : null,
-                download: _isBook ? _downloadProgress : null,
+                  onShelf: _toggleShelf,
+                  inShelf: _inShelf,
+                ),
               )
             : null,
       ),
@@ -670,10 +693,6 @@ class _DetailPageState extends State<DetailPage> {
         ],
         DetailStatsRow(stats: stats),
         const SizedBox(height: 20),
-        if (_series.cast.isNotEmpty) ...[
-          DetailCastRow(cast: _series.cast),
-          const SizedBox(height: 20),
-        ],
         DetailDescription(text: extractMediaDescription(_detail)),
         if (detail != null && detail.tags.isNotEmpty) ...[
           const SizedBox(height: 18),
@@ -704,24 +723,17 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  /// 加载态：和真实版式同构的骨架屏，而不是转圈。
+  ///
+  /// 首开要等一次上游往返，骨架条能让"正在铺开"这件事被看见，观感比
+  /// 空白 + 转圈短得多。离线时本地整本缓存就是唯一入口，所以按钮要留在
+  /// 骨架下方；它与错误卡片共用同一个 key，两种状态互斥不会同屏。
   Widget _loadingView(HomePalette palette) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 36),
-    child: Column(
-      children: [
-        const SizedBox.square(
-          dimension: 22,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: HomePalette.accent,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text('正在加载书籍与目录', style: TextStyle(color: palette.muted, fontSize: 13)),
-        // 离线时这条请求注定失败；本地有整本缓存就先把入口摆出来，不必让用户
-        // 对着转圈等到超时。与错误卡片共用同一个 key：两种状态互斥，不会同屏。
-        if (_cachedBook != null) ...[
-          const SizedBox(height: 16),
-          FilledButton.icon(
+    padding: const EdgeInsets.only(top: 18, bottom: 36),
+    child: DetailSkeleton(
+      footer: _cachedBook == null
+          ? null
+          : FilledButton.icon(
             key: const Key('detail_read_cached'),
             onPressed: _readCached,
             style: FilledButton.styleFrom(
@@ -732,8 +744,6 @@ class _DetailPageState extends State<DetailPage> {
             icon: const Icon(LucideIcons.book_open, size: 16),
             label: const Text('从缓存阅读'),
           ),
-        ],
-      ],
     ),
   );
 
@@ -810,6 +820,50 @@ class _DetailPageState extends State<DetailPage> {
   /// catalog still opens from the `查看目录` row above it.
   Widget _directoryPreview(HomePalette palette) {
     if (_allChapters.isEmpty) {
+      // 详情已经铺出来了，目录还在路上：给一行轻量提示，不拿整块卡片顶替。
+      if (_directoryLoading) {
+        return Column(
+          key: const Key('detail_directory_loading'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: HomePalette.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    '正在加载目录',
+                    style: TextStyle(color: palette.muted, fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ),
+            // 离线时目录请求会一直悬着，本地整本缓存就是唯一能读的入口。
+            if (_cachedBook != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: FilledButton.icon(
+                  key: const Key('detail_read_cached'),
+                  onPressed: _readCached,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HomePalette.accent,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(110, 48),
+                  ),
+                  icon: const Icon(LucideIcons.book_open, size: 16),
+                  label: const Text('从缓存阅读'),
+                ),
+              ),
+          ],
+        );
+      }
       return _stateCard(
         icon: LucideIcons.list,
         title: '暂无目录',
@@ -1005,21 +1059,14 @@ class _DetailPageState extends State<DetailPage> {
   Future<Map<String, dynamic>?> _readSavedRecord() async {
     final store = widget.readerStore ?? LibraryStore.instance;
     try {
-      final saved = switch (widget.item.kind) {
-        'video' || 'manju' => await PlayerHistory(store).load(_contentId),
-        'audio' => await AudioHistory(store).load(_contentId),
-        'manga' => await ReaderHistory(
-          scopedHistoryStore(store, 'manga'),
-        ).load(_contentId),
-        _ => await ReaderHistory(store).load(_contentId),
-      };
-      if (saved?['kind'] != null &&
-          saved?['kind'] != widget.item.kind &&
-          !(_isVideo && isVideoKind(saved!['kind'].toString()))) {
+      final saved = widget.item.kind == 'audio'
+          ? await AudioHistory(store).load(_contentId)
+          : await ReaderHistory(store).load(_contentId);
+      if (saved?['kind'] != null && saved?['kind'] != widget.item.kind) {
         return null;
       }
       // Legacy text-reading records sometimes encode the chapter ID as a number.
-      return !_isVideo && saved != null
+      return saved != null
           ? {
               ...saved,
               if (saved['chapterId'] != null)
@@ -1032,32 +1079,94 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  int? _savedIndex(Map<String, dynamic>? saved) => _isAudio
-      ? resumeAudioChapterIndex(saved, _allChapters)
-      : resumeEpisodeIndex(saved, _allChapters);
+  int? _savedIndex(Map<String, dynamic>? saved) {
+    if (_isAudio) return resumeAudioChapterIndex(saved, _allChapters);
+    final chapterId = saved?['chapterId']?.toString();
+    if (chapterId == null || chapterId.isEmpty) return null;
+    final index = _allChapters.indexWhere(
+      (chapter) => chapter.itemId == chapterId,
+    );
+    return index < 0 ? null : index;
+  }
 
   Future<void> _refreshResume() async {
     final generation = ++_historyGeneration;
     final saved = await _readSavedRecord();
     if (!mounted || generation != _historyGeneration) return;
     setState(() => _resumeIndex = _savedIndex(saved));
+    // 没有阅读记录时，点「开始阅读」进的是第一章，同样值得预热。
+    unawaited(_prewarmResumeChapter(_resumeIndex ?? 0));
   }
 
-  /// 「点击书籍直接进入阅读」：详情页加载出目录后，直接按上次进度进
-  /// 阅读器。目录为空（加载失败/无章节）时不触发，用户留在详情页看错误
-  /// 与重试；`_autoOpened` 保证同一详情页实例只自动进一次。
-  Future<void> _maybeAutoOpenReader() async {
-    if (!widget.autoOpenReader ||
-        _autoOpened ||
-        !(_isBook || _isManga) ||
-        _allChapters.isEmpty) {
+  /// 进详情页时顺手把「继续阅读」那一章的正文与插图预热好。
+  ///
+  /// 阅读页第一次打开某章要联网取正文（真机实测约 0.8 秒）。用户进详情页
+  /// 几乎一定会点继续阅读，于是趁他看简介这会儿先把正文取回来写进章节缓存，
+  /// 点进去就是本地命中；图片也在同一段空闲里提前下好，不再停在占位图。
+  ///
+  /// 只在真实联网路径生效，注入 loader 的离线调用方一次都不预热。
+  Future<void> _prewarmResumeChapter(int? index) async {
+    if (!_useSnapshots || !_isBook || index == null || index < 0) return;
+    if (index >= _allChapters.length) return;
+    if (_prewarming) return;
+    final cache = _chapterCacheStore;
+    if (cache == null) return;
+    _prewarming = true;
+    final chapter = _allChapters[index];
+    ChapterContent? content;
+    try {
+      final text = await cache.read(
+        bookId: _contentId,
+        chapterId: chapter.itemId,
+      );
+      if (text != null && text.trim().isNotEmpty) {
+        content = ChapterContent.fromCacheText(text);
+      }
+    } catch (_) {
+      content = null;
+    }
+    if (!mounted) return;
+    if (content == null || content.isEmpty) {
+      // 本地还没有这一章：趁详情页停留时取一次并落缓存。
+      try {
+        content = await ApiClient.instance.chapterContent(
+          chapter.itemId,
+          allowEmpty: true,
+        );
+      } catch (_) {
       return;
     }
-    _autoOpened = true;
-    await _openLastPosition(replace: true);
+      if (content.isEmpty || !mounted) return;
+      try {
+        await cache.write(
+          bookId: _contentId,
+          chapterId: chapter.itemId,
+          title: chapter.title,
+          text: content.toCacheText(),
+        );
+      } catch (_) {
+        // 落盘失败不影响预热图片，也不影响用户正常进入正文。
+      }
+    }
+    if (!mounted || !content.hasImages) return;
+    var warmed = 0;
+    for (final block in content.blocks) {
+      if (block is! ChapterImage) continue;
+      if (warmed >= 4 || !mounted) break;
+      warmed++;
+      try {
+        await precacheImage(
+          ReaderImageSizing.provider(block),
+          context,
+          onError: (_, _) {},
+        );
+      } catch (_) {
+        // 预热失败不影响正文；插图组件自己还会再试一次。
+      }
+    }
   }
 
-  Future<void> _openLastPosition({bool replace = false}) async {
+  Future<void> _openLastPosition() async {
     if (_opening || _allChapters.isEmpty) return;
     final generation = ++_openGeneration;
     setState(() => _opening = true);
@@ -1076,7 +1185,7 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
       final index = restored ?? 0;
-      _openChapter(_allChapters[index], replace: replace);
+      _openChapter(_allChapters[index]);
     } finally {
       if (mounted && generation == _openGeneration) {
         setState(() => _opening = false);
@@ -1084,28 +1193,15 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  Future<void> _openChapter(Chapter chapter, {bool replace = false}) async {
+  Future<void> _openChapter(Chapter chapter) async {
     // An explicit chapter selection supersedes any pending resume lookup.
     ++_openGeneration;
     ++_historyGeneration;
     if (_opening) setState(() => _opening = false);
     final index = _allChapters.indexWhere((c) => c.itemId == chapter.itemId);
     final startIndex = index < 0 ? 0 : index;
-    final page = switch (widget.item.kind) {
-      'video' || 'manju' => PlayerPage(
-        bookId: _contentId,
-        kind: widget.item.kind,
-        title: widget.item.title,
-        cover: widget.item.cover,
-        historyStore: widget.readerStore,
-        eps: _allChapters,
-        startIndex: startIndex,
-        // 搜索→详情页→播放与短剧页同源（kind 已是 video/manju），不传
-        // shortSeries 会让长按面板/弹幕/剧评/已看标记/清晰度整组失效
-        // （它们都挂在 PlayerPage.shortSeries 门上）。
-        shortSeries: true,
-      ),
-      'audio' => AudioPage(
+    final Widget page = widget.item.kind == 'audio'
+        ? AudioPage(
         bookId: _contentId,
         title: widget.item.title,
         cover: widget.item.cover,
@@ -1113,16 +1209,8 @@ class _DetailPageState extends State<DetailPage> {
         chapters: _allChapters,
         startIndex: startIndex,
         resumeSession: false,
-      ),
-      'manga' => ComicReaderPage(
-        bookId: _contentId,
-        title: widget.item.title,
-        cover: widget.item.cover,
-        readerStore: widget.readerStore,
-        chapters: _allChapters,
-        startIndex: startIndex,
-      ),
-      _ => ReaderPage(
+          )
+        : ReaderPage(
         ageRating: ContentRating.ofItem(widget.item),
         bookId: _contentId,
         title: widget.item.title,
@@ -1130,27 +1218,16 @@ class _DetailPageState extends State<DetailPage> {
         readerStore: widget.readerStore,
         chapters: _allChapters,
         startIndex: startIndex,
-        // 详情页注入的缓存（离线下载/测试用内存缓存）即阅读器的缓存；
-        // 生产调用方不传时为 null，阅读器沿用默认的 ChapterCacheStore。
         chapterCache: widget.chapterCache,
-      ),
-    };
-    await _push(page, replace: replace);
+          );
+    await _push(page);
   }
 
-  Future<void> _push(Widget page, {bool replace = false}) async {
-    if (replace) {
-      // 直接进入阅读：顶掉详情页，阅读器返回时回到点书的页面，而不是详情页。
-      await Navigator.pushReplacement(
-        context,
-        MaterialPageRoute<void>(builder: (_) => page),
-      );
-    } else {
+  Future<void> _push(Widget page) async {
       await Navigator.push(
         context,
         MaterialPageRoute<void>(builder: (_) => page),
       );
-    }
     if (mounted) unawaited(_refreshResume());
   }
 
@@ -1229,23 +1306,11 @@ class _ChapterExcerpt extends StatelessWidget {
   }
 }
 
-/// 点书卡片的统一入口：默认进详情页；用户开了设置 → 阅读 →「点击书籍
-/// 直接进入阅读」时，详情页加载完目录后自动按上次进度进阅读器（小说/漫画），
-/// 返回时回到点书的页面。听书/短剧与加载失败时仍停留在详情页。
-///
-/// 调用方不要再直接 `Navigator.push(DetailPage(...))`，否则新开关对那
-/// 个入口不生效。
+/// 点书卡片的统一入口：始终先进入详情与目录页，只有用户明确点击章节或
+/// 「开始阅读 / 继续阅读」时才进入正文。
 Future<void> openBookDetail(BuildContext context, MediaItem item) async {
-  await BookOpenPreferences.instance.load();
-  if (!context.mounted) return;
   await Navigator.push(
     context,
-    MaterialPageRoute<void>(
-      builder: (_) => DetailPage(
-        item: item,
-        autoOpenReader:
-            BookOpenPreferences.instance.directReader.value,
-      ),
-    ),
+    MaterialPageRoute<void>(builder: (_) => DetailPage(item: item)),
   );
 }

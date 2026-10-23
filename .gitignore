@@ -84,3 +84,18 @@ _sessionzip/
 .omx/
 .omx-state-locks/
 .omx-state-locks.identity.json
+
+# Local adb/debug scratch artifacts (not source)
+/$null
+/candidates.txt
+/content-*.json
+/detail-oldman.json
+/dir-oldman.json
+/huozhe_candidates.txt
+/inspect_huozhe.txt
+/probe_books.txt
+/screen-current.png
+/search-book.json
+/search-laorenyuhai.json
+/window.xml
+/window-current.xml

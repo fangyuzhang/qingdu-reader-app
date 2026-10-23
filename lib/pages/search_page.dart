@@ -352,7 +352,7 @@ class _SearchPageState extends State<SearchPage> {
           final kind = _categories[index].kind;
           if (item != null &&
               (kind == null || kind == item.kind) &&
-              !_kHiddenKinds.contains(item.kind)) {
+              _supportedKinds.contains(item.kind)) {
             feed.items.add(item);
           }
           feed.initialized = true;
@@ -416,7 +416,7 @@ class _SearchPageState extends State<SearchPage> {
         for (final item in page.items) {
           if (item.id.isEmpty ||
               (category.kind != null && item.kind != category.kind) ||
-              _kHiddenKinds.contains(item.kind)) {
+              !_supportedKinds.contains(item.kind)) {
             continue;
           }
           if (feed.seen.add('${item.kind}:${item.id}')) feed.items.add(item);
@@ -1019,13 +1019,8 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
-// 【青茄重构·删除】原含 短剧(video)/漫剧(manju)/漫画(manga) 三个分类；
-// 产品定位删除后仅保留 综合/小说/听书。枚举值移除不影响上游 API 调用
-// （ApiClient.searchTabs 仍支持全部 tabType，供二期恢复）。
-/// 【青茄重构·删除】产品已删除 短剧/漫剧/漫画 三类内容，
-/// 搜索结果（含「综合」与 ID 查询）不再展示这三类条目。
-/// 底层 ApiClient 仍支持全部 tabType，二期恢复分类时移除本集合即可。
-const Set<String> _kHiddenKinds = {'video', 'manju', 'manga'};
+/// Content kinds offered by Qingqie Reading.
+const Set<String> _supportedKinds = {'book', 'audio'};
 
 enum _SearchCategory {
   general('综合', 1),

@@ -21,7 +21,7 @@ import androidx.core.app.ServiceCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 
 /**
- * 听书 / 听视频（listen mode）的前台保活服务：
+ * 听书（listen mode）的前台保活服务：
  * 1. 提高进程优先级，防 MIUI / HyperOS / ColorOS 等厂商系统冻结后台进程导致音频中断。
  * 2. 常驻媒体通知卡片：展示当前书名/剧名与章节名，提供「上一章/集」、「播放/暂停」、
  *    「下一章/集」、「关闭」控制。

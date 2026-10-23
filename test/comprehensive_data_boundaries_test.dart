@@ -8,11 +8,7 @@ import 'package:fqapp/main.dart' as app;
 import 'package:fqapp/services/app_theme.dart';
 import 'package:fqapp/services/chapter_text_formatter.dart';
 import 'package:fqapp/services/library_store.dart';
-import 'package:fqapp/services/player_style_config.dart';
-import 'package:fqapp/services/digg_store.dart';
-import 'package:fqapp/services/drama_download_store.dart';
 import 'package:fqapp/services/shelf_store.dart';
-import 'package:fqapp/services/swipe_guide_store.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
@@ -51,25 +47,8 @@ void main() {
           // that openBox off the widget test's fake-async file I/O path, which
           // would never complete.
           await ShelfStore.instance.init();
-          // 同理，短剧 feed 的 点赞 box 也在 bootstrap 里开箱。
-          await DiggStore.instance.init();
-          // 「上滑查看更多视频」引导同样在 bootstrap 里开箱；这里预置「已显示」，
-          // 否则引导的循环 Lottie 动画会让下面的 pumpAndSettle 永远不 settle。
-          await SwipeGuideStore.instance.init();
-          await SwipeGuideStore.instance.markShown();
-          // 首页 feed 的冷启动缓存 box 与榜单缓存 box 也在 bootstrap 里开箱。
-          await Hive.openBox<dynamic>('home_feed_cache_v1');
-          await Hive.openBox<dynamic>('rank_cache_v1');
           // 已看集 box 也在 LibraryStore.init 里开箱（F07），同样要预开。
           await Hive.openBox<dynamic>('watched_episodes');
-          // 短剧离线缓存的记录箱随 bootstrap 预热（F08），同样要预开。
-          await Hive.openBox<dynamic>('drama_download_v1');
-          // 预热同时跑完 P1-4 的 keyHex 迁移：首次开盒会写迁移 marker，
-          // 写盘 I/O 同样不能落在 widget 测试的 fake-async 路径上。
-          await HiveDramaDownloadStore.instance.warmUp();
-          // 官方播放页开关在 bootstrap 里从 config.json 读取；提前读好，
-          // 避免 bundle 加载落在 widget 测试的 fake-async 路径上。
-          await PlayerStyleConfig.load();
           await history.put('kept-book', record);
         });
         const channel = MethodChannel('plugins.flutter.io/path_provider');

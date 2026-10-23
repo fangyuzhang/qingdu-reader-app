@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,19 +16,11 @@ import 'services/app_log.dart';
 import 'services/app_theme.dart';
 import 'services/audio_preferences.dart';
 import 'services/backend_service.dart';
-import 'services/digg_store.dart';
-import 'services/drama_download_store.dart';
-import 'services/drama_downloader.dart';
-import 'services/connectivity_status.dart';
-import 'services/home_feed_cache.dart';
+import 'services/detail_snapshot_cache.dart';
 import 'services/library_store.dart';
-import 'services/rank_cache.dart';
-import 'services/player_style_config.dart';
-import 'services/short_series_font_scale.dart';
-import 'services/playlet_share.dart';
+import 'services/share_service.dart';
 import 'services/poster_cache.dart';
 import 'services/shelf_store.dart';
-import 'services/swipe_guide_store.dart';
 import 'widgets/lazy_indexed_stack.dart';
 import 'widgets/home/home_design.dart';
 
@@ -40,11 +31,20 @@ void main() {
   // 且子 zone 的未捕获异常处理对绑定回调不生效。
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+    // 【青茄·竖屏】全应用只接受竖屏：手机横过来时界面保持竖向，不再整体
+    // 转成横向排版（阅读、听书、笔记都在竖屏完成）。清单里的
+    // android:screenOrientation="portrait" 在系统层兜同一件事，避免
+    // 启动瞬间先转一次再被 Flutter 拉回来。
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]),
+    );
     // 应用内日志：接管 debugPrint 与 FlutterError.onError，未处理异步异常由
     // runZonedGuarded 捕获；文件持久化异步开启，失败只退回内存模式。
     AppLog.instance.install();
     unawaited(AppLog.instance.startPersistence());
-    // 短剧分享的「系统分享」走 Android 的 Intent.ACTION_SEND
+    // 通用系统分享走 Android 的 Intent.ACTION_SEND
     //（官方同一条路径）。桥不可用时 PlayletShare 自动降级为复制链接，
     // 不会把失败说成成功。
     // 插件回 false 表示没能调起选择器（没有可分享的应用），必须原样返回：
@@ -76,7 +76,7 @@ Future<void> _initializeLocalData() async {
   // 首页真正依赖的只有三个：书架历史、书架收藏、偏好（含主题），
   // 三者互相独立，并行打开；其余可选数据挪到 [_initializeOptionalData]，
   // 在首帧之后继续，不再串行拖住进入首页。
-  final spFuture = SharedPreferences.getInstance();
+  final spFuture = _loadPreferencesSafely();
   await Future.wait([LibraryStore.instance.init(), ShelfStore.instance.init()]);
   final sp = await spFuture;
   // The 加入书架 collection is optional data: a failure here must not block
@@ -85,64 +85,35 @@ Future<void> _initializeLocalData() async {
   _initializeOptionalData();
   // Note: Optional preference schemas cannot block local data startup; see
   // .agents/notes/implemented/bug-fix/2026-09-17-persistent-data-and-web-cancellation.md.
-  final savedTheme = sp.get(themeModeKey);
-  themeModeNotifier.value = themeModeFromName(
-    savedTheme is String ? savedTheme : null,
-  );
-  // 墨水屏模式与深色模式同为可选偏好：读不到退化为关闭，不拖住启动。
-  einkModeNotifier.value = sp.getBool(einkModeKey) ?? false;
+  if (sp != null) {
+    final savedTheme = sp.get(themeModeKey);
+    themeModeNotifier.value = themeModeFromName(
+      savedTheme is String ? savedTheme : null,
+    );
+    // 墨水屏模式与深色模式同为可选偏好：读不到退化为关闭，不拖住启动。
+    einkModeNotifier.value = sp.getBool(einkModeKey) ?? false;
+  }
 }
 
-/// 不阻塞进入首页的可选本地数据与预热。
-///
-/// 这些能力都自带「不可用退化」：读不到就当没有（点赞/一次性弹窗/冷启动
-/// 缓存/榜单缓存），或使用方只在 box 就绪时才查（离线下载）。放在首帧
-/// 之后继续跑，启动曲线从「串行打开全部箱子」变成「首页先出、后台补齐」。
+/// Preferences are useful, but a platform-plugin failure must not make the
+/// whole local library unreadable. The Hive-backed bookshelf and history can
+/// still open, so startup falls back to product defaults and records the real
+/// error for the in-app log page.
+Future<SharedPreferences?> _loadPreferencesSafely() async {
+  try {
+    return await SharedPreferences.getInstance();
+  } catch (error, stack) {
+    AppLog.w('bootstrap', '偏好读取失败，继续使用默认偏好', error: error, stack: stack);
+    return null;
+  }
+}
+
+/// Local work that can finish after the first frame without blocking startup.
 Future<void> _initializeOptionalData() async {
-  try {
-    await DiggStore.instance.init();
-  } catch (_) {
-    // DiggStore 自己把「不可用」当成「没有点赞」处理（见 _openBox）。
-  }
-  try {
-    await SwipeGuideStore.instance.init();
-  } catch (_) {
-    // SwipeGuideStore 自己把「不可用」当成「未显示」处理。
-  }
-  try {
-    HomeFeedCache.hiveReady = true;
-    await HomeFeedCache.instance.warmUp();
-  } catch (_) {
-    // HomeFeedCache 自己把「不可用」当成「没有缓存」处理。
-  }
-  try {
-    RankCache.hiveReady = true;
-    await RankCache.instance.warmUp();
-  } catch (_) {
-    // RankCache 自己把「不可用」当成「没有缓存」处理。
-  }
-  // 官方播放页开关与字号档：SharedPreferences 级别的读取，成本可忽略，
-  // 保持 await 确保播放器随时拿到配置。
-  await PlayerStyleConfig.load();
-  await ShortSeriesFontScale.load();
-  // 听书后台播放开关：异步读取，失败退化为默认开启。
   unawaited(AudioPreferences.instance.load());
-  // 离线缓存的记录箱启动即打开：播放器的离线命中只在 box 就绪时才查。
-  try {
-    await HiveDramaDownloadStore.instance.warmUp();
-  } catch (_) {}
-  // 离线缓存的网络门：断网/计费链路时自动暂停下载队列。
-  try {
-    Connectivity().onConnectivityChanged.listen((results) {
-      final view = foldConnectivity(results);
-      DramaDownloader.instance.updateConnectivity(
-        online: view.online,
-        metered: view.metered,
-      );
-    });
-  } catch (_) {}
-  // 海报缓存的字节预算清扫：超额时删最旧的图。
   unawaited(PosterCache.instance.enforceBudget());
+  // 详情页快照盒：首帧之后再打开，之后每次进详情都是同步命中。
+  unawaited(DetailSnapshotCache.instance.load());
 }
 
 class FqApp extends StatefulWidget {
@@ -167,11 +138,12 @@ class _FqAppState extends State<FqApp> {
             final effectiveMode = eink ? ThemeMode.light : mode;
             return MaterialApp(
               navigatorKey: _navigatorKey,
+              navigatorObservers: [AudioRouteWatcher.instance],
               builder: (context, child) => AudioPlaybackScope(
                 navigatorKey: _navigatorKey,
                 child: child ?? const SizedBox.shrink(),
               ),
-              title: 'fqapp',
+              title: '青茄阅读',
               debugShowCheckedModeBanner: false,
               theme: _theme(Brightness.light, eink: eink),
               darkTheme: _theme(Brightness.dark, eink: eink),
@@ -221,7 +193,8 @@ class _AppBootstrapState extends State<AppBootstrap> {
     try {
       await (widget.initializer ?? _initializeLocalData)();
       if (mounted) setState(() => _ready = true);
-    } catch (_) {
+    } catch (error, stack) {
+      AppLog.e('bootstrap', '本地数据初始化失败', error: error, stack: stack);
       if (mounted) setState(() => _failed = true);
     } finally {
       _initializing = false;
@@ -250,7 +223,10 @@ class _AppBootstrapState extends State<AppBootstrap> {
                 Text(_failed ? '无法读取本地数据' : '正在读取本地数据…'),
                 if (_failed) ...[
                   const SizedBox(height: 8),
-                  const Text('请检查设备可用空间后重试。', textAlign: TextAlign.center),
+                  const Text(
+                    '本地数据未被清除，请重试；若仍失败，请反馈应用日志。',
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 16),
                   OutlinedButton(
                     onPressed: _initialize,
@@ -408,7 +384,7 @@ class _RootShellState extends State<RootShell> {
           children: [
             const HomePage(),
             // 【青茄重构·删除】原第二个页面为 DramaPage（短剧 feed），
-            // 产品定位删除短剧后主导航为 首页/书架/我的 三 tab。
+            // 主导航为 首页/书架/笔记/我的 四 tab。
             // 空书架上的「去书城找书」切回首页 tab。
             LibraryPage(onBrowse: () => setState(() => _index = 0)),
             const NotesPage(),

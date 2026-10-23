@@ -9,21 +9,10 @@ import '../../models/media_item.dart';
 import '../cover_tag_chip.dart';
 import 'home_design.dart';
 
-String homeKindLabel(String kind) => switch (kind) {
-  'video' => '短剧',
-  'manju' => '漫剧',
-  'manga' => '漫画',
-  'audio' => '听书',
-  _ => '小说',
-};
+String homeKindLabel(String kind) => kind == 'audio' ? '听书' : '小说';
 
-IconData homeKindIcon(String kind) => switch (kind) {
-  'video' => LucideIcons.clapperboard,
-  'manju' => LucideIcons.film,
-  'manga' => LucideIcons.image,
-  'audio' => LucideIcons.headphones,
-  _ => LucideIcons.book_open,
-};
+IconData homeKindIcon(String kind) =>
+    kind == 'audio' ? LucideIcons.headphones : LucideIcons.book_open;
 
 /// Fixed cover proportions, with a measured text allowance for large fonts.
 int _homeColumns(BuildContext context, double width) {
@@ -113,13 +102,9 @@ class _CoverArtwork extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final colors = switch (kind) {
-      'video' => [const Color(0xFF734740), const Color(0xFF242428)],
-      'manju' => [const Color(0xFF8B557E), const Color(0xFF35283D)],
-      'manga' => [const Color(0xFF6F6887), const Color(0xFF343349)],
-      'audio' => [const Color(0xFF426C78), const Color(0xFF233B42)],
-      _ => [const Color(0xFF6A7964), const Color(0xFF293C35)],
-    };
+    final colors = kind == 'audio'
+        ? [const Color(0xFF426C78), const Color(0xFF233B42)]
+        : [const Color(0xFF2FA98C), const Color(0xFF1F5A4D)];
     canvas.drawRect(
       Offset.zero & size,
       Paint()
@@ -345,11 +330,7 @@ class HomeSectionHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(
-                LucideIcons.compass,
-                size: 19,
-                color: palette.muted,
-              ),
+              Icon(LucideIcons.compass, size: 19, color: palette.muted),
             ],
           ),
           const SizedBox(height: 6),

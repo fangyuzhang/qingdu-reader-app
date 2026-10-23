@@ -333,9 +333,9 @@ class _AudioPlaybackController extends ChangeNotifier
       case 'playPause':
         unawaited(_togglePlayback());
       case 'prev':
-        if (_index > 0) unawaited(_openChapter(_index - 1));
+        unawaited(_switchChapter(-1));
       case 'next':
-        if (_index < _chapters.length - 1) unawaited(_openChapter(_index + 1));
+        unawaited(_switchChapter(1));
       case 'stop':
         if (onStop case final stop?) {
           stop();
@@ -393,6 +393,8 @@ class _AudioPlaybackController extends ChangeNotifier
     bool autoplay = true,
     bool? completed,
     bool persistCurrent = true,
+    int skipEmptyDirection = 0,
+    int skipEmptyRemaining = 12,
   }) async {
     if (_closed || index < 0 || index >= _chapters.length) return;
     final generation = ++_generation;
@@ -506,12 +508,56 @@ class _AudioPlaybackController extends ChangeNotifier
       });
       _syncListenClock();
     } catch (error) {
+      // 诊断用：只记异常类型与上游文案（不含 URL / 密钥 / 响应体），
+      // 设置 → 服务 → 日志即可看到具体是哪一步失败。
+      AppLog.e(
+        'audio',
+        '第 ${index + 1} 章音源失败 ${error.runtimeType}: $error',
+        error: error,
+      );
+      // 版权页、前折页、书名页这类只有图片的前置章节在上游没有音频，翻章
+      // 撞上它们时不该停在“本章暂无音频内容”的死页上：沿同一个方向继续找
+      // 下一章真的有音源的正文。付费锁章不跳过——那是有意拦截，必须让用户
+      // 看到明确文案。
+      final nextSkip = index + skipEmptyDirection;
+      if (_current(generation) &&
+          skipEmptyDirection != 0 &&
+          skipEmptyRemaining > 0 &&
+          _isNoAudioError(error) &&
+          nextSkip >= 0 &&
+          nextSkip < _chapters.length) {
+        await candidate?.dispose();
+        if (!_current(generation)) return;
+        return _openChapter(
+          nextSkip,
+          autoplay: autoplay,
+          skipEmptyDirection: skipEmptyDirection,
+          skipEmptyRemaining: skipEmptyRemaining - 1,
+          persistCurrent: false,
+        );
+      }
       if (_current(generation)) {
         _fail(error, generation);
       } else {
         await candidate?.dispose();
       }
     }
+  }
+
+  /// 用户点「上一章 / 下一章」时按方向翻章，自动跨过没有音源的前置章节。
+  Future<void> _switchChapter(int direction) async {
+    if (_closed || direction == 0) return;
+    final target = _index + direction;
+    if (target < 0 || target >= _chapters.length) return;
+    await _openChapter(target, skipEmptyDirection: direction);
+  }
+
+  /// 上游“这一章根本没有音源”的确定结果（不是付费锁，也不是网络抖动）。
+  static bool _isNoAudioError(Object error) {
+    final text = error.toString();
+    if (text.contains('LOCK')) return false;
+    return text.contains('未获取到音频地址') ||
+        text.contains('该章节暂时无法播放');
   }
 
   /// Fetches one chapter's audio source.
@@ -550,22 +596,48 @@ class _AudioPlaybackController extends ChangeNotifier
       if (toneId != '0' ||
           !error.message.contains('NO_THIS_TONE') ||
           !_current(_generation)) {
-        rethrow;
+        final fallback = await _loadLegacySource(itemId, toneId);
+        if (fallback == null) rethrow;
+        result = fallback;
+      } else {
+        final selectable = _firstSelectableTone();
+        if (selectable == null) rethrow;
+        final tone = selectable;
+        result = await retryTransient(
+          () => ApiClient.instance
+              .audioSource(itemId, bookId: _bookId, toneId: tone)
+              .timeout(const Duration(seconds: 30)),
+        );
       }
-      final fallback = _firstSelectableTone();
+    } on FormatException catch (error) {
+      // "未获取到音频地址" means playinfo simply had no stream for this item,
+      // which the audiobook player may still hold.
+      if (!error.message.contains('未获取到音频地址')) rethrow;
+      final fallback = await _loadLegacySource(itemId, toneId);
       if (fallback == null) rethrow;
-      final tone = fallback;
-      result = await retryTransient(
-        () => ApiClient.instance
-            .audioSource(itemId, bookId: _bookId, toneId: tone)
-            .timeout(const Duration(seconds: 30)),
-      );
+      result = fallback;
     }
     _audioSourceCache[cacheKey] = result;
     while (_audioSourceCache.length > 5) {
       _audioSourceCache.remove(_audioSourceCache.keys.first);
     }
     return result;
+  }
+
+  /// Asks the audiobook player (legacy mget bridge) for a stream.
+  ///
+  /// Only called when the reading-edition playinfo endpoint refuses a chapter
+  /// (locked chapters answer `QUERY_CHAPTER_LOCK_ERROR`, front-matter items
+  /// have no playinfo stream at all). Failures return null so the original
+  /// playinfo error still reaches the UI.
+  Future<AudioSource?> _loadLegacySource(String itemId, String toneId) async {
+    try {
+      return await ApiClient.instance
+          .audioPlaySource(itemId, bookId: _bookId, toneId: toneId)
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      return null;
+    }
   }
 
   /// First non-default voice the page knows, for books without a default one.
@@ -635,16 +707,19 @@ class _AudioPlaybackController extends ChangeNotifier
   void _publishListeningSession({bool playing = true}) {
     if (_index < 0 || _index >= _chapters.length) return;
     final chapter = _chapters[_index];
+    final position = _boundedPosition(
+      _player?.position ?? _position.value,
+      _duration,
+    );
     ListeningSession.instance.update(
       bookId: _bookId,
       chapterId: chapter.itemId,
       chapterTitle: chapter.title,
-      position: _boundedPosition(
-        _player?.position ?? _position.value,
-        _duration,
-      ),
+      position: position,
       duration: _duration,
       playing: playing && !_completed,
+      // 有声书没有字符坐标，用字幕轨里正在念的那一句让阅读页定位高亮。
+      narrationText: _subtitles.cueAt(position)?.text,
     );
   }
 
@@ -714,7 +789,7 @@ class _AudioPlaybackController extends ChangeNotifier
         _syncForeground();
         unawaited(_persistProgress());
         if (shouldAdvance && _index + 1 < _chapters.length) {
-          unawaited(_openChapter(_index + 1));
+          unawaited(_switchChapter(1));
         } else {
           unawaited(_pause(player, generation));
         }
@@ -818,11 +893,22 @@ class _AudioPlaybackController extends ChangeNotifier
       _loading = false;
       _wantPlay = false;
       // Signed URLs and backend response bodies must not appear in the UI.
-      _error = error is TimeoutException
-          ? '加载超时，请检查网络后重试。'
-          : '音频暂时无法播放，请重试或切换其他章节。';
+      _error = _audioFailureText(error);
     });
     _publishMoreState();
+  }
+
+  /// Turns a source failure into a message that tells the user what actually
+  /// happened: a locked chapter and a chapter that ships no audio at all are
+  /// both permanent, and "请重试" is misleading for either.
+  static String _audioFailureText(Object error) {
+    if (error is TimeoutException) return '加载超时，请检查网络后重试。';
+    final text = error.toString();
+    if (text.contains('LOCK')) return '本章为付费内容，暂不可听。';
+    if (text.contains('未获取到音频地址') || text.contains('该章节暂时无法播放')) {
+      return '本章暂无音频内容。';
+    }
+    return '音频暂时无法播放，请重试或切换其他章节。';
   }
 
   Future<void> _play(NativePlayer player, int generation) async {
@@ -939,6 +1025,79 @@ class _AudioPlaybackController extends ChangeNotifier
     if (_narratorTones.any((tone) => tone.id == id)) return false;
     if (_extras.tones.offlineTones.any((tone) => tone.id == id)) return false;
     return true;
+  }
+
+  /// 真人讲书一栏：每个 narrators 条目其实是另一本书的录音版本。
+  List<VoiceOption> _narratorVoiceOptions() => [
+    for (final tone in _uniqueTones(_extras.tones.narratorTones))
+      VoiceOption(
+        id: tone.id,
+        title: tone.title,
+        description: tone.description,
+        badge: tone.badge,
+      ),
+  ];
+
+  /// 智能朗读一栏：只列 playinfo 真的能播的音色。
+  ///
+  /// `tts_tones` 列表本身就是可选集合：每个 id 都能单独出流（对 playinfo
+  /// 实测过）。另外三类来源绝不能进面板：合成出来的 `0/默认音色`、
+  /// 只能走离线下载的 `offline_tts_tones`、以及是 abook_id 的真人讲书。
+  List<VoiceOption> _onlineVoiceOptions() {
+    final ids = <String>{};
+    final options = <VoiceOption>[
+      for (final tone in _uniqueTones(_ttsTones))
+        if (_selectableTone(tone.id) && ids.add(tone.id))
+          VoiceOption(
+            id: tone.id,
+            title: tone.title,
+            description: tone.description,
+            badge: tone.badge,
+            isMultiTone: tone.isMultiTone,
+          ),
+    ];
+    if (options.isNotEmpty) return options;
+    for (final voice in _voices) {
+      if (!_selectableTone(voice.id) || !ids.add(voice.id)) continue;
+      options.add(VoiceOption(id: voice.id, title: voice.label));
+    }
+    return options;
+  }
+
+  /// 选中一个音色：同书就地换音轨；智能朗读属于原著目录时换到原著版本。
+  /// 换版本本身由 [_switchBookVersion] 负责释放旧播放器并重建。
+  Future<void> _chooseTone(String toneId) async {
+    if (_closed || _switchingVersion) return;
+    for (final narrator in _narratorTones) {
+      if (narrator.id != toneId) continue;
+      if (narrator.id == _bookId) return;
+      await _switchBookVersion(
+        narrator.id,
+        title: narrator.title,
+        cover: _cover,
+        toneId: '0',
+      );
+      return;
+    }
+    if (!_selectableTone(toneId)) return;
+    final novel = _extras.tones.relatedNovel;
+    if (_ttsBookId != _bookId && novel != null) {
+      await _switchBookVersion(
+        novel.id,
+        title: novel.title.isEmpty ? _title : novel.title,
+        cover: novel.cover.isEmpty ? _cover : novel.cover,
+        toneId: toneId,
+      );
+      return;
+    }
+    if (toneId == _toneId) return;
+    await _openChapter(
+      _index,
+      position: _player?.position ?? _position.value,
+      toneId: toneId,
+      autoplay: _wantPlay,
+      completed: _completed,
+    );
   }
 
   /// TTS plays on the ebook's chapter IDs, even when the panel was opened
@@ -1092,7 +1251,10 @@ class _AudioPlaybackController extends ChangeNotifier
     required String cover,
     required String toneId,
   }) async {
-    if (_closed || _switchingVersion || targetId.isEmpty || targetId == _bookId) {
+    if (_closed ||
+        _switchingVersion ||
+        targetId.isEmpty ||
+        targetId == _bookId) {
       return;
     }
     var generation = _generation;

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/reader_page.dart';
+import 'package:fqapp/services/app_theme.dart';
 import 'package:fqapp/services/reader_device.dart';
 import 'package:fqapp/services/reader_preferences.dart';
 
@@ -17,6 +18,9 @@ import 'support/fakes.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
+    // 全局深浅色是进程级单例：每个用例都从「跟随系统」重新开始，
+    // 免得上一条用例切换过的夜间主题漏到下一条。
+    themeModeNotifier.value = ThemeMode.system;
     SharedPreferences.setMockInitialValues({
       'reader_page_mode': 'scroll',
       'reader_info_mode': 'detailed',
@@ -52,6 +56,58 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets('opening the menu at chapter start lifts the text once and '
+      'never shifts it again while scrolling', (tester) async {
+    await _size(tester, const Size(390, 800));
+    await tester.pumpWidget(_app(_reader(store: MemoryReaderStore())));
+    await tester.pumpAndSettle();
+    final controller = _controller(tester);
+    expect(controller.offset, 0);
+    final paragraph = _firstVisibleParagraph(tester);
+    final restingTop = tester.getRect(find.byKey(paragraph)).top;
+
+    // 章首开工具栏：正文整体下移，且首行要落在工具栏下沿以下。
+    await _openMenu(tester);
+    final toolbarBottom = tester
+        .getRect(find.byKey(const ValueKey('reader-toolbar')))
+        .bottom;
+    final liftedTop = tester.getRect(find.byKey(paragraph)).top;
+    expect(liftedTop, greaterThanOrEqualTo(toolbarBottom));
+    expect(liftedTop, greaterThan(restingTop));
+
+    // 让位是锁存的：滚起来以后不会再掉回去。
+    controller.jumpTo(120);
+    await tester.pumpAndSettle();
+    expect(controller.offset, 120);
+    final scrolledTop = tester.getRect(find.byKey(paragraph)).top;
+    expect(scrolledTop - liftedTop, closeTo(-120, 0.5));
+
+    // 中途关工具栏：滚动偏移抵消让位，正文视觉位置分毫不动。
+    await _openMenu(tester);
+    expect(tester.getRect(find.byKey(paragraph)).top, closeTo(scrolledTop, 0.5));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('读正文切夜间会带上整个 App，全局切亮色正文跟着回日间', (tester) async {
+    await _size(tester, const Size(390, 800));
+    await tester.pumpWidget(_app(_reader(store: MemoryReaderStore())));
+    await tester.pumpAndSettle();
+    await _openMenu(tester);
+    expect(find.text('夜间'), findsOneWidget);
+
+    // 正文里点夜间 -> 全局偏好一起变成深色，按钮文案换成「日间」。
+    await tester.tap(find.text('夜间'));
+    await tester.pumpAndSettle();
+    expect(themeModeNotifier.value, ThemeMode.dark);
+    expect(find.text('日间'), findsOneWidget);
+
+    // 反向：全局（设置页 / 我的）切回亮色，正文跟着回到日间。
+    themeModeNotifier.value = ThemeMode.light;
+    await tester.pumpAndSettle();
+    expect(find.text('夜间'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('back first closes the menu and then leaves the reader', (
     tester,
@@ -93,22 +149,26 @@ void main() {
     final device = _Device();
     await tester.pumpWidget(_app(_reader(device: device)));
     await tester.pumpAndSettle();
-    expect(find.text('21:16'), findsOneWidget);
+    // 滚动模式已有页数估算，左下角显示「页/页 百分比」，右下角是电量。
+    expect(find.byKey(const ValueKey('reader-page-progress')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reader-clock')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-battery')), findsOneWidget);
     expect(find.text('64%'), findsOneWidget);
     device.events.add(
       ReaderDeviceStatus(time: DateTime(2026, 9, 10, 21, 17), battery: 63),
     );
     await tester.pump();
-    expect(find.text('21:17'), findsOneWidget);
     expect(find.text('63%'), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-controls')), findsNothing);
     final oldProgress = tester
-        .widget<Text>(find.byKey(const ValueKey('reader-progress')))
+        .widget<Text>(find.byKey(const ValueKey('reader-page-progress')))
         .data;
     _controller(tester).jumpTo(350);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<Text>(find.byKey(const ValueKey('reader-progress'))).data,
+      tester
+          .widget<Text>(find.byKey(const ValueKey('reader-page-progress')))
+          .data,
       isNot(oldProgress),
     );
     await tester.pumpWidget(const SizedBox.shrink());
@@ -174,7 +234,9 @@ void main() {
       await tester.ensureVisible(
         find.byKey(const ValueKey('reader-vertical-padding-28.0')),
       );
-      await tester.tap(find.byKey(const ValueKey('reader-vertical-padding-28.0')));
+      await tester.tap(
+        find.byKey(const ValueKey('reader-vertical-padding-28.0')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('关闭排版设置'));
       await tester.pumpAndSettle();
@@ -194,6 +256,8 @@ void main() {
         'reader_theme_preset': 'dark',
         'reader_page_mode': 'scroll',
       });
+      // 正文配色跟随全局：要验「夜间目录用正文配色」，全局也得是深色。
+      themeModeNotifier.value = ThemeMode.dark;
       await tester.pumpWidget(_app(_reader()));
       await tester.pumpAndSettle();
       await _openMenu(tester);

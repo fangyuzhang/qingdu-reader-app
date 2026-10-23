@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fqapp/services/reader_annotation_store.dart';
+import 'package:fqapp/services/reader_mark_style.dart';
 import 'package:fqapp/widgets/reader/reader_note_block.dart';
 
 /// 锁死「写想法」弹层的生命周期回归：
@@ -95,7 +97,7 @@ void main() {
   });
 
   testWidgets('保存返回去空格后的想法', (tester) async {
-    String? result;
+    AnnotationDraft? result;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -125,7 +127,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-annot-save')));
     await tester.pumpAndSettle();
 
-    expect(result, '这段写得好');
+    expect(result?.thought, '这段写得好');
     expect(tester.takeException(), isNull);
   });
 
@@ -234,4 +236,146 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'editor saves custom category, multiple tags and custom annotation marks',
+    (tester) async {
+      AnnotationDraft? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    result = await showAnnotationEditor(
+                      context,
+                      quote: 'source',
+                    );
+                  },
+                  child: const Text('Edit'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Edit'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-annot-input')),
+        'annotation thought',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-category-input')),
+        'character',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-tag-input')),
+        'tag-a, tag-b',
+      );
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('reader-marker-custom')),
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-marker-custom')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('reader-marker-label')),
+        'custom',
+      );
+      await tester.tap(
+        find.byKey(
+          ValueKey(
+            'reader-marker-color-${readerMarkColorPresets[5].colorValue}',
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-mark-style-dashed')));
+      await tester.tap(
+        find.byKey(
+          ValueKey('reader-mark-color-${readerMarkColorPresets[2].colorValue}'),
+        ),
+      );
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('reader-annot-save')),
+      );
+      await tester.tap(find.byKey(const ValueKey('reader-annot-save')));
+      await tester.pumpAndSettle();
+
+      expect(result, isNotNull);
+      expect(result!.thought, 'annotation thought');
+      expect(result!.category, 'character');
+      expect(result!.tags, ['tag-a', 'tag-b']);
+      expect(result!.markerType, AnnotationDraft.customMarkerType);
+      expect(result!.markerLabel, 'custom');
+      expect(result!.markerColorValue, readerMarkColorPresets[5].colorValue);
+      expect(result!.markStyle, ReaderMarkStyle.dashed);
+      expect(result!.markColorValue, readerMarkColorPresets[2].colorValue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('users can choose an arbitrary marker badge colour', (
+    tester,
+  ) async {
+    AnnotationDraft? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: ElevatedButton(
+                onPressed: () async {
+                  result = await showAnnotationEditor(context, quote: 'source');
+                },
+                child: const Text('Edit'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Edit'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('reader-annot-input')),
+      'custom badge colour',
+    );
+    final custom = find.byKey(const ValueKey('reader-marker-color-custom'));
+    await tester.ensureVisible(custom);
+    await tester.tap(custom);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('reader-marker-color-picker')),
+      findsOneWidget,
+    );
+    final hue = find.byKey(const ValueKey('reader-marker-color-hue'));
+    final hueRect = tester.getRect(hue);
+    await tester.tapAt(
+      Offset(hueRect.left + hueRect.width * 0.58, hueRect.center.dy),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('reader-marker-color-apply')));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byKey(const ValueKey('reader-annot-save')));
+    await tester.tap(find.byKey(const ValueKey('reader-annot-save')));
+    await tester.pumpAndSettle();
+
+    expect(result, isNotNull);
+    expect(
+      result!.markerColorValue,
+      isNot(isIn(readerMarkColorPresets.map((preset) => preset.colorValue))),
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

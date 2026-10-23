@@ -204,14 +204,26 @@ void main() {
   });
 
   group('批注块插入位置', () {
-    test('批注块紧跟所属段落，并把后续块的 top 顺移', () {
+    test('批注块紧跟所属行，后续行顺延', () {
       final layout = _layoutWithLongNote(width: 320, bodyLength: 800);
+      final plain = _build(viewport: const Size(360, 640), notes: const []);
+      final source = plain.blocks[1];
+      final localStart = _title.length + 1 + 5 - source.start;
+      final line = source.lines.lastWhere((line) => line.start <= localStart);
+      final expectedPrefix = source.text.substring(0, line.end);
+
       final noteIndex = layout.blocks.indexWhere((block) => block.isNote);
       expect(noteIndex, greaterThan(0));
       final anchor = layout.blocks[noteIndex - 1];
       final note = layout.blocks[noteIndex];
       final after = layout.blocks[noteIndex + 1];
       expect(anchor.isBody, isTrue);
+      // 批注落在 note.start 所属行之后：前半段恰好是该行之前的文字，
+      // 后半段从批注块的字符起点继续，两者拼回原文。
+      expect(anchor.text, expectedPrefix);
+      expect(note.start, anchor.end);
+      expect(after.start, note.start);
+      expect(anchor.text + after.text, source.text);
       expect(
         note.top,
         closeTo(

@@ -78,8 +78,8 @@ node scripts/verify_audio_cenc.cjs build/diagnostics/play-response.json
 python scripts/generate_app_icons.py
 ```
 
-APK 校验须传入 `--apk`、`--build-tools`、`--report-dir` 以及预期签名指纹，完整示例见本地
-`docs/release-signing.md`（不入库）。只在没有正式签名材料的场景（fork、本地检视构建）才加
+APK 校验须传入 `--apk`、`--build-tools`、`--report-dir` 以及预期签名指纹，完整示例见仓库根目录
+`README.md` 的“正式签名”和“构建 release APK”两节。只在没有正式签名材料的场景（fork、本地检视构建）才加
 `--allow-unsigned`，此时报告里 `signature.signed` 为 `false`，其余检查照常执行。
 `--help` 只显示参数，不算通过 APK 验证。
 

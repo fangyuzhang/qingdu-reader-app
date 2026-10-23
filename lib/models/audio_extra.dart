@@ -1,5 +1,5 @@
 /// Audio-side extras for the listening page: voice tones (智能朗读 / 真人讲书),
-/// the spoken-subtitle track (边听边读), and related works (原著小说 / 改编短剧).
+/// the spoken-subtitle track (边听边读), and related works (原著小说).
 ///
 /// Shapes verified against live responses and against the official client's
 /// own models. Two details matter and are easy to get wrong:
@@ -252,8 +252,8 @@ class SubtitleTrack {
   static final _cuePattern = RegExp(r'^\[(\d+),\d+\]<\d+,\d+,\d+>(.*)$');
 }
 
-/// A companion work shown next to the audio player: the original novel or an
-/// adaptation. Derives from `/api/v1/books/{id}/related`.
+/// A companion work shown next to the audio player. Derives from
+/// `/api/v1/books/{id}/related`.
 class RelatedWork {
   const RelatedWork({
     required this.kind,
@@ -263,13 +263,13 @@ class RelatedWork {
     this.label = '',
   });
 
-  /// `book` for the original novel, `video` for a short-drama adaptation.
+  /// `book` for the original novel.
   final String kind;
   final String id;
   final String title;
   final String cover;
 
-  /// Caption under the title (`原著小说` / `改编短剧`).
+  /// Caption under the title (`原著小说`).
   final String label;
 
   bool get isEmpty => id.isEmpty && title.isEmpty;
@@ -286,13 +286,6 @@ class RelatedWork {
       if (books is List) {
         for (final entry in books) {
           final work = _work(entry, kind: 'book', label: '原著小说');
-          if (work != null) works.add(work);
-        }
-      }
-      final videos = cell['video_data'];
-      if (videos is List) {
-        for (final entry in videos) {
-          final work = _work(entry, kind: 'video', label: '改编短剧');
           if (work != null) works.add(work);
         }
       }

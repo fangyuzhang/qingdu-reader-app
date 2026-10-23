@@ -105,7 +105,7 @@ void main() {
     expect(session.requests, ['$_audioChapter:0', '$_novelChapter:115']);
     expect(find.byType(AudioPage), findsOneWidget);
     expect(find.byKey(ValueKey('audio_session_$_novelBook')), findsOneWidget);
-    expect(find.text('全球冰封：我打造了末日安全屋'), findsOneWidget);
+    expect(find.textContaining('全球冰封：我打造了末日安全屋'), findsOneWidget);
     expect(find.text('听书'), findsOneWidget);
     expect(session.players.first.disposed, isTrue);
     expect(session.players.last.isPlaying, isTrue);
@@ -175,7 +175,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('voice_option_96')));
       await _flush(tester);
       expect(find.text('声音设置'), findsOneWidget);
-      expect(find.text('冰河末世，我囤积了百亿物资'), findsWidgets);
+      expect(find.textContaining('冰河末世，我囤积了百亿物资'), findsWidgets);
       expect(session.players, hasLength(1));
       expect(session.players.single.disposed, isFalse);
 
@@ -188,7 +188,7 @@ void main() {
       expect(find.text('声音设置'), findsNothing);
       expect(find.byType(AudioPage), findsOneWidget);
       expect(find.byKey(ValueKey('audio_session_$_novelBook')), findsOneWidget);
-      expect(find.text('全球冰封：我打造了末日安全屋'), findsOneWidget);
+      expect(find.textContaining('全球冰封：我打造了末日安全屋'), findsOneWidget);
       expect(find.text('听书'), findsOneWidget);
     },
   );

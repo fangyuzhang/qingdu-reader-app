@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
+import '../services/app_theme.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
 import 'cached_books_page.dart';
@@ -8,7 +11,7 @@ import 'notes_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 
-/// 个人中心（我的）页：顶部书友卡片 + 快捷入口（章节缓存/剧集缓存/设置/关于）
+/// 个人中心（我的）页：顶部书友卡片 + 快捷入口（章节缓存/设置/关于）
 /// + 嵌入式阅读与视听统计。
 class MinePage extends StatelessWidget {
   const MinePage({super.key});
@@ -28,6 +31,23 @@ class MinePage extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
         actions: [
+          // 【青茄·日夜切换】放在设置左侧：一键在深色 / 亮色之间切换，
+          // 与设置页「外观」、阅读页夜间按钮写的是同一个全局偏好。
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeModeNotifier,
+            builder: (context, mode, _) {
+              final dark = einkModeNotifier.value
+                  ? false
+                  : themeModeIsDark(mode, MediaQuery.platformBrightnessOf(context));
+              return IconButton(
+                icon: Icon(dark ? LucideIcons.sun : LucideIcons.moon),
+                tooltip: dark ? '切换到亮色' : '切换到深色',
+                onPressed: () => unawaited(
+                  setThemeMode(dark ? ThemeMode.light : ThemeMode.dark),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(LucideIcons.settings),
             tooltip: '设置',
@@ -38,9 +58,7 @@ class MinePage extends StatelessWidget {
           ),
         ],
       ),
-      body: StatsPage(
-        header: _buildProfileHeader(context, scheme, palette),
-      ),
+      body: StatsPage(header: _buildProfileHeader(context, scheme, palette)),
     );
   }
 
@@ -67,7 +85,7 @@ class MinePage extends StatelessWidget {
                 height: 52,
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [Color(0xFFEF5038), Color(0xFFF27A65)],
+                    colors: [Color(0xFF2FA98C), Color(0xFF1F8A72)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -102,10 +120,7 @@ class MinePage extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       '沉浸阅读，记录每一个好故事',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: palette.muted,
-                      ),
+                      style: TextStyle(fontSize: 12.5, color: palette.muted),
                     ),
                   ],
                 ),
@@ -156,7 +171,6 @@ class MinePage extends StatelessWidget {
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.pen_line,
-              iconColor: const Color(0xFFD64545),
               label: '笔记',
               palette: palette,
               onTap: () => Navigator.push(
@@ -168,7 +182,6 @@ class MinePage extends StatelessWidget {
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.bookmark,
-              iconColor: const Color(0xFF3B82F6),
               label: '章节缓存',
               palette: palette,
               onTap: () => Navigator.push(
@@ -176,13 +189,10 @@ class MinePage extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const CachedBooksPage()),
               ),
             ),
-            // 【青茄重构·删除】「剧集缓存」入口随短剧功能一并下线：
-            // 缓存页本身还在仓库里，但青少年版不再暴露任何剧集入口。
             const SizedBox(width: 8),
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.sliders_horizontal,
-              iconColor: const Color(0xFF10B981),
               label: '应用设置',
               palette: palette,
               onTap: () => Navigator.push(
@@ -194,7 +204,6 @@ class MinePage extends StatelessWidget {
             _buildShortcutTile(
               context: context,
               icon: LucideIcons.info,
-              iconColor: const Color(0xFF8B5CF6),
               label: '关于我们',
               palette: palette,
               onTap: () => Navigator.push(
@@ -230,27 +239,25 @@ class MinePage extends StatelessWidget {
     );
   }
 
+  /// 快捷入口沿用听书页的「同一主色、深浅分层」：底色 soft、图标底 accent@14%，
+  /// 靠图标形状和文字区分入口，不再各给一个彩色，视线不会被四块颜色拉扯。
   Widget _buildShortcutTile({
     required BuildContext context,
     required IconData icon,
-    required Color iconColor,
     required String label,
     required HomePalette palette,
     required VoidCallback onTap,
   }) {
     return Expanded(
       child: Material(
-        color: palette.surface,
+        color: palette.soft,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
-          child: Container(
+          splashColor: HomePalette.accent.withValues(alpha: 0.08),
+          child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: palette.line, width: 0.6),
-            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -258,17 +265,17 @@ class MinePage extends StatelessWidget {
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: iconColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                    color: HomePalette.accent.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(11),
                   ),
-                  child: Icon(icon, size: 18, color: iconColor),
+                  child: Icon(icon, size: 18, color: palette.accentText),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 7),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                     color: palette.ink,
                   ),
                 ),

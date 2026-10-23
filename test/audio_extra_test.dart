@@ -334,17 +334,14 @@ void main() {
       },
     };
 
-    test('labels novels and adaptations separately', () {
+    test('keeps the original novel and ignores legacy video adaptations', () {
       final works = RelatedWork.fromPayload(payload);
-      expect(works, hasLength(2));
+      expect(works, hasLength(1));
       expect(works[0].kind, 'book');
       expect(works[0].label, '原著小说');
       expect(works[0].id, '7521039556003499070');
       expect(works[0].title, '穿书黄毛？！我真没想当渣男啊！');
       expect(works[0].cover, 'https://example.test/b.jpg');
-      expect(works[1].kind, 'video');
-      expect(works[1].label, '改编短剧');
-      expect(works[1].id, '7599595550698114073');
     });
 
     test('degrades to an empty list', () {

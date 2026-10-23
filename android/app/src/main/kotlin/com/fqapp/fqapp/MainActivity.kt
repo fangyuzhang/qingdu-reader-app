@@ -1,6 +1,12 @@
 package com.fqapp.fqapp
 
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.os.Bundle
 import android.view.KeyEvent
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterShellArgs
@@ -14,6 +20,44 @@ class MainActivity : FlutterActivity() {
     private var volumeKeyEnabled = false
     private var volumeChannel: MethodChannel? = null
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // 【青茄·启动配色】系统深色 + App 浅色（或反过来）时，启动窗口的
+        // windowBackground 只跟随系统，进 App 那一瞬间顶部状态栏会先闪一条
+        // 系统底色（浅色系统上常见为一条黑边）。这里在 Flutter 首帧之前按
+        // 「App 自己保存的主题」把窗口底色与状态栏图标亮度摆正，之后由页面
+        // 内的 SystemUiOverlayStyle 接管。
+        applyStartupThemeColors()
+        super.onCreate(savedInstanceState)
+    }
+
+    private fun applyStartupThemeColors() {
+        val mode = savedThemeMode()
+        val dark = when (mode) {
+            "dark" -> true
+            "light" -> false
+            else -> (resources.configuration.uiMode and
+                Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        }
+        val windowColor =
+            if (dark) Color.parseColor("#201F1D") else Color.parseColor("#FAF9F6")
+        window.setBackgroundDrawable(ColorDrawable(windowColor))
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+
+    /// Flutter 侧 SharedPreferences 落到 `FlutterSharedPreferences`，键前缀 `flutter.`。
+    private fun savedThemeMode(): String? = try {
+        getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            .getString("flutter.theme_mode", null)
+    } catch (_: Throwable) {
+        null
+    }
+
     override fun getFlutterShellArgs(): FlutterShellArgs = super.getFlutterShellArgs().also {
         // Runs before the engine/FlutterLoader starts; configureFlutterEngine is
         // too late to select the process-wide rendering backend.
@@ -23,7 +67,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Native ExoPlayer host for DRM short dramas (CENC streaming decrypt).
+        // Native ExoPlayer host for encrypted audiobook playback (CENC streaming decrypt).
         flutterEngine.plugins.add(NativePlayerPlugin())
         flutterEngine.plugins.add(ReaderDevicePlugin())
         flutterEngine.plugins.add(SystemTtsPlugin())

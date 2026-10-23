@@ -346,7 +346,16 @@ internal fun resolveOfflineFile(url: String, allowedRoots: List<File>): File? {
     if (host.isNotEmpty() && host != "localhost") return null
     val rawPath = rest.substring(slash)
     if (rawPath.isEmpty()) return null
-    val file = File(percentDecodePath(rawPath))
+    var decodedPath = percentDecodePath(rawPath)
+    // Standard file URLs use file:///C:/... on Windows; Java expects C:/...
+    if (File.separatorChar == '\\' &&
+        decodedPath.length >= 3 &&
+        decodedPath[0] == '/' &&
+        decodedPath[2] == ':'
+    ) {
+        decodedPath = decodedPath.substring(1)
+    }
+    val file = File(decodedPath)
     if (!isFileWithinRoots(file, allowedRoots)) return null
     return if (file.isFile) file else null
 }

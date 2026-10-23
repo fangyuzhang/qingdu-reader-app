@@ -1,6 +1,7 @@
-import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
@@ -248,31 +249,365 @@ class _CoverImage extends StatelessWidget {
   }
 }
 
-/// Two-line opening excerpt of the current chapter.
-class AudioExcerpt extends StatelessWidget {
-  final String text;
-  final VoidCallback? onTap;
+/// 听书页顶部：缩小的封面 + 右侧当前章节。
+///
+/// 封面固定在左上，章节标题最多两行，所以标题长短不会推挤下方的播放控件。
+class AudioNowPlayingHeader extends StatelessWidget {
+  final String cover;
+  final String bookTitle;
+  final String chapterTitle;
+  final String subtitle;
+  final VoidCallback? onOpenCatalog;
+  final VoidCallback? onOpenReader;
 
-  const AudioExcerpt({super.key, required this.text, this.onTap});
+  const AudioNowPlayingHeader({
+    super.key,
+    this.cover = '',
+    required this.bookTitle,
+    required this.chapterTitle,
+    this.subtitle = '',
+    this.onOpenCatalog,
+    this.onOpenReader,
+  });
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return HomePressable(
-      semanticLabel: '章节试读',
-      onTap: onTap ?? () {},
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+    return SizedBox(
+      height: 84,
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: onOpenCatalog,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 60,
+                height: 80,
+                child: _CoverImage(url: cover, palette: palette),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onOpenCatalog,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    chapterTitle,
+                    key: const Key('audio_chapter_title'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: palette.ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    subtitle.isEmpty ? bookTitle : '$bookTitle · $subtitle',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: palette.muted,
+                      fontSize: 12,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: '打开目录',
+            onPressed: onOpenCatalog,
+            visualDensity: VisualDensity.compact,
+            icon: Icon(LucideIcons.list, size: 20, color: palette.muted),
+          ),
+          IconButton(
+            tooltip: '进入正文',
+            key: const Key('audio-open-reader'),
+            onPressed: onOpenReader,
+            visualDensity: VisualDensity.compact,
+            icon: Icon(LucideIcons.book_open, size: 20, color: palette.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 正文滚动区上下的渐隐遮罩：文字进出列表边缘时淡出，而不是被硬切掉半行。
+class NarrationFade extends StatelessWidget {
+  /// 44 像素盖住一行半文字，正文进出时是淡出而不是被刀切掉半行。
+  const NarrationFade({super.key, required this.child, this.height = 44});
+
+  final Widget child;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    final edge = palette.canvas;
+    Widget mask(bool top) => Positioned(
+      top: top ? 0 : null,
+      bottom: top ? null : 0,
+      left: 0,
+      right: 0,
+      height: height,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: top ? Alignment.topCenter : Alignment.bottomCenter,
+              end: top ? Alignment.bottomCenter : Alignment.topCenter,
+              colors: [edge, edge, edge.withValues(alpha: 0)],
+              stops: const [0, 0.28, 1],
+            ),
+          ),
+        ),
+      ),
+    );
+    return Stack(
+      children: [Positioned.fill(child: child), mask(true), mask(false)],
+    );
+  }
+}
+
+/// 听书页正文区：整章文字可上下滚动，像读正文一样。
+///
+/// 有字幕轨时逐句铺开、当前句高亮并自动跟随；长按任意一句弹出「从本句听」。
+/// 没有字幕轨（部分真人讲书）时退回章节摘要段落，只读不跟随。不加载任何图片。
+class AudioNarrationBody extends StatefulWidget {
+  final SubtitleTrack track;
+  final String excerpt;
+  final ValueListenable<Duration> position;
+  final void Function(Duration at)? onListenFrom;
+  final VoidCallback? onOpenReader;
+
+  const AudioNarrationBody({
+    super.key,
+    required this.track,
+    required this.excerpt,
+    required this.position,
+    this.onListenFrom,
+    this.onOpenReader,
+  });
+
+  @override
+  State<AudioNarrationBody> createState() => _AudioNarrationBodyState();
+}
+
+class _AudioNarrationBodyState extends State<AudioNarrationBody> {
+  final ScrollController _controller = ScrollController();
+  final GlobalKey _currentKey = GlobalKey();
+  int _index = -1;
+
+  /// 用户自己滚动时暂停自动跟随，过一会儿再恢复，免得刚滑上去就被拽回。
+  DateTime _followPausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.track.indexAt(widget.position.value);
+    widget.position.addListener(_onPosition);
+    _scheduleFollow();
+  }
+
+  @override
+  void didUpdateWidget(covariant AudioNarrationBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.position, widget.position)) {
+      oldWidget.position.removeListener(_onPosition);
+      widget.position.addListener(_onPosition);
+    }
+    final next = widget.track.indexAt(widget.position.value);
+    if (next != _index) {
+      _index = next;
+      _scheduleFollow();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.position.removeListener(_onPosition);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onPosition() {
+    final next = widget.track.indexAt(widget.position.value);
+    if (next == _index || !mounted) return;
+    setState(() => _index = next);
+    _scheduleFollow();
+  }
+
+  void _scheduleFollow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (DateTime.now().isBefore(_followPausedUntil)) return;
+      final context = _currentKey.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.32,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  Future<void> _showListenMenu(
+    BuildContext context,
+    Offset globalPosition,
+    SubtitleCue cue,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject();
+    if (overlay is! RenderBox) return;
+    final palette = HomePalette.of(context);
+    final selected = await showMenu<bool>(
+      context: context,
+      color: palette.surface,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(globalPosition, globalPosition + const Offset(1, 1)),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem<bool>(
+          value: true,
+          height: 44,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.play, size: 17, color: palette.accentText),
+              const SizedBox(width: 10),
+              Text(
+                '从本句听',
+                style: TextStyle(
+                  color: palette.ink,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (selected == true && mounted) {
+      widget.onListenFrom?.call(Duration(milliseconds: cue.startMs));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    final cues = widget.track.cues;
+    final paragraphs = <String>[
+      if (cues.isEmpty)
+        for (final line in widget.excerpt.split('\n'))
+          if (line.trim().isNotEmpty) line.trim(),
+    ];
+    if (cues.isEmpty && paragraphs.isEmpty) {
+      return Center(
         child: Text(
-          text,
-          key: const Key('audio_excerpt'),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+          '本章暂无同步字幕',
+          key: const Key('audio_narration_empty'),
+          style: TextStyle(color: palette.muted, fontSize: 13),
+        ),
+      );
+    }
+    return NarrationFade(
+      child: NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        if (notification.dragDetails != null) {
+          _followPausedUntil = DateTime.now().add(const Duration(seconds: 8));
+        }
+        return false;
+      },
+      child: SingleChildScrollView(
+        key: const Key('audio-narration-scroll'),
+        controller: _controller,
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (cues.isEmpty)
+              for (final paragraph in paragraphs)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    paragraph,
+                    key: const Key('audio_narration_excerpt'),
+                    style: TextStyle(
+                      color: palette.ink.withValues(alpha: 0.88),
+                      fontSize: 16,
+                      height: 1.8,
+                    ),
+                  ),
+                )
+            else
+              for (var i = 0; i < cues.length; i++)
+                _cueLine(context, cues[i], i, palette),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cueLine(
+    BuildContext context,
+    SubtitleCue cue,
+    int index,
+    HomePalette palette,
+  ) {
+    final current = index == _index;
+    final past = _index >= 0 && index < _index;
+    final hasAction = widget.onListenFrom != null;
+    return GestureDetector(
+      key: current ? _currentKey : null,
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: hasAction
+          ? (details) =>
+                unawaited(_showListenMenu(context, details.globalPosition, cue))
+          : null,
+      onDoubleTap: widget.onOpenReader,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+        decoration: BoxDecoration(
+          color: current
+              ? HomePalette.accent.withValues(alpha: palette.dark ? 0.16 : 0.10)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              color: current ? palette.accentText : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Text(
+          cue.text,
+          key: current ? const Key('audio_narration_current') : null,
           style: TextStyle(
-            color: palette.ink.withValues(alpha: 0.82),
-            fontSize: 15,
-            height: 1.5,
+            color: current
+                ? palette.ink
+                : past
+                ? palette.muted.withValues(alpha: 0.5)
+                : palette.muted.withValues(alpha: 0.85),
+            fontSize: current ? 17 : 16,
+            height: 1.75,
+            fontWeight: current ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
       ),
@@ -280,114 +615,313 @@ class AudioExcerpt extends StatelessWidget {
   }
 }
 
-/// Companion works: the original novel and any adaptation.
-class AudioRelatedRow extends StatelessWidget {
-  final List<RelatedWork> works;
-  final void Function(RelatedWork work) onTap;
+/// 系统朗读的正文区：与有声书正文同一套观感（逐句铺开、当前句高亮、
+/// 自动跟随、上下渐隐），区别只是句子来自 TTS 的正文切分而不是字幕轨。
+class TtsNarrationBody extends StatefulWidget {
+  const TtsNarrationBody({
+    super.key,
+    required this.lines,
+    required this.currentIndex,
+    this.placeholder = '正在准备朗读…',
+    this.onListenFrom,
+    this.onOpenReader,
+  });
 
-  const AudioRelatedRow({super.key, required this.works, required this.onTap});
+  final List<String> lines;
+  final int currentIndex;
+  final String placeholder;
+  final void Function(int index)? onListenFrom;
+  final VoidCallback? onOpenReader;
+
+  @override
+  State<TtsNarrationBody> createState() => _TtsNarrationBodyState();
+}
+
+class _TtsNarrationBodyState extends State<TtsNarrationBody> {
+  final ScrollController _controller = ScrollController();
+  final GlobalKey _currentKey = GlobalKey();
+  DateTime _followPausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleFollow();
+  }
+
+  @override
+  void didUpdateWidget(covariant TtsNarrationBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentIndex != widget.currentIndex) _scheduleFollow();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _scheduleFollow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (DateTime.now().isBefore(_followPausedUntil)) return;
+      final context = _currentKey.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.32,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  Future<void> _showMenu(BuildContext context, Offset at, int index) async {
+    final overlay = Overlay.of(context).context.findRenderObject();
+    if (overlay is! RenderBox) return;
+    final palette = HomePalette.of(context);
+    final selected = await showMenu<bool>(
+      context: context,
+      color: palette.surface,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(at, at + const Offset(1, 1)),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem<bool>(
+          value: true,
+          height: 44,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.play, size: 17, color: palette.accentText),
+              const SizedBox(width: 10),
+              Text(
+                '从本句听',
+                style: TextStyle(
+                  color: palette.ink,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (selected == true) widget.onListenFrom?.call(index);
+  }
 
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    if (works.isEmpty) return const SizedBox.shrink();
-    final textScaler = MediaQuery.textScalerOf(context);
-    // A horizontal list forces a tight height on its cards, so derive the row
-    // height from the scaled title/label instead of a fixed 76px.
-    final rowHeight = math.max(
-      76.0,
-      textScaler.scale(12.5) * 1.35 * 2 +
-          textScaler.scale(11) * 1.4 +
-          5 +
-          16 +
-          4,
+    if (widget.lines.isEmpty) {
+      return Center(
+        child: Text(
+          widget.placeholder,
+          key: const Key('tts_narration_empty'),
+          style: TextStyle(color: palette.muted, fontSize: 13),
+        ),
+      );
+    }
+    return NarrationFade(
+      child: NotificationListener<ScrollStartNotification>(
+        onNotification: (notification) {
+          if (notification.dragDetails != null) {
+            _followPausedUntil = DateTime.now().add(const Duration(seconds: 8));
+          }
+          return false;
+        },
+        child: SingleChildScrollView(
+          key: const Key('tts-narration-scroll'),
+          controller: _controller,
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < widget.lines.length; i++)
+                _line(context, widget.lines[i], i, palette),
+            ],
+          ),
+        ),
+      ),
     );
-    return SizedBox(
-      height: rowHeight,
-      child: ListView.separated(
-        key: const Key('audio_related_row'),
-        scrollDirection: Axis.horizontal,
-        itemCount: works.length,
-        separatorBuilder: (context, _) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final work = works[index];
-          return HomePressable(
-            key: ValueKey('audio_related_${work.kind}_${work.id}'),
-            semanticLabel: '${work.label}：${work.title}',
-            onTap: () => onTap(work),
-            borderRadius: BorderRadius.circular(12),
+  }
+
+  Widget _line(
+    BuildContext context,
+    String text,
+    int index,
+    HomePalette palette,
+  ) {
+    final current = index == widget.currentIndex;
+    final past = widget.currentIndex >= 0 && index < widget.currentIndex;
+    final hasAction = widget.onListenFrom != null;
+    return GestureDetector(
+      key: current ? _currentKey : null,
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: hasAction
+          ? (details) =>
+                unawaited(_showMenu(context, details.globalPosition, index))
+          : null,
+      onDoubleTap: widget.onOpenReader,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+        decoration: BoxDecoration(
+          color: current
+              ? HomePalette.accent.withValues(alpha: palette.dark ? 0.16 : 0.10)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              color: current ? palette.accentText : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Text(
+          text,
+          key: current ? const Key('tts_narration_current') : null,
+          style: TextStyle(
+            color: current
+                ? palette.ink
+                : past
+                ? palette.muted.withValues(alpha: 0.5)
+                : palette.muted.withValues(alpha: 0.85),
+            fontSize: current ? 17 : 16,
+            height: 1.75,
+            fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 正文下方的进度脚注：左边阅读页数，右边全书进度。
+class AudioListenFooter extends StatelessWidget {
+  final String pageLabel;
+  final double bookProgress;
+
+  const AudioListenFooter({
+    super.key,
+    required this.pageLabel,
+    required this.bookProgress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    final percent = (bookProgress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+      child: Row(
+        children: [
+          Text(
+            pageLabel,
+            key: const Key('audio-page-label'),
+            style: TextStyle(color: palette.muted, fontSize: 11.5),
+          ),
+          const Spacer(),
+          Text(
+            '全书 $percent%',
+            key: const Key('audio-book-progress'),
+            style: TextStyle(color: palette.muted, fontSize: 11.5),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 音色与边听边读的紧凑入口，替代原来占很大一块的音色卡片。
+class AudioToneBar extends StatelessWidget {
+  final String title;
+  final String toneLabel;
+  final VoidCallback? onTones;
+  final VoidCallback onReadAlong;
+
+  const AudioToneBar({
+    super.key,
+    required this.title,
+    required this.toneLabel,
+    required this.onTones,
+    required this.onReadAlong,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              key: const Key('audio-voice'),
+              onTap: onTones,
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: palette.soft,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      LucideIcons.audio_lines,
+                      size: 16,
+                      color: palette.muted,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        toneLabel.isEmpty ? title : toneLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: palette.ink, fontSize: 12.5),
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      LucideIcons.chevron_right,
+                      size: 14,
+                      color: palette.muted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            key: const Key('audio-read-along-bar'),
+            onTap: onReadAlong,
+            borderRadius: BorderRadius.circular(10),
             child: Container(
-              width: 218,
-              padding: const EdgeInsets.all(8),
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: palette.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: palette.line.withValues(alpha: 0.8)),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: palette.line, width: 0.8),
               ),
               child: Row(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: SizedBox(
-                      width: 44,
-                      height: 58,
-                      child: work.cover.isEmpty
-                          ? ColoredBox(
-                              color: palette.soft,
-                              child: Icon(
-                                work.kind == 'video'
-                                    ? LucideIcons.clapperboard
-                                    : LucideIcons.book,
-                                size: 18,
-                                color: palette.muted,
-                              ),
-                            )
-                          : Image.network(
-                              work.cover,
-                              fit: BoxFit.cover,
-                              // 44x58 logical thumbnail; decode at 2×.
-                              cacheWidth: 96,
-                              errorBuilder: (context, _, _) => ColoredBox(
-                                color: palette.soft,
-                                child: Icon(
-                                  LucideIcons.book,
-                                  size: 18,
-                                  color: palette.muted,
-                                ),
-                              ),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          work.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: palette.ink,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            height: 1.35,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          work.label,
-                          style: TextStyle(color: palette.muted, fontSize: 11),
-                        ),
-                      ],
-                    ),
+                  Icon(LucideIcons.headphones, size: 15, color: palette.muted),
+                  const SizedBox(width: 6),
+                  Text(
+                    '边听边读',
+                    style: TextStyle(color: palette.muted, fontSize: 12.5),
                   ),
                 ],
               ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -568,13 +1102,15 @@ class AudioProgressRow extends StatelessWidget {
                     enabledThumbRadius: 7,
                   ),
                 ),
-                child: Slider(
+                child: MergeSemantics(
+                  child: Slider(
                   key: const ValueKey('audio-seek'),
                   value: value,
                   max: maximum > 0 ? maximum : 1,
                   label: time(Duration(milliseconds: value.round())),
-                  onChanged: active ? onChanged : null,
-                  onChangeEnd: active ? onChangeEnd : null,
+                    onChanged: active ? onChanged : null,
+                    onChangeEnd: active ? onChangeEnd : null,
+                  ),
                 ),
               ),
             ),
@@ -635,283 +1171,3 @@ class _SkipLabel extends StatelessWidget {
 
 /// Official two-card voice area: the left card lists the selectable voices
 /// (智能朗读 / 真人讲书) and the right card is the 边听边读 entry.
-class AudioToneSection extends StatelessWidget {
-  final String title;
-  final List<AudioTone> tones;
-  final String selectedId;
-  final String currentChapterTitle;
-  final ValueChanged<AudioTone> onSelect;
-  final VoidCallback onReadAlong;
-  final VoidCallback? onShowVoices;
-
-  const AudioToneSection({
-    super.key,
-    this.title = '智能朗读',
-    required this.tones,
-    required this.selectedId,
-    required this.currentChapterTitle,
-    required this.onSelect,
-    required this.onReadAlong,
-    this.onShowVoices,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
-    final textScaler = MediaQuery.textScalerOf(context);
-    final headerHeight = textScaler.scale(15) * 1.5 + 8;
-    final chipHeight = math.max(
-      64.0,
-      textScaler.scale(12.5) * 1.5 + textScaler.scale(11) * 1.5 + 26,
-    );
-    // The left card stacks header + chips; the right card stacks header + a
-    // two-line chapter title. Both must fit, at any system text scale.
-    final cardHeight = math.max(
-      116.0,
-      math.max(
-        16 + headerHeight + 4 + chipHeight,
-        16 + headerHeight + 8 + textScaler.scale(13) * 1.5 * 2,
-      ),
-    );
-    final ordered = [...tones];
-    // The selected voice is shown first so the active choice is visible.
-    ordered.sort((a, b) {
-      if (a.id == selectedId) return -1;
-      if (b.id == selectedId) return 1;
-      return 0;
-    });
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 237,
-          child: Container(
-            height: cardHeight,
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-            decoration: BoxDecoration(
-              color: palette.soft,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                HomePressable(
-                  key: const Key('audio-voice'),
-                  semanticLabel: '选择音色',
-                  onTap: onShowVoices ?? () {},
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: palette.ink,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          LucideIcons.chevron_right,
-                          size: 13,
-                          color: palette.muted,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Expanded(
-                  child: ordered.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              '暂无可选音色',
-                              style: TextStyle(
-                                color: palette.muted,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Row(
-                            children: [
-                              for (var i = 0; i < ordered.length; i++) ...[
-                                if (i > 0) const SizedBox(width: 6),
-                                _AudioToneChip(
-                                  tone: ordered[i],
-                                  height: chipHeight,
-                                  selected: ordered[i].id == selectedId,
-                                  onTap: () => onSelect(ordered[i]),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          flex: 133,
-          child: Container(
-            height: cardHeight,
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-            decoration: BoxDecoration(
-              color: palette.soft,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                HomePressable(
-                  key: const Key('audio_read_along'),
-                  semanticLabel: '边听边读',
-                  onTap: onReadAlong,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            '边听边读',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: palette.ink,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          LucideIcons.chevron_right,
-                          size: 13,
-                          color: palette.muted,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      currentChapterTitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: palette.ink,
-                        fontSize: 13,
-                        height: 1.35,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AudioToneChip extends StatelessWidget {
-  final AudioTone tone;
-  final double height;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _AudioToneChip({
-    required this.tone,
-    required this.height,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
-    return HomePressable(
-      key: ValueKey('audio_tone_${tone.id}'),
-      semanticLabel: '选择音色 ${tone.title}',
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 96, maxWidth: 120),
-        height: height,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? palette.surface
-              : palette.line.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected
-                ? palette.accentText.withValues(alpha: 0.55)
-                : Colors.transparent,
-            width: selected ? 1.2 : 0,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    tone.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected ? palette.accentText : palette.ink,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (tone.isMultiTone) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    LucideIcons.audio_lines,
-                    size: 14,
-                    color: selected ? palette.accentText : palette.muted,
-                  ),
-                ],
-              ],
-            ),
-            if (tone.description.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                tone.description,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: palette.muted, fontSize: 11),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}

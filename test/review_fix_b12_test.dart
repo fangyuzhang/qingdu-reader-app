@@ -105,6 +105,8 @@ void main() {
       ),
     );
     await _flush(tester);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
     expect(find.text('伴生作品'), findsOneWidget);
   });
 

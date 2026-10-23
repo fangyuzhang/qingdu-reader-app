@@ -1,5 +1,125 @@
 part of '../../pages/audio_page.dart';
 
+/// 跟踪 Navigator 的路由栈，用来判断「听书页是否真的被另一个页面盖住」。
+///
+/// `ModalRoute.isCurrentOf` 把弹窗、菜单、底部面板也算作「上面有东西」，
+/// 于是听书页一开弹层，迷你胶囊就会冒出来盖住播放控件。这里只看页面路由
+/// （[PageRoute]），弹层（[PopupRoute]）不算遮挡。
+class AudioRouteWatcher extends NavigatorObserver with ChangeNotifier {
+  AudioRouteWatcher._();
+
+  static final AudioRouteWatcher instance = AudioRouteWatcher._();
+
+  final List<Route<dynamic>> _routes = <Route<dynamic>>[];
+
+  /// 没有接入 Navigator 时（例如 widget 测试里的裸 MaterialApp）返回 false，
+  /// 调用方回退到 `ModalRoute.isCurrentOf`。
+  bool get tracksRoutes => _routes.isNotEmpty;
+
+  @visibleForTesting
+  void resetForTest() => _routes.clear();
+
+  /// 栈顶是弹层（弹窗 / 底部面板 / 菜单）时为 true。
+  ///
+  /// 胶囊挂在 Navigator 之外的最外层 Overlay，天然压在弹层之上：阅读页
+  /// 打开「听书 / 系统朗读」选择面板时，胶囊会盖住面板里的「听书」一行。
+  /// 这里用路由栈判断，弹层期间先让胶囊退场。
+  bool get popupOpen =>
+      _routes.isNotEmpty && _routes.last is PopupRoute<dynamic>;
+
+  bool isTopPage(Route<dynamic> route) {
+    for (final other in _routes.reversed) {
+      if (other is PageRoute<dynamic>) return identical(other, route);
+    }
+    return false;
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.add(route);
+    notifyListeners();
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+    notifyListeners();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+    notifyListeners();
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final index = oldRoute == null ? -1 : _routes.indexOf(oldRoute);
+    if (index >= 0) {
+      if (newRoute == null) {
+        _routes.removeAt(index);
+      } else {
+        _routes[index] = newRoute;
+      }
+    } else if (newRoute != null) {
+      _routes.add(newRoute);
+    }
+    notifyListeners();
+  }
+}
+
+/// 阅读页与听书胶囊之间的轻量协调层。
+///
+/// 胶囊挂在 Navigator 之外的最外层 Overlay，读不到阅读页内部状态，所以
+/// 阅读页把「是否在阅读」「工具栏是否展开」「是否有置顶弹窗」写进这里。
+/// 工具栏收起时胶囊不再退化成底部小按钮，而是始终保持完整形态，保证
+/// 播放/暂停、设置、关闭这些控制入口一直可用；只有弹出休息提醒等置顶
+/// 弹窗时才暂时隐藏，让弹窗真正压在最上层。
+class ReadingCapsuleHost extends ChangeNotifier {
+  ReadingCapsuleHost._();
+
+  static final ReadingCapsuleHost instance = ReadingCapsuleHost._();
+
+  int _readers = 0;
+  bool _toolbarVisible = false;
+  bool _dialogOpen = false;
+
+  bool get readerActive => _readers > 0;
+  bool get toolbarVisible => _toolbarVisible;
+  bool get dialogOpen => _dialogOpen;
+
+  void enterReader() {
+    _readers++;
+    notifyListeners();
+  }
+
+  void exitReader() {
+    if (_readers > 0) _readers--;
+    _toolbarVisible = false;
+    notifyListeners();
+  }
+
+  void setToolbarVisible(bool value) {
+    if (_toolbarVisible == value) return;
+    _toolbarVisible = value;
+    notifyListeners();
+  }
+
+  void setDialogOpen(bool value) {
+    if (_dialogOpen == value) return;
+    _dialogOpen = value;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void resetForTest() {
+    _readers = 0;
+    _toolbarVisible = false;
+    _dialogOpen = false;
+    notifyListeners();
+  }
+}
+
 /// Owns one listening session for the lifetime of the app's Navigator.
 class AudioPlaybackScope extends StatefulWidget {
   const AudioPlaybackScope({
@@ -34,6 +154,8 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
   void initState() {
     super.initState();
     NativePlayer.beforePlay = _playGate;
+    ReadingCapsuleHost.instance.addListener(_changed);
+    AudioRouteWatcher.instance.addListener(_changed);
   }
 
   Future<void> _beforePlay(NativePlayer player) async {
@@ -134,6 +256,20 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
       session.addListener(_changed);
       session.start();
       _changed();
+      try {
+        // Do not close the listening page until the first body is loaded and
+        // the engine accepted the first utterance. A locked chapter with no
+        // readable text must fail in place, not flash back to the reader.
+        await session.started.timeout(const Duration(seconds: 40));
+      } catch (_) {
+        if (identical(_tts, session)) await _closeTts();
+        rethrow;
+      }
+      if (session.closed || session.error != null) {
+        final message = session.error ?? '系统朗读未能启动';
+        if (identical(_tts, session)) await _closeTts();
+        throw StateError(message);
+      }
     });
     _queue = next.catchError((Object _) {});
     return next;
@@ -164,6 +300,7 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
     final navigator = widget.navigatorKey.currentState;
     if (navigator == null) return;
     _ttsPage = session;
+    _changed();
     unawaited(
       navigator
           .push<void>(
@@ -175,7 +312,10 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
             ),
           )
           .whenComplete(() {
-            if (identical(_ttsPage, session)) _ttsPage = null;
+            if (identical(_ttsPage, session)) {
+              _ttsPage = null;
+              _changed();
+            }
           }),
     );
   }
@@ -229,6 +369,8 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
 
   @override
   void dispose() {
+    ReadingCapsuleHost.instance.removeListener(_changed);
+    AudioRouteWatcher.instance.removeListener(_changed);
     if (identical(NativePlayer.beforePlay, _playGate)) {
       NativePlayer.beforePlay = null;
     }
@@ -262,94 +404,137 @@ class _AudioPlaybackScopeState extends State<AudioPlaybackScope> {
     return Overlay(initialEntries: [_entry]);
   }
 
+  // 胶囊的落点：拖过之后记住，换会话时回到默认位置。
+  Offset? _capsuleAt;
+  Object? _capsuleOwner;
+
+  Offset _defaultCapsule(BoxConstraints box, EdgeInsets padding) => Offset(
+    16,
+    math.max(
+      padding.top + 8,
+      box.maxHeight - padding.bottom - ListeningCapsule.height - 96,
+    ),
+  );
+
+  Offset _clampCapsule(Offset wanted, BoxConstraints box, EdgeInsets padding) {
+    final maxX = math.max(8.0, box.maxWidth - ListeningCapsule.width - 8);
+    final maxY = math.max(
+      padding.top + 8,
+      box.maxHeight - padding.bottom - ListeningCapsule.height - 8,
+    );
+    return Offset(
+      wanted.dx.clamp(8.0, maxX),
+      wanted.dy.clamp(padding.top + 8, maxY),
+    );
+  }
+
   Widget _buildEntry(BuildContext context) {
     final session = _session;
     final tts = _tts;
-    final showBar =
+    final showAudio =
         session != null &&
         !session._closed &&
         !_views.any((v) => v._routeCurrent && identical(v._session, session));
-    return Column(
-      children: [
-        Expanded(child: widget.child),
-        if (tts != null && !tts.closed)
-          SystemTtsMiniBar(
-            session: tts,
-            onOpen: () => _openTts(tts),
-            onClose: () => unawaited(stopTts(tts)),
-          ),
-        if (showBar)
-          Material(
-            color: Theme.of(context).colorScheme.surfaceContainer,
-            child: SafeArea(
-              top: false,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 64),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        key: const ValueKey('audio-mini-open'),
-                        onTap: () => _open(session),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                session._title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              Text(
-                                session._error != null
-                                    ? '播放失败，查看详情'
-                                    : session._loading
-                                    ? '正在加载…'
-                                    : session._chapters.isEmpty
-                                    ? '暂无章节'
-                                    : session._chapters[session._index].title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      key: const ValueKey('audio-mini-toggle'),
-                      tooltip: session._wantPlay && !session._completed
-                          ? '暂停听书'
-                          : '继续听书',
-                      onPressed: session._ready
-                          ? session._togglePlayback
-                          : null,
-                      icon: Icon(
-                        session._wantPlay && !session._completed
-                            ? Icons.pause
-                            : Icons.play_arrow,
-                      ),
-                    ),
-                    IconButton(
-                      key: const ValueKey('audio-mini-close'),
-                      tooltip: '关闭听书',
-                      onPressed: () => unawaited(stop(session)),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
+    // 听书详情页自己就是完整的播放器，再浮一颗胶囊只会压在传输控件上。
+    final showTts = tts != null && !tts.closed && !identical(_ttsPage, tts);
+    final showCapsule = showAudio || showTts;
+    final host = ReadingCapsuleHost.instance;
+    // 阅读页收起工具栏时胶囊保持完整形态，用播放/暂停、设置、关闭继续
+    // 提供听书控制；任何置顶弹窗（如 45 分钟护眼提醒）打开期间胶囊整体
+    // 隐藏，弹窗才能真正压在最上层。
+    final suppressed = host.dialogOpen || AudioRouteWatcher.instance.popupOpen;
+    final owner = showAudio ? session : tts;
+    if (!identical(_capsuleOwner, owner)) {
+      _capsuleOwner = owner;
+      _capsuleAt = null;
+    }
+    return LayoutBuilder(
+      builder: (context, box) {
+        final padding = MediaQuery.paddingOf(context);
+        final at = _clampCapsule(
+          _capsuleAt ?? _defaultCapsule(box, padding),
+          box,
+          padding,
+        );
+        return Stack(
+          children: [
+            Positioned.fill(child: widget.child),
+            if (showCapsule && !suppressed)
+              Positioned(
+                left: at.dx,
+                top: at.dy,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanUpdate: (details) {
+                    // 快速滑动时一帧内会有多次 pointer move；必须以最新的
+                    // 落点为基准累加，否则每次都用同一帧的旧坐标，手指走完
+                    // 胶囊却只挪了一小步。
+                    final next = _clampCapsule(
+                      (_capsuleAt ?? at) + details.delta,
+                      box,
+                      padding,
+                    );
+                    if (next == _capsuleAt) return;
+                    setState(() => _capsuleAt = next);
+                  },
+                  child: showAudio ? _audioCapsule(session) : _ttsCapsule(tts!),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _audioCapsule(_AudioPlaybackController session) {
+    final chapterTitle = session._chapters.isEmpty
+        ? '暂无章节'
+        : session._chapters[session._index].title;
+    return ListeningCapsule(
+      title: session._title,
+      status: session._error != null
+          ? '播放失败'
+          : session._loading
+          ? '正在加载…'
+          : chapterTitle,
+      playing: session._wantPlay && !session._completed,
+      onOpen: () => _open(session),
+      onToggle: session._ready ? session._togglePlayback : null,
+      // 胶囊挂在 Navigator 之外，弹层要用 Navigator 自己的 context，
+      // 否则 showModalBottomSheet 找不到可用的 Navigator。
+      onSettings: () => unawaited(_openListeningSettings(session)),
+      onClose: () => unawaited(stop(session)),
+    );
+  }
+
+  Widget _ttsCapsule(SystemTtsPlayback session) => ListenableBuilder(
+    listenable: session,
+    builder: (context, _) => ListeningCapsule(
+      title: session.book.title,
+      status: session.error != null
+          ? '朗读失败'
+          : session.loading
+          ? '正在准备…'
+          : '系统朗读 · ${session.chapter.title}',
+      playing: session.wantPlay,
+      onOpen: () => _openTts(session),
+      onToggle: () => unawaited(session.toggle()),
+      onSettings: () => unawaited(_openTtsSettings()),
+      onClose: () => unawaited(stopTts(session)),
+    ),
+  );
+
+  Future<void> _openListeningSettings(_AudioPlaybackController session) async {
+    final context = widget.navigatorKey.currentState?.overlay?.context;
+    if (context == null) return;
+    await _showListeningSettings(context, session);
+  }
+
+  Future<void> _openTtsSettings() async {
+    final navigator = widget.navigatorKey.currentState;
+    if (navigator == null) return;
+    await navigator.push<void>(
+      MaterialPageRoute<void>(builder: (_) => const SystemTtsSettingsPage()),
     );
   }
 }

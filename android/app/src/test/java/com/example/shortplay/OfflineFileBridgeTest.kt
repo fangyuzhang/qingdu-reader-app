@@ -10,9 +10,16 @@ import java.nio.file.Files
 class OfflineFileBridgeTest {
     private fun tempRoot(): File = Files.createTempDirectory("offline-bridge").toFile()
 
+    /** Build a standards-compliant file URL on both Android/Linux and Windows. */
+    private fun fileUrl(file: File, host: String = ""): String {
+        val absolute = file.absolutePath.replace('\\', '/')
+        val path = if (absolute.startsWith('/')) absolute else "/$absolute"
+        return "file://$host$path"
+    }
+
     private fun fileUnder(root: File, relative: String): File {
         val file = File(root, relative)
-        file.parentFile.mkdirs()
+        file.parentFile?.mkdirs()
         file.writeBytes(byteArrayOf(1, 2, 3))
         return file
     }
@@ -20,15 +27,15 @@ class OfflineFileBridgeTest {
     @Test fun fileInsideAllowedRootIsResolved() {
         val root = tempRoot()
         val file = fileUnder(root, "offline-video/ep1.mp4")
-        val resolved = resolveOfflineFile("file://${file.absolutePath}", listOf(root))
+        val resolved = resolveOfflineFile(fileUrl(file), listOf(root))
         assertNotNull(resolved)
         assertEquals(file.canonicalFile, resolved!!.canonicalFile)
     }
 
     @Test fun pathTraversalOutOfRootIsRejected() {
         val root = tempRoot()
-        val secret = fileUnder(root.parentFile, "secret.txt")
-        val traversal = "file://${root.absolutePath}/offline-video/../../secret.txt"
+        val secret = fileUnder(requireNotNull(root.parentFile), "secret.txt")
+        val traversal = fileUrl(File("${root.absolutePath}/offline-video/../../secret.txt"))
         assertNull(resolveOfflineFile(traversal, listOf(root)))
         // Sanity: the traversal really does point at the secret file.
         assertEquals(secret.canonicalFile, File("${root.absolutePath}/offline-video/../../secret.txt").canonicalFile)
@@ -36,8 +43,8 @@ class OfflineFileBridgeTest {
 
     @Test fun encodedTraversalOutOfRootIsRejected() {
         val root = tempRoot()
-        fileUnder(root.parentFile, "secret.txt")
-        val encoded = "file://${root.absolutePath}/offline-video/%2e%2e%2f%2e%2e%2fsecret.txt"
+        fileUnder(requireNotNull(root.parentFile), "secret.txt")
+        val encoded = fileUrl(File(root, "offline-video/base")).removeSuffix("/base") + "/%2e%2e%2f%2e%2e%2fsecret.txt"
         assertNull(resolveOfflineFile(encoded, listOf(root)))
     }
 
@@ -47,7 +54,7 @@ class OfflineFileBridgeTest {
         val link = File(root, "link.mp4")
         runCatching { Files.createSymbolicLink(link.toPath(), outside.toPath()) }
         if (!Files.isSymbolicLink(link.toPath())) return // FS without symlink support: nothing to test.
-        assertNull(resolveOfflineFile("file://${link.absolutePath}", listOf(root)))
+        assertNull(resolveOfflineFile(fileUrl(link), listOf(root)))
     }
 
     @Test fun absolutePathOutsideRootsIsRejected() {
@@ -59,35 +66,35 @@ class OfflineFileBridgeTest {
     @Test fun nonLocalhostHostIsRejected() {
         val root = tempRoot()
         val file = fileUnder(root, "offline-video/ep1.mp4")
-        assertNull(resolveOfflineFile("file://evil.example${file.absolutePath}", listOf(root)))
+        assertNull(resolveOfflineFile(fileUrl(file, "evil.example"), listOf(root)))
     }
 
     @Test fun localhostHostIsAccepted() {
         val root = tempRoot()
         val file = fileUnder(root, "offline-video/ep1.mp4")
-        assertNotNull(resolveOfflineFile("file://localhost${file.absolutePath}", listOf(root)))
+        assertNotNull(resolveOfflineFile(fileUrl(file, "localhost"), listOf(root)))
     }
 
     @Test fun nonFileSchemeIsRejected() {
         val root = tempRoot()
-        assertNull(resolveOfflineFile("https://${root.absolutePath}/x.mp4", listOf(root)))
+        assertNull(resolveOfflineFile("https://${root.absolutePath.replace('\\', '/')}/x.mp4", listOf(root)))
     }
 
     @Test fun missingFileIsRejected() {
         val root = tempRoot()
-        assertNull(resolveOfflineFile("file://${root.absolutePath}/offline-video/nope.mp4", listOf(root)))
+        assertNull(resolveOfflineFile(fileUrl(File(root, "offline-video/nope.mp4")), listOf(root)))
     }
 
     @Test fun emptyAllowedRootsRejectEverything() {
         val root = tempRoot()
         val file = fileUnder(root, "offline-video/ep1.mp4")
-        assertNull(resolveOfflineFile("file://${file.absolutePath}", emptyList()))
+        assertNull(resolveOfflineFile(fileUrl(file), emptyList()))
     }
 
     @Test fun siblingPrefixDoesNotMatchRoot() {
         val root = tempRoot()
-        val sibling = File(root.parentFile, "${root.name}-sibling")
+        val sibling = File(requireNotNull(root.parentFile), "${root.name}-sibling")
         val file = fileUnder(sibling, "ep1.mp4")
-        assertNull(resolveOfflineFile("file://${file.absolutePath}", listOf(root)))
+        assertNull(resolveOfflineFile(fileUrl(file), listOf(root)))
     }
 }

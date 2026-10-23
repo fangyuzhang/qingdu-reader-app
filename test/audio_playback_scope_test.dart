@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fqapp/models/chapter_media.dart';
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/audio_page.dart';
+import 'package:fqapp/widgets/audio/listening_capsule.dart';
 import 'package:fqapp/services/audio_preferences.dart';
 import 'package:fqapp/services/listening_session.dart';
 import 'package:fqapp/services/native_player.dart';
@@ -17,7 +18,48 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     AudioPreferences.instance.resetForTest();
     ListeningSession.instance.clear();
+    AudioRouteWatcher.instance.resetForTest();
+    ReadingCapsuleHost.instance.resetForTest();
   });
+
+  testWidgets(
+    'the capsule stays fully usable when the reader toolbar collapses',
+    (tester) async {
+      final app = await _mount(tester);
+      app.open();
+      await _flush(tester);
+      app.navigator.currentState!.pop();
+      await _flush(tester);
+      // 非阅读页：保持完整胶囊。
+      expect(find.byType(ListeningCapsule), findsOneWidget);
+
+      ReadingCapsuleHost.instance.enterReader();
+      await _flush(tester);
+      // 阅读页工具栏收起：不再退化成底部小按钮，完整胶囊（播放/暂停、
+      // 设置、关闭）必须仍然可用。
+      expect(find.byType(ListeningCapsule), findsOneWidget);
+      expect(find.byKey(const ValueKey('audio-mini-toggle')), findsOneWidget);
+      expect(find.byKey(const ValueKey('audio-mini-settings')), findsOneWidget);
+      expect(find.byKey(const ValueKey('audio-mini-close')), findsOneWidget);
+      expect(find.byKey(const ValueKey('audio-mini-collapsed')), findsNothing);
+      expect(find.text('停止听书'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('audio-mini-toggle')));
+      await _flush(tester);
+      expect(app.players.single.isPlaying, isFalse);
+
+      ReadingCapsuleHost.instance.setToolbarVisible(true);
+      await _flush(tester);
+      expect(find.byType(ListeningCapsule), findsOneWidget);
+      expect(find.byKey(const ValueKey('audio-mini-collapsed')), findsNothing);
+
+      // 置顶弹窗（护眼提醒）期间：胶囊整体隐藏，不遮挡弹窗。
+      ReadingCapsuleHost.instance.setDialogOpen(true);
+      await _flush(tester);
+      expect(find.byType(ListeningCapsule), findsNothing);
+      expect(find.byKey(const ValueKey('audio-mini-collapsed')), findsNothing);
+    },
+  );
 
   testWidgets(
     'popping the audio page preserves playback and reopening reuses it',
@@ -51,6 +93,20 @@ void main() {
       expect(find.byKey(const ValueKey('audio-mini-open')), findsNothing);
     },
   );
+
+  testWidgets('a sheet over the audio page does not reveal the capsule', (
+    tester,
+  ) async {
+    final app = await _mount(tester);
+    app.open();
+    await _flush(tester);
+    expect(find.byKey(const ValueKey('audio-mini-open')), findsNothing);
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('播放设置'), findsOneWidget);
+    expect(find.byKey(const ValueKey('audio-mini-open')), findsNothing);
+  });
 
   testWidgets(
     'switching books waits for old native release before creating another',
@@ -110,6 +166,37 @@ void main() {
     },
   );
 
+  testWidgets('the floating capsule opens 听书设置 with 定时/语速/音色', (tester) async {
+    final app = await _mount(tester);
+    app.open();
+    await _flush(tester);
+    app.navigator.currentState!.pop();
+    await _flush(tester);
+    expect(find.byType(ListeningCapsule), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('audio-mini-settings')));
+    await _flush(tester);
+    expect(find.text('听书设置'), findsOneWidget);
+    expect(find.text('定时关闭'), findsOneWidget);
+    expect(find.text('语速'), findsOneWidget);
+    expect(find.text('音色'), findsOneWidget);
+  });
+
+  testWidgets('the capsule can be dragged somewhere else', (tester) async {
+    final app = await _mount(tester);
+    app.open();
+    await _flush(tester);
+    app.navigator.currentState!.pop();
+    await _flush(tester);
+    final capsule = find.byType(ListeningCapsule);
+    final before = tester.getTopLeft(capsule);
+    await tester.drag(capsule, const Offset(-40, -220));
+    await tester.pump();
+    final after = tester.getTopLeft(capsule);
+    expect(after.dy, lessThan(before.dy));
+    expect(after.dx, lessThan(before.dx));
+  });
+
   testWidgets(
     'another media request cancels narration still waiting for its source',
     (tester) async {
@@ -143,6 +230,7 @@ Future<_Harness> _mount(WidgetTester tester) async {
   await tester.pumpWidget(
     MaterialApp(
       navigatorKey: app.navigator,
+      navigatorObservers: [AudioRouteWatcher.instance],
       builder: (_, child) =>
           AudioPlaybackScope(navigatorKey: app.navigator, child: child!),
       home: const Scaffold(body: Text('书架')),

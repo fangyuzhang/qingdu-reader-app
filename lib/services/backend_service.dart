@@ -164,7 +164,7 @@ class BackendService {
       // Use the bundle manifest so nested CSS/fonts and plugin files are
       // deployed along with the top-level HTML and filters.
     ];
-    const runtimeRoots = ['assets/filters/', 'assets/web/', 'assets/plugins/'];
+    const runtimeRoots = ['assets/filters/', 'assets/web/'];
     final manifest = await AssetManifest.loadFromAssetBundle(_assets);
     for (final asset in manifest.listAssets()) {
       if (runtimeRoots.any(asset.startsWith)) {

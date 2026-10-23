@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../services/app_log.dart';
 import '../services/book_txt_export.dart';
-import '../services/playlet_share.dart';
+import '../services/share_service.dart';
 import '../widgets/logs/log_entry_card.dart';
 import '../widgets/logs/log_filter_sheet.dart';
 

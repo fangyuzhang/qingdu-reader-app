@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/models/media_item.dart';
 import 'package:fqapp/pages/cached_books_page.dart';
+import 'package:fqapp/pages/local_book_detail_page.dart';
 import 'package:fqapp/pages/reader_page.dart';
 import 'package:fqapp/services/chapter_cache_store.dart';
 
@@ -40,6 +41,9 @@ void main() {
     await tester.tap(find.text('离线测试书'));
     await tester.tap(find.text('离线测试书'));
     history.pending.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(LocalBookDetailPage), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('local-book-chapter-1')));
     await tester.pumpAndSettle();
     expect(find.byType(ReaderPage, skipOffstage: false), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -94,6 +98,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('离线测试书'));
       await tester.pumpAndSettle();
+      expect(find.byType(LocalBookDetailPage), findsOneWidget);
+      expect(find.byType(ReaderPage), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('local-book-read-button')));
+      await tester.pumpAndSettle();
       expect(find.textContaining('离线正文${scenario.chapter}'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -134,7 +142,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('离线测试书'));
       await tester.pumpAndSettle();
+      expect(find.byType(LocalBookDetailPage), findsOneWidget);
+      expect(find.byType(ReaderPage), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('local-book-read-button')));
+      await tester.pumpAndSettle();
       expect(find.textContaining('这段正文来自磁盘缓存'), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(LocalBookDetailPage), findsOneWidget);
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('删除《离线测试书》缓存'));

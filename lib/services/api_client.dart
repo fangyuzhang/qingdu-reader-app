@@ -508,6 +508,42 @@ class ApiClient {
     });
   }
 
+  /// The legacy video_model/mget playback route.
+  ///
+  /// The reading-edition playinfo endpoint enforces the reading app's own
+  /// chapter lock (`QUERY_CHAPTER_LOCK_ERROR`), while the audiobook player
+  /// still carries a stream for the same item. The listening session uses this
+  /// only as a fallback when playinfo refuses a chapter, never as the primary
+  /// source (mget ignores `tone_id`, which would break voice switching).
+  Future<AudioSource> audioPlaySource(
+    String itemId, {
+    required String bookId,
+    String? toneId,
+  }) async {
+    final selectedTone = toneId == null || toneId.trim().isEmpty
+        ? '0'
+        : toneId.trim();
+    final response = await _get(
+      _url('/api/v1/audio/play', {
+        'item_ids': itemId,
+        'book_id': bookId,
+        'tone_id': selectedTone,
+      }),
+    );
+    final statusCode = response.statusCode;
+    final bodyBytes = response.bodyBytes;
+    final baseUrl = _resourceBase;
+    return Isolate.run(() {
+      final payload = _decodeEnvelope(statusCode, bodyBytes);
+      return parseAudioSource(
+        payload,
+        itemId: itemId,
+        toneId: selectedTone,
+        baseUrl: baseUrl,
+      );
+    });
+  }
+
   /// Voice IDs come from ordinary book detail, as in the existing web player.
   /// Optional metadata failures must not prevent playing the default voice.
   Future<List<AudioVoice>> audioVoices(String bookId) async {
@@ -1204,7 +1240,10 @@ class ApiClient {
 
   // Note: 图文接口的解密标记与旧缓存升级见
   // .agents/notes/implemented/bug-fix/2026-09-10-reader-illustrations.md
-  Future<ChapterContent> chapterContent(String itemId) async {
+  Future<ChapterContent> chapterContent(
+    String itemId, {
+    bool allowEmpty = false,
+  }) async {
     final stopwatch = Stopwatch()..start();
     try {
       final response = await _get(
@@ -1227,7 +1266,9 @@ class ApiClient {
           data['content'] as String,
           baseUrl: baseUrl,
         );
-        if (content.isEmpty) throw const ApiException('正文为空');
+        if (content.isEmpty && !allowEmpty) {
+          throw const ApiException('正文为空');
+        }
         return content;
       });
     } on Exception {
@@ -1244,7 +1285,9 @@ class ApiClient {
             ? remaining
             : const Duration(seconds: 5),
       );
-      if (text.trim().isEmpty) throw const ApiException('正文为空');
+      if (text.trim().isEmpty && !allowEmpty) {
+        throw const ApiException('正文为空');
+      }
       return ChapterContent.fromPlainText(text);
     }
   }

@@ -8,10 +8,10 @@ import '../widgets/home/home_design.dart';
 import 'detail_page.dart';
 import 'search_page.dart';
 
-/// 书单条目「直达阅读」的公共链路。
+/// 书单条目「查看详情」的公共链路。
 ///
 /// 【青茄修复·新增】先把书目解析成书城里的同名书，再交给
-/// `DetailPage(autoOpenReader: true)` 打开上次进度；解析失败（离线/书城
+/// `DetailPage` 展示书籍详情与目录；解析失败（离线/书城
 /// 没有结果）时回退到搜索页，让用户自己挑一个来源。
 ///
 /// 首页和荐读页共用这一条链路，避免两处行为跑偏。
@@ -32,11 +32,9 @@ Future<void> openCuratedReading(
 
   if (resolution != null) {
     final item = resolution.toMediaItem();
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => DetailPage(item: item, autoOpenReader: true),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => DetailPage(item: item)));
     return;
   }
 
@@ -54,7 +52,7 @@ Future<void> openCuratedReading(
 /// 单本荐读书目详情。
 ///
 /// 【青茄重构·新增】首页不再直接推网文流，这里是「编辑部书单」的落点：
-/// 展示书目信息 + 荐语。主按钮已改为「开始阅读」（直达阅读器），
+/// 展示书目信息 + 荐语。主按钮先进入书城详情与目录，
 /// 下方仍保留「在书城搜索」作为手动挑源的次要入口。
 class CuratedBookPage extends StatefulWidget {
   const CuratedBookPage({
@@ -297,7 +295,7 @@ class _CuratedBookPageState extends State<CuratedBookPage> {
                         )
                       : const Icon(LucideIcons.book_open, size: 18),
                   label: Text(
-                    _opening ? '正在打开…' : '开始阅读',
+                    _opening ? '正在打开…' : '查看书籍详情',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -450,9 +448,9 @@ class _HowToReadCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '书单只做推荐，正文来自书城书源；点开始阅读会直接打开同名书的'
-            '最新可读来源。如果暂时找不到，也可以在书城搜索「$keyword」'
-            '自己挑一个来源。',
+            '书单只做推荐，正文来自书城书源；点“查看书籍详情”会先打开同名书的'
+            '详情与目录，再由你决定何时进入正文。如果暂时找不到，也可以在书城'
+            '搜索「$keyword」自己挑一个来源。',
             style: TextStyle(fontSize: 12.5, height: 1.6, color: palette.muted),
           ),
         ],

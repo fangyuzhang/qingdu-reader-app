@@ -7,12 +7,12 @@ import 'package:fqapp/models/book_comment.dart';
 
 /// Regression tests for B13 (audio/comment model parsing).
 ///
-/// Covers the upstream `cover` field on related short-drama entries, and the
-/// numeric helpers in [BookComment]/[AudioTone] that must degrade instead of
-/// throwing `Error`s on non-finite JSON numbers or out-of-range timestamps.
+/// Covers the related-work product boundary, and the numeric helpers in
+/// [BookComment]/[AudioTone] that must degrade instead of throwing `Error`s on
+/// non-finite JSON numbers or out-of-range timestamps.
 void main() {
   group('RelatedWork cover parsing', () {
-    test('uses video_data.cover when the other cover fields are absent', () {
+    test('ignores legacy video_data and keeps the original novel', () {
       final works = RelatedWork.fromPayload({
         'data': {
           'cell_data': [
@@ -38,9 +38,9 @@ void main() {
         },
       });
 
-      expect(works, hasLength(2));
-      expect(works[0].cover, 'https://example.test/n.jpg');
-      expect(works[1].cover, 'https://example.test/v.jpg');
+      expect(works, hasLength(1));
+      expect(works.single.kind, 'book');
+      expect(works.single.cover, 'https://example.test/n.jpg');
     });
   });
 

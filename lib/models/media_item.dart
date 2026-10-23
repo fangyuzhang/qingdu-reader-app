@@ -642,6 +642,18 @@ class Chapter {
   /// .agents/notes/implemented/feature/2026-09-11-reader-paragraph-bubble.md
   final String version;
 
+  /// Upstream chapter word count (`chapter_word_number`).
+  ///
+  /// This is catalogue metadata, not a replacement for inspecting the body.
+  /// It is useful for diagnostics and for distinguishing an obviously short
+  /// title page from a normal chapter, but the reader still validates content
+  /// before skipping anything.
+  final int? wordCount;
+
+  /// Upstream chapter type (`chapter_type`). Kept so future source-specific
+  /// front-matter rules do not have to re-open the raw directory payload.
+  final int? chapterType;
+
   /// 官方选集格子的元数据（`hj3/r0.java:413-419,539-554` 的
   /// `SaasVideoData` 字段）。JSON 侧的键名**未取证**（Gson 按字段名原样
   /// 读写，上游可能换成下划线风格），因此解析时多种拼写都接受，
@@ -656,6 +668,8 @@ class Chapter {
     required this.title,
     required this.volumeName,
     this.version = '',
+    this.wordCount,
+    this.chapterType,
     this.trailer = false,
     this.highlight = false,
     this.disabled = false,
@@ -667,6 +681,34 @@ class Chapter {
     title: _entryTitle(m, index: index),
     volumeName: (m['volume_name'] ?? m['volumeName'] ?? '').toString(),
     version: (m['version'] ?? '').toString(),
+    wordCount: _asInt(
+      m['chapter_word_number'] ?? m['word_count'] ?? m['wordCount'],
+    ),
+    chapterType: _asInt(m['chapter_type'] ?? m['chapterType']),
+  );
+
+  Chapter copyWith({
+    String? itemId,
+    String? title,
+    String? volumeName,
+    String? version,
+    int? wordCount,
+    int? chapterType,
+    bool? trailer,
+    bool? highlight,
+    bool? disabled,
+    bool? newlyUpdate,
+  }) => Chapter(
+    itemId: itemId ?? this.itemId,
+    title: title ?? this.title,
+    volumeName: volumeName ?? this.volumeName,
+    version: version ?? this.version,
+    wordCount: wordCount ?? this.wordCount,
+    chapterType: chapterType ?? this.chapterType,
+    trailer: trailer ?? this.trailer,
+    highlight: highlight ?? this.highlight,
+    disabled: disabled ?? this.disabled,
+    newlyUpdate: newlyUpdate ?? this.newlyUpdate,
   );
 }
 
@@ -752,7 +794,7 @@ class SearchTab {
 /// is merged in from the raw `item_data_list` in the same payload — see
 /// .agents/notes/implemented/feature/2026-09-11-reader-paragraph-bubble.md
 List<List<Chapter>> parseDirectory(Map<String, dynamic> payload) {
-  final versions = _directoryVersions(payload);
+  final metadata = _directoryMetadata(payload);
   final inner = _directoryInner(payload);
   if (inner is List) {
     final entries = _asMapList(inner);
@@ -762,7 +804,7 @@ List<List<Chapter>> parseDirectory(Map<String, dynamic> payload) {
                 for (var i = 0; i < entries.length; i++)
                   Chapter.fromRaw(entries[i], index: i),
               ]
-              .map((chapter) => _withVersion(chapter, versions))
+              .map((chapter) => _withMetadata(chapter, metadata))
               .where((chapter) => chapter.itemId.isNotEmpty)
               .toList();
       return chapters.isEmpty ? [] : [chapters];
@@ -785,13 +827,13 @@ List<List<Chapter>> parseDirectory(Map<String, dynamic> payload) {
         final chapter = Chapter.fromRaw(raw, index: i);
         if (chapter.itemId.isEmpty) continue;
         chapters.add(
-          Chapter(
-            itemId: chapter.itemId,
-            title: chapter.title,
-            volumeName: chapter.volumeName.isEmpty
-                ? volumeName
-                : chapter.volumeName,
-            version: _withVersion(chapter, versions).version,
+          _withMetadata(
+            chapter.copyWith(
+              volumeName: chapter.volumeName.isEmpty
+                  ? volumeName
+                  : chapter.volumeName,
+            ),
+            metadata,
           ),
         );
       }
@@ -815,7 +857,7 @@ List<List<Chapter>> parseDirectory(Map<String, dynamic> payload) {
             ? Episode.fromRaw(found.entries[i], index: i).toChapter()
             : Chapter.fromRaw(found.entries[i], index: i);
         if (chapter.itemId.isNotEmpty) {
-          chapters.add(_withVersion(chapter, versions));
+          chapters.add(_withMetadata(chapter, metadata));
         }
       }
       if (chapters.isNotEmpty) volumes.add(chapters);
@@ -824,38 +866,65 @@ List<List<Chapter>> parseDirectory(Map<String, dynamic> payload) {
   return volumes;
 }
 
-/// Fills in a chapter's missing `version` from the raw `item_data_list` of the
-/// same payload; the bridge-normalized entries omit it entirely.
-Chapter _withVersion(Chapter chapter, Map<String, String> versions) =>
-    chapter.version.isEmpty && versions[chapter.itemId]?.isNotEmpty == true
-    ? Chapter(
-        itemId: chapter.itemId,
-        title: chapter.title,
-        volumeName: chapter.volumeName,
-        version: versions[chapter.itemId]!,
-      )
-    : chapter;
+/// Fills in catalogue metadata omitted by the bridge-normalized entries.
+Chapter _withMetadata(
+  Chapter chapter,
+  Map<String, _DirectoryChapterMetadata> metadata,
+) {
+  final raw = metadata[chapter.itemId];
+  if (raw == null) return chapter;
+  return chapter.copyWith(
+    version: chapter.version.isEmpty ? raw.version : null,
+    wordCount: chapter.wordCount ?? raw.wordCount,
+    chapterType: chapter.chapterType ?? raw.chapterType,
+  );
+}
 
-/// Indexes `item_id → version` from the first raw `item_data_list` found in
-/// the payload. The normalized bridge chapters have no `version`, but the same
-/// response always also embeds the raw upstream list, which does.
-Map<String, String> _directoryVersions(dynamic value, [int depth = 0]) {
-  final versions = <String, String>{};
-  if (depth > 6 || value is! Map) return versions;
+class _DirectoryChapterMetadata {
+  const _DirectoryChapterMetadata({
+    this.version = '',
+    this.wordCount,
+    this.chapterType,
+  });
+
+  final String version;
+  final int? wordCount;
+  final int? chapterType;
+}
+
+/// Indexes stable chapter metadata from the raw `item_data_list` embedded in a
+/// directory response. The bridge's normalized chapters currently carry only
+/// IDs and titles; without this merge every consumer loses word counts and the
+/// reader can only discover title-only pages by fetching them.
+Map<String, _DirectoryChapterMetadata> _directoryMetadata(
+  dynamic value, [
+  int depth = 0,
+]) {
+  final metadata = <String, _DirectoryChapterMetadata>{};
+  if (depth > 6 || value is! Map) return metadata;
   final raw = value['item_data_list'];
   if (raw is List) {
     for (final entry in raw) {
       if (entry is! Map) continue;
       final id = (entry['item_id'] ?? entry['itemId'] ?? '').toString();
       final version = (entry['version'] ?? '').toString();
-      if (id.isNotEmpty && version.isNotEmpty) versions[id] = version;
+      if (id.isEmpty) continue;
+      metadata[id] = _DirectoryChapterMetadata(
+        version: version,
+        wordCount: _asInt(
+          entry['chapter_word_number'] ??
+              entry['word_count'] ??
+              entry['wordCount'],
+        ),
+        chapterType: _asInt(entry['chapter_type'] ?? entry['chapterType']),
+      );
     }
-    if (versions.isNotEmpty) return versions;
+    if (metadata.isNotEmpty) return metadata;
   }
   for (final child in value.values) {
-    if (child is Map) versions.addAll(_directoryVersions(child, depth + 1));
+    if (child is Map) metadata.addAll(_directoryMetadata(child, depth + 1));
   }
-  return versions;
+  return metadata;
 }
 
 /// Directory entries plus whether they came from the drama-shaped `episodes`

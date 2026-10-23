@@ -585,10 +585,7 @@
                     button.type = "button";
                     button.textContent = chapter.title;
                     button.addEventListener("click", () => {
-                        let target = "read.html";
-                        if (tab === "漫画") target = "comic.html";
-                        if (tab === "听书") target = "listen.html";
-                        if (tab === "短剧") target = "video.html";
+                        const target = tab === "听书" ? "listen.html" : "read.html";
                         location.href = `/${target}?source=${encodeURIComponent(source)}&book_id=${encodeURIComponent(bookId)}&item_id=${encodeURIComponent(chapter.id)}&tab=${encodeURIComponent(tab)}`;
                     });
                     grid.appendChild(button);

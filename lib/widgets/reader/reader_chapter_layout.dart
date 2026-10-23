@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../services/chapter_text_formatter.dart';
+import '../../services/reader_mark_style.dart';
 import '../../services/reader_preferences.dart';
 import '../../services/reader_underline_store.dart';
 import 'reader_bubble.dart';
@@ -114,6 +115,13 @@ class ReaderInlineNote {
     required this.quote,
     required this.thought,
     this.isExcerpt = false,
+    this.category = '',
+    this.tags = const [],
+    this.markerType = '',
+    this.markerLabel = '',
+    this.markerColorValue = 0,
+    this.markStyle = ReaderMarkStyle.solid,
+    this.markColorValue = 0,
   });
 
   /// 存储键（`ReaderAnnotationStore.keyFor`）——批注块内的编辑/删除回写用。
@@ -131,6 +139,24 @@ class ReaderInlineNote {
 
   /// true = 书摘（角标「摘」），false = 批注（角标「批」）。
   final bool isExcerpt;
+
+  final String category;
+  final List<String> tags;
+  final String markerType;
+  final String markerLabel;
+  final int markerColorValue;
+  final ReaderMarkStyle markStyle;
+  final int markColorValue;
+
+  String get badgeLabel {
+    final value = markerLabel.trim();
+    if (value.isNotEmpty) return value;
+    return isExcerpt ? '摘' : '批';
+  }
+
+  int get badgeColorValue => markerColorValue != 0
+      ? markerColorValue
+      : (isExcerpt ? readerDefaultExcerptColor : readerDefaultAnnotationColor);
 
   /// 块内展示的文字：有想法用想法，书摘/纯收藏用原文。
   String get body => thought.trim().isEmpty ? quote : thought;
@@ -266,6 +292,128 @@ class ReaderContentBlock {
   }
   if (layoutStart < 0) return null;
   return (start: layoutStart, end: layoutEnd);
+}
+
+/// 有声书没有字符坐标，只能拿「当前正在念的那一句」原文在排版里找位置。
+///
+/// 先整句精确匹配；再忽略空白字符比对一次（字幕里常有多余空格）；最后用
+/// 前 12 个字符做前缀匹配，遮开标点差异。都找不到就返回 null——宁可这一
+/// 句不高亮，也不能错标到别的段。
+({int start, int end})? narrationTextRange(
+  ReaderChapterLayout layout,
+  String text,
+) {
+  final needle = text.trim();
+  if (needle.isEmpty) return null;
+  final probes = <String>[
+    needle,
+    if (needle.length > 12) needle.substring(0, 12),
+  ];
+  for (final probe in probes) {
+    if (probe.trim().isEmpty) continue;
+    for (var i = 1; i < layout.blocks.length; i++) {
+      final block = layout.blocks[i];
+      if (!block.isBody || block.text.isEmpty) continue;
+      final hit = _matchInBlock(block, probe);
+      if (hit != null) return hit;
+    }
+  }
+  return null;
+}
+
+/// 在排版里找 [text] 的全部出现位置，取离 [hint] 最近的一处。
+///
+/// 系统朗读同时给出字符偏移和分句原文：偏移偶尔会与排版块错位，原文匹配
+/// 又可能撞上重复的短句。两者结合——先按原文找出候选，再取离偏移最近的
+/// 那一个，既精确又不会跳到章节开头。
+({int start, int end})? narrationTextRangeNear(
+  ReaderChapterLayout layout,
+  String text,
+  int hint,
+) {
+  final needle = text.trim();
+  if (needle.isEmpty) return null;
+  ({int start, int end})? best;
+  var bestGap = 1 << 30;
+  for (var i = 1; i < layout.blocks.length; i++) {
+    final block = layout.blocks[i];
+    if (!block.isBody || block.text.isEmpty) continue;
+    var from = 0;
+    while (true) {
+      final at = block.text.indexOf(needle, from);
+      if (at < 0) break;
+      final hit = (
+        start: block.start + at,
+        end: block.start + at + needle.length,
+      );
+      final gap = (hit.start - hint).abs();
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = hit;
+      }
+      from = at + 1;
+    }
+  }
+  return best;
+}
+
+/// 段落内匹配：先按原样找，再忽略空白找一次（用下标映射还原到原文坐标）。/// 段落内匹配：先按原样找，再忽略空白找一次（用下标映射还原到原文坐标）。
+({int start, int end})? _matchInBlock(ReaderContentBlock block, String needle) {
+  final at = block.text.indexOf(needle);
+  if (at >= 0) {
+    return (start: block.start + at, end: block.start + at + needle.length);
+  }
+  final compactNeedle = needle.replaceAll(_ignorable, '');
+  if (compactNeedle.isEmpty) return null;
+  final compact = StringBuffer();
+  final positions = <int>[];
+  for (var i = 0; i < block.text.length; i++) {
+    if (_ignorable.hasMatch(block.text[i])) continue;
+    compact.write(block.text[i]);
+    positions.add(i);
+  }
+  final hit = compact.toString().indexOf(compactNeedle);
+  if (hit < 0) return null;
+  final start = positions[hit];
+  final end = positions[hit + compactNeedle.length - 1] + 1;
+  return (start: block.start + start, end: block.start + end);
+}
+
+final _ignorable = RegExp(
+  '[\\s，。！？、；：""'
+  '（）《》…—,.!?;:]',
+);
+
+/// 有声书兜底高亮：句对不上原文时，按朗读进度比例落到所在段落，整段高亮。
+///
+/// 字幕句可能跨段落、或与正文标点不同，逐句匹配会落空；这时至少要让读者
+/// 看见「正在读的是这一段」，而不是整章没有任何提示。
+({int start, int end})? narrationBlockAtProgress(
+  ReaderChapterLayout layout,
+  double progress,
+) {
+  final blocks = <ReaderContentBlock>[
+    for (var i = 1; i < layout.blocks.length; i++)
+      if (layout.blocks[i].isBody && layout.blocks[i].text.isNotEmpty)
+        layout.blocks[i],
+  ];
+  if (blocks.isEmpty) return null;
+  var total = 0;
+  for (final block in blocks) {
+    total += block.text.length;
+  }
+  if (total == 0) return null;
+  final target = (progress.clamp(0.0, 1.0) * (total - 1)).round();
+  var cursor = 0;
+  for (final block in blocks) {
+    final end = cursor + block.text.length;
+    if (target < end) {
+      return (start: block.start, end: block.start + block.text.length);
+    }
+    cursor = end;
+  }
+  final last = blocks.last;
+  return (start: last.start, end: last.start + last.text.length);
 }
 
 /// A slice retains its original paragraph layout, including justification.
@@ -440,7 +588,9 @@ class ReaderChapterLayout {
     final target = offset.clamp(0, legacyTextLength);
     var block = blocks.first;
     for (final candidate in blocks) {
-      if (candidate.isImage || candidate.text.isEmpty) continue;
+      if (candidate.isNote || candidate.isImage || candidate.text.isEmpty) {
+        continue;
+      }
       if (candidate.legacyStart > target) break;
       block = candidate;
     }
@@ -629,6 +779,8 @@ class ReaderChapterLayout {
   String textInRange(int start, int end) {
     final buffer = StringBuffer();
     for (final block in blocks) {
+      // 批注块不属于正文，复制 / 选区文本不能把批注内容算进去。
+      if (block.isNote) continue;
       if (block.start >= end) break;
       if (block.end <= start) continue;
       final from = math.max(start, block.start) - block.start;
@@ -661,8 +813,8 @@ class ReaderChapterLayout {
   /// The text block holding [offset], or null past the last block.
   ReaderContentBlock? blockAtOffset(int offset) {
     for (final block in blocks) {
-      // 批注块不参与正文定位：它的 start 贴着上一段末尾，若参与匹配
-      // 会与下一段的字符区间重叠，命中错误的块。
+      // 批注块不参与正文定位：它的 start 与拆开后的后半段相同，若参与
+      // 匹配会命中批注而不是正文。
       if (block.isNote) continue;
       if (block.start <= offset && offset < block.end) return block;
     }
@@ -925,8 +1077,9 @@ class ReaderChapterLayout {
 }
 
 /// 批注块左右「非正文」宽度：容器内边距 16 + 角标 20 + 间距 8 +
-/// 折叠/删除图标 32 + 间隙 4 = 80；改 [ReaderNoteBlock] 布局时必须同步。
-const double _kNoteChromeWidth = 80;
+/// 角标 20 + 间距 8 + 三个图标 48 + 三个间隙 12 = 88，另留 12 的余量。
+/// 改 [ReaderNoteBlock] 布局时必须同步。
+const double _kNoteChromeWidth = 100;
 
 /// 批注块纵向固定开销：容器上下内边距 16 + 底部外边距 6。
 const double _kNoteChromeHeight = 22;
@@ -952,9 +1105,14 @@ const double _kNoteMinBodyWidth = 120;
 /// 批注块用的合成块 index 起点，远离正文段落序号，避免 key 冲突。
 const int _kInlineNoteIndexBase = 1000000;
 
-/// 把批注块按字符位置插进所属段落之后。
+/// 段落被批注拆开后的后半段 index 起点，避免与正文段落（以及批注块）冲突。
+const int _kSplitBlockIndexBase = 2000000;
+
+/// 把批注块按字符位置插进所属**行**之后。
 ///
 /// 批注块的 `start` 落在某段落 [ReaderContentBlock.start]..[end] 之内即归属该段；
+/// 再按段内行范围找到包含 `start` 的那一行，把段落拆成「行前 / 行后」两段，
+/// 批注块插在两段之间，后续行整体顺延。
 /// 找不到归属（例如跨章残留）时挂到章末，保证不会静默丢失。
 /// 返回重排后的块列表与总高度。
 (List<ReaderContentBlock>, double) _insertInlineNotes(
@@ -967,14 +1125,26 @@ const int _kInlineNoteIndexBase = 1000000;
   final out = <ReaderContentBlock>[];
   var cursor = 0;
   var ordinal = 0;
+  var splitOrdinal = 0;
   var running = 0.0;
 
-  void appendNote(ReaderInlineNote note, ReaderContentBlock anchor) {
+  void emit(ReaderContentBlock block) {
+    out.add(block);
+    if (block.lines.isNotEmpty) {
+      running += block.height + spec.paragraphSpacing;
+    }
+  }
+
+  void appendNote(
+    ReaderInlineNote note, {
+    required int start,
+    required int legacyStart,
+  }) {
     final noteBlock = _measureInlineNote(
       note,
       index: _kInlineNoteIndexBase + ordinal++,
-      anchorStart: anchor.end,
-      anchorLegacy: anchor.legacyStart + anchor.text.length,
+      anchorStart: start,
+      anchorLegacy: legacyStart,
       top: running,
       spec: spec,
     );
@@ -983,23 +1153,139 @@ const int _kInlineNoteIndexBase = 1000000;
   }
 
   for (final block in blocks) {
-    final placed = block.withTop(running);
-    out.add(placed);
-    if (placed.lines.isNotEmpty) {
-      running += placed.height + spec.paragraphSpacing;
+    if (block.isTitle || block.isImage || block.lines.isEmpty) {
+      emit(block.withTop(running));
+      continue;
     }
-    if (block.isTitle || block.isImage) continue;
+    final notes = <ReaderInlineNote>[];
     while (cursor < pending.length && pending[cursor].start <= block.end) {
-      appendNote(pending[cursor++], block);
+      notes.add(pending[cursor++]);
+    }
+    if (notes.isEmpty) {
+      emit(block.withTop(running));
+      continue;
+    }
+    var emitted = 0;
+    var firstSegment = true;
+    int segmentIndex() {
+      if (firstSegment) {
+        firstSegment = false;
+        return block.index;
+      }
+      return _kSplitBlockIndexBase + splitOrdinal++;
+    }
+
+    for (final note in notes) {
+      final local = (note.start - block.start).clamp(0, block.text.length);
+      final lineIndex = _floorIndex(
+        block.lines.length,
+        (index) => block.lines[index].start <= local,
+      );
+      final lineEnd = block.lines[lineIndex].end.clamp(0, block.text.length);
+      if (lineEnd > emitted) {
+        emit(
+          _sliceBodyBlock(
+            block,
+            from: emitted,
+            to: lineEnd,
+            index: segmentIndex(),
+            top: running,
+          ),
+        );
+        emitted = lineEnd;
+      }
+      // 批注块的字符起点落在这一行的末尾；同一行有多条批注时依次排在
+      // 该行之后，后续正文从下一行继续。
+      appendNote(
+        note,
+        start: block.start + emitted,
+        legacyStart: block.legacyStart + emitted,
+      );
+    }
+    if (emitted < block.text.length) {
+      emit(
+        _sliceBodyBlock(
+          block,
+          from: emitted,
+          to: block.text.length,
+          index: segmentIndex(),
+          top: running,
+        ),
+      );
     }
   }
   if (cursor < pending.length && blocks.isNotEmpty) {
     final last = blocks.last;
     while (cursor < pending.length) {
-      appendNote(pending[cursor++], last);
+      appendNote(
+        pending[cursor++],
+        start: last.end,
+        legacyStart: last.legacyStart + last.text.length,
+      );
     }
   }
   return (out, running);
+}
+
+/// 把正文段落按字符区间 [from, to) 切成一个独立块。
+///
+/// [from] / [to] 必须落在行边界上（[_insertInlineNotes] 用行尾切分）。
+/// 首段保留段首缩进，末段保留段尾的段评气泡；其余装饰与段落身份沿用原块。
+ReaderContentBlock _sliceBodyBlock(
+  ReaderContentBlock block, {
+  required int from,
+  required int to,
+  required int index,
+  required double top,
+}) {
+  final lines = <ReaderTextLine>[];
+  var baseTop = 0.0;
+  var hasBase = false;
+  for (final line in block.lines) {
+    final start = math.max(line.start, from);
+    final end = math.min(line.end, to);
+    if (end <= start) continue;
+    if (!hasBase) {
+      baseTop = line.top;
+      hasBase = true;
+    }
+    lines.add(
+      ReaderTextLine(
+        start - from,
+        end - from,
+        line.top - baseTop,
+        line.bottom - baseTop,
+      ),
+    );
+  }
+  final height = lines.isEmpty ? 0.0 : lines.last.bottom;
+  final originalChildren = block.span.children ?? const <InlineSpan>[];
+  final span = TextSpan(
+    style: block.span.style,
+    children: [
+      if (from == 0 && originalChildren.isNotEmpty) originalChildren.first,
+      TextSpan(text: block.text.substring(from, to)),
+      if (to == block.text.length && originalChildren.length >= 3)
+        originalChildren.last,
+    ],
+  );
+  return ReaderContentBlock(
+    index: index,
+    text: block.text.substring(from, to),
+    start: block.start + from,
+    legacyStart: block.legacyStart + from,
+    top: top,
+    height: height,
+    span: span,
+    align: block.align,
+    lines: List.unmodifiable(lines),
+    paraIndex: block.paraIndex,
+    textId: block.textId,
+    startMs: block.startMs,
+    bubbleCount: to == block.text.length ? block.bubbleCount : null,
+    bubbleVariant: to == block.text.length ? block.bubbleVariant : null,
+    underlined: block.underlined,
+  );
 }
 
 /// 测量一条批注块：先按批注文字风格量出正文高度，再折算成整块高度。
