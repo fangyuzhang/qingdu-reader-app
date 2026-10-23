@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/pages/reading_report_page.dart';
 import 'package:fqapp/services/library_store.dart';
+import 'package:fqapp/services/reading_report.dart';
 import 'package:fqapp/services/reading_stats_store.dart';
 
 /// 「我的阅读」详细报告页：五个档位的排版与数据接线。
@@ -85,7 +86,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('每日阅读：周档七天齐全，阅历档不出现', (tester) async {
+  testWidgets('每日阅读：周档补齐到今天的每一天，阅历档不出现', (tester) async {
     await seed(tester);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
@@ -95,13 +96,13 @@ void main() {
       200,
     );
     expect(find.text('每日阅读'), findsOneWidget);
-    // 周档补齐 0 分钟的天，所以正好 7 行（哪怕只读了其中两天）。
+    // 周档补齐 0 分钟的天，但只列到今天：周一起算共 weekday 行。
     final rows = find.byWidgetPredicate((widget) {
       final key = widget.key;
       return key is ValueKey<String> &&
           key.value.startsWith('reading-report-daily-row-');
     });
-    expect(rows, findsNWidgets(7));
+    expect(rows, findsNWidgets(reportDay(DateTime.now()).weekday));
 
     // 档位切换在列表顶部，先滚回去再点「阅历」。
     await tester.scrollUntilVisible(

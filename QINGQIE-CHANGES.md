@@ -625,6 +625,7 @@ flutter test             # 1954 passed / 10 skipped
 - 收敛方案：
   - 服务层新增 `ReadingReport.dailyIn(range, {includeEmpty})` 与 `reportDayLabel()`（`lib/services/reading_report.dart`），逐日明细与「今天/昨天/周几」文案只此一份。
   - 报告页新增「每日阅读」卡片（`_DailyReadingCard`）：按天列出时长 + 相对进度条，默认 14 行、超出可展开；周档补齐 0 分钟的天，年/总档只列有记录的日子；「阅历」档不出现。
+  - 真机复验后两处微调：只列到今天（不再把本周未来的周六/周日列成「--」）；时长列改为等比缩放，系统字号调大时也不再截成「5小时16…」。
   - 我的页删除 `_DailyRecordsCard`、`_RecentCoversCard`（与「最近阅读」同数据重复）、`_daySubtitle`；热力图卡片副标题改为「最近 16 周 · 点击查看每日阅读」。
   - `_computeDayMinutes` 改为复用 `buildBookDayMinutes + sumDayMinutes`；`_dayKey` 统一为 `reportDayKey`。
 - 代码精简：
@@ -633,4 +634,9 @@ flutter test             # 1954 passed / 10 skipped
   - 移除 pubspec 中已无任何 `package:hive` 引用的 `hive` / `hive_flutter`（代码统一走 `hive_ce`）。
   - 保留待确认项：`DetailExtras`、`ReaderSelectionEntry`、`HomeMediaCard` 等「只在自家文件内使用」的公开声明，是否降为私有涉及公开 API，未动。
 - 测试：`flutter analyze` 无问题；新增 5 条用例（`dailyIn` 三种口径 + 日期标签 + 报告页「每日阅读」7 行）；全量 `flutter test` 通过数 1485 → 1490，失败 15 条与基线 `9d20ecb` 完全一致（阅读器系统栏/批注/段评等既有问题，与本次无关）。
-- APK：签名、对齐校验通过；SHA-256 `54681cbd27c6512848a64412637a872bde58f5984b1c60b323523a2ff41b5128`；38,524,657 字节；真机 `lastUpdateTime=2026-10-23 15:23:23`。
+- APK：签名、对齐校验通过；SHA-256 `0299fdc928591880208d8e0d7fb7cc1d1d782996a213bbf3973abf9e44cbd102`；38,524,658 字节。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：
+  - 「我的」页只剩 阅读热力图 / 我的笔记 / 最近阅读 / 阅读排行，无「每日记录」「最近封面」；
+  - 热力图卡片副标题「最近 16 周 · 点击查看每日阅读」；
+  - 报告页「每日阅读」周档 5 行（周一→今天），时长完整显示，进度条以周内最高一天为满格；
+  - 深色模式下卡片底色/文字/进度条随主题切换，无白块。

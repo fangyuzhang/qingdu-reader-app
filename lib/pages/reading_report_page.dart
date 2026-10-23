@@ -219,6 +219,14 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     }
   }
 
+  /// 每日阅读只统计到今天：周 / 月档的期末若在未来，不把未来几天列成「--」。
+  ReportRange get _dailyRange {
+    final today = reportDay(DateTime.now());
+    final end = _range.end.isAfter(today) ? today : _range.end;
+    final start = _range.start.isAfter(end) ? end : _range.start;
+    return ReportRange(start, end);
+  }
+
   /// 已过去的天数（当期为「到今天为止」，往期为整期）。
   int _elapsedDays(ReportRange range) {
     final today = reportDay(DateTime.now());
@@ -461,7 +469,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                   const SizedBox(height: 12),
                   _DailyReadingCard(
                     days: report.dailyIn(
-                      _range,
+                      _dailyRange,
                       includeEmpty: _scope == ReportScope.week,
                     ),
                     totalMinutes: _minutes(report),
@@ -1225,16 +1233,21 @@ class _DailyReadingRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 66,
-            child: Text(
-              active ? formatReadingDuration(minutes) : '--',
-              textAlign: TextAlign.right,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                color: active ? palette.ink : palette.muted,
+            width: 92,
+            // 系统字号被调大时「5小时16分钟」会超出 92pt：等比缩小，
+            // 不加省略号——时长被截成「5小时16…」等于没显示。
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                active ? formatReadingDuration(minutes) : '--',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                  color: active ? palette.ink : palette.muted,
+                ),
               ),
             ),
           ),
