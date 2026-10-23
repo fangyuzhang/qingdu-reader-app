@@ -178,7 +178,7 @@ void main() {
     expect(detail.item.kind, 'audio');
   });
 
-  testWidgets('滑离顶部后上滑弹出浮动搜索按钮，回顶自动收起', (tester) async {
+  testWidgets('滚动时不再出现浮动搜索按钮，顶部搜索入口保留', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetPhysicalSize);
@@ -188,31 +188,15 @@ void main() {
     await tester.pumpAndSettle();
 
     final list = find.byKey(const Key('home_curated'));
-    double fabOpacity() => tester
-        .widget<AnimatedOpacity>(
-          find.ancestor(
-            of: find.byKey(const Key('home-search-float')),
-            matching: find.byType(AnimatedOpacity),
-          ),
-        )
-        .opacity;
-
-    // 往下滑很多：浮动搜索按钮滑入（opacity = 1）。
     for (var i = 0; i < 12; i++) {
       await tester.drag(list, const Offset(0, -300));
       await tester.pump(const Duration(milliseconds: 40));
     }
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('home-search-float')), findsOneWidget);
-    expect(fabOpacity(), 1);
 
-    // 回到顶部：按钮收起（opacity = 0）。
-    for (var i = 0; i < 20; i++) {
-      await tester.drag(list, const Offset(0, 400));
-      await tester.pump(const Duration(milliseconds: 40));
-    }
-    await tester.pumpAndSettle();
-    expect(fabOpacity(), 0);
+    // 固定顶栏的搜索按钮全程在；滚动后不再叠一个浮动搜索按钮。
+    expect(find.byKey(const Key('home-search-float')), findsNothing);
+    expect(find.byKey(const Key('home-search-button')), findsOneWidget);
   });
 
   testWidgets('顶部分类标签打开该分类书城页', (tester) async {
@@ -620,5 +604,48 @@ void main() {
       expect(book('m', '水浒传', 'classic', age: '15+').isMature, isTrue);
       expect(book('n', '西游记', 'classic').isMature, isFalse);
     });
+  });
+
+  testWidgets('分类卡片不再展示与「全部」对不上的本数', (tester) async {
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('精选 2 本'), findsNothing);
+    expect(find.text('精选书单 · 查看全部'), findsWidgets);
+  });
+
+  testWidgets('横向书架滑到末尾后继续右滑进入全部', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final many = CuratedCatalog(
+      categories: [category('classic', '古典名著')],
+      books: [for (var i = 0; i < 8; i++) book('rail$i', '古典名著$i', 'classic')],
+    );
+    Future<List<MediaItem>> loader(String query, int offset) async =>
+        offset == 0 ? [searchHit('补充书')] : const [];
+
+    await tester.pumpWidget(
+      app(HomePage(catalog: many, categoryLoader: loader)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('home-rail-classic')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    // 先滚到末端，多出来的距离就是越过右端的 overscroll。
+    await tester.drag(
+      find.byKey(const Key('home-rail-classic')),
+      const Offset(-900, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CategoryBrowsePage), findsOneWidget);
   });
 }

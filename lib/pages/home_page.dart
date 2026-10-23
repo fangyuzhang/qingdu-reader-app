@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/curated_book.dart';
@@ -50,9 +51,6 @@ class _HomePageState extends State<HomePage> {
 
   /// 正在解析/打开某本书：给一层很轻的遮罩，避免重复点击和闪屏。
   bool _opening = false;
-
-  /// 【青茄修复·上滑搜索】滑离顶部后，往上稍一滑动就在页顶弹出搜索按钮。
-  bool _searchFabVisible = false;
 
   @override
   void initState() {
@@ -138,46 +136,42 @@ class _HomePageState extends State<HomePage> {
                 // 滑到再深的位置也能随时换分类或听书。
                 _topBar(palette),
                 Expanded(
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: _onHomeScroll,
-                    child: RefreshIndicator(
-                      color: HomePalette.accent,
-                      backgroundColor: palette.surface,
-                      onRefresh: () => _load(rotateRecommendations: true),
-                      child: CustomScrollView(
-                        key: const Key('home_curated'),
-                        physics: const BouncingScrollPhysics(
-                          parent: AlwaysScrollableScrollPhysics(),
-                        ),
-                        slivers: [
-                          if (_loading)
-                            const SliverToBoxAdapter(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 80),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: HomePalette.accent,
-                                  ),
+                  child: RefreshIndicator(
+                    color: HomePalette.accent,
+                    backgroundColor: palette.surface,
+                    onRefresh: () => _load(rotateRecommendations: true),
+                    child: CustomScrollView(
+                      key: const Key('home_curated'),
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      slivers: [
+                        if (_loading)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 80),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: HomePalette.accent,
                                 ),
                               ),
-                            )
-                          else if (_catalog.books.isEmpty)
-                            SliverToBoxAdapter(child: _empty(palette))
-                          else ...[
-                            ..._homeSlivers(palette),
-                            SliverToBoxAdapter(child: _footer(palette)),
-                          ],
-                          const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                            ),
+                          )
+                        else if (_catalog.books.isEmpty)
+                          SliverToBoxAdapter(child: _empty(palette))
+                        else ...[
+                          ..._homeSlivers(palette),
+                          SliverToBoxAdapter(child: _footer(palette)),
                         ],
-                      ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                      ],
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          _searchFab(palette),
           if (_opening) const _OpeningOverlay(),
         ],
       ),
@@ -210,62 +204,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  /// 【青茄修复·上滑搜索】滑离顶部后，往上稍一滑动就在页顶弹出搜索按钮；
-  /// 回到顶部自动收起。按钮始终浮在固定标签栏下方，点一下直接进搜索页。
-  bool _onHomeScroll(ScrollNotification notification) {
-    final pixels = notification.metrics.pixels;
-    final delta = notification is ScrollUpdateNotification
-        ? notification.scrollDelta
-        : null;
-    final shouldShow =
-        pixels > 160 || (pixels > 8 && delta != null && delta > 24);
-    if (shouldShow != _searchFabVisible) {
-      setState(() => _searchFabVisible = shouldShow);
-    }
-    return false;
-  }
-
-  Widget _searchFab(HomePalette palette) {
-    return Positioned(
-      top: 8,
-      left: 0,
-      right: 0,
-      child: Center(
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          offset: Offset(0, _searchFabVisible ? 0 : -1.6),
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 180),
-            opacity: _searchFabVisible ? 1 : 0,
-            child: IgnorePointer(
-              ignoring: !_searchFabVisible,
-              child: FilledButton.icon(
-                key: const Key('home-search-float'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: palette.surface,
-                  foregroundColor: palette.ink,
-                  elevation: 3,
-                  side: BorderSide(color: palette.line, width: 0.6),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 10,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                ),
-                onPressed: _openSearch,
-                icon: const Icon(LucideIcons.search, size: 17),
-                label: const Text('搜索', style: TextStyle(fontSize: 13)),
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -578,8 +516,11 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         const SizedBox(height: 1),
+                        // 这里的数字只是首页轮换用的本地书单条数，点进「全部」
+                        // 还会从书城追加更多，写「精选 N 本」会和目标页对不上。
+                        // 不写死数量，避免用户拿它当分类总数。
                         Text(
-                          '精选 ${_catalog.booksOf(category.key).length} 本',
+                          '精选书单 · 查看全部',
                           style: TextStyle(
                             fontSize: 10.5,
                             color: palette.muted,
@@ -767,19 +708,25 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 10),
           SizedBox(
             height: tileWidth * 4 / 3 + captionHeight,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: books.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (context, index) => CuratedBookTile(
-                key: Key('home-recommend-${category.key}-${books[index].id}'),
-                book: books[index],
-                category: category,
-                width: tileWidth,
-                coverUrl: _coverOf(books[index]),
-                onTap: () => _openBook(books[index]),
-                onLongPress: () => _openCuratedPage(books[index]),
+            child: _CategoryRail(
+              key: Key('home-rail-${category.key}'),
+              // 滑到末尾后继续右滑，直接进「全部」。阈值按拖动距离累计，
+              // 松手即重置，避免轻扫误触。
+              onOpenAll: () => _openCategory(category),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                itemCount: books.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
+                itemBuilder: (context, index) => CuratedBookTile(
+                  key: Key('home-recommend-${category.key}-${books[index].id}'),
+                  book: books[index],
+                  category: category,
+                  width: tileWidth,
+                  coverUrl: _coverOf(books[index]),
+                  onTap: () => _openBook(books[index]),
+                  onLongPress: () => _openCuratedPage(books[index]),
+                ),
               ),
             ),
           ),
@@ -983,6 +930,65 @@ class _Label extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 横向书架的「滑到底继续滑 = 查看全部」容器。
+///
+/// 安卓默认 ClampingScrollPhysics 到头后不再移动，只会持续发
+/// [OverscrollNotification]。这里把一次拖动中越过右端的距离累加，达到阈值就
+/// 打开分类页并给一次轻震动；松手 / 重新按下都会清零，所以正常滑动不会误触。
+class _CategoryRail extends StatefulWidget {
+  const _CategoryRail({
+    super.key,
+    required this.child,
+    required this.onOpenAll,
+  });
+
+  final Widget child;
+  final VoidCallback onOpenAll;
+
+  @override
+  State<_CategoryRail> createState() => _CategoryRailState();
+}
+
+class _CategoryRailState extends State<_CategoryRail> {
+  /// 滑到末尾后再拖约 72dp 才触发：太短会被正常甩动误触，太长又像滑不动。
+  static const double _triggerOverscroll = 72;
+
+  double _pull = 0;
+  bool _fired = false;
+
+  bool _onScroll(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.horizontal) return false;
+    if (notification is ScrollStartNotification) {
+      _pull = 0;
+      _fired = false;
+    } else if (notification is OverscrollNotification) {
+      final atEnd =
+          notification.metrics.extentAfter <= 0.5 &&
+          notification.metrics.maxScrollExtent > 0;
+      if (atEnd && notification.overscroll > 0 && !_fired) {
+        _pull += notification.overscroll;
+        if (_pull >= _triggerOverscroll) {
+          _fired = true;
+          HapticFeedback.selectionClick();
+          widget.onOpenAll();
+        }
+      }
+    } else if (notification is ScrollEndNotification) {
+      _pull = 0;
+      _fired = false;
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScroll,
+      child: widget.child,
     );
   }
 }
