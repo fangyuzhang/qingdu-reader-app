@@ -54,9 +54,7 @@ class ReaderStatusBar extends StatelessWidget {
         ? null
         : (progress.clamp(0.0, 1.0) * bookPages).round().clamp(1, bookPages);
     final percent = (progress.clamp(0.0, 1.0) * 100).toStringAsFixed(1);
-    final pageLabel = readPage == null
-        ? null
-        : '$readPage/$bookPages $percent%';
+    final pageCountLabel = readPage == null ? null : '$readPage/$bookPages';
     // 状态栏必须保持高度恒定。上下滑动模式下滚动的像素位置在切换日夜时
     // 原样保留，若这里随内容（分页行 / 电池块 / 百分比）增减高度，正文可用
     // 高度会变化一次，视觉上就是正文上下跳一下。分页模式没有跨页滚动所以
@@ -107,16 +105,38 @@ class ReaderStatusBar extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        pageLabel ?? time,
-                        key: ValueKey(
-                          pageLabel == null
-                              ? 'reader-clock'
-                              : 'reader-page-progress',
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: pageCountLabel == null
+                          ? Text(
+                              time,
+                              key: const ValueKey('reader-clock'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            )
+                          : Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    pageCountLabel,
+                                    key: const ValueKey('reader-page-progress'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                // 页数与百分比之间留两个数字的空档：原来的单个
+                                // 空格让「2085/2096」和「99.5%」粘在一起，读数
+                                // 时容易当成一个数。宽度按当前字号实测，换字体
+                                // 或调大系统字号都跟着走。
+                                SizedBox(width: _gapWidth(context)),
+                                Flexible(
+                                  child: Text(
+                                    '$percent%',
+                                    key: const ValueKey('reader-page-percent'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
                     ),
                     if (status.battery != null) ...[
                       const SizedBox(width: 12),
@@ -144,5 +164,16 @@ class ReaderStatusBar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 一个空格 + 两个数字的宽度，用于页数与百分比之间的分隔。
+  double _gapWidth(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style;
+    final painter = TextPainter(
+      text: TextSpan(text: ' 00', style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.width;
   }
 }

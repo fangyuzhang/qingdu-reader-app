@@ -85,7 +85,10 @@ void main() {
 
     // 中途关工具栏：滚动偏移抵消让位，正文视觉位置分毫不动。
     await _openMenu(tester);
-    expect(tester.getRect(find.byKey(paragraph)).top, closeTo(scrolledTop, 0.5));
+    expect(
+      tester.getRect(find.byKey(paragraph)).top,
+      closeTo(scrolledTop, 0.5),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -160,17 +163,19 @@ void main() {
     await tester.pump();
     expect(find.text('63%'), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-controls')), findsNothing);
-    final oldProgress = tester
-        .widget<Text>(find.byKey(const ValueKey('reader-page-progress')))
-        .data;
+    // 页数与百分比分成了两个 Text，中间隔两个数字的宽度：整数页码在
+    // 小幅滚动时可能不变，百分比一定变，所以盯百分比。
+    final percentFinder = find.byKey(const ValueKey('reader-page-percent'));
+    final oldProgress = tester.widget<Text>(percentFinder).data;
+    final gap =
+        tester.getTopLeft(percentFinder).dx -
+        tester
+            .getTopRight(find.byKey(const ValueKey('reader-page-progress')))
+            .dx;
+    expect(gap, greaterThan(8), reason: '页数与百分比之间要留出空档');
     _controller(tester).jumpTo(350);
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<Text>(find.byKey(const ValueKey('reader-page-progress')))
-          .data,
-      isNot(oldProgress),
-    );
+    expect(tester.widget<Text>(percentFinder).data, isNot(oldProgress));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

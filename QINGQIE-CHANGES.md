@@ -687,3 +687,22 @@ flutter test             # 1954 passed / 10 skipped
   - 「我的」页快捷栏只剩 章节缓存 / 应用设置 / 关于我们；底部「笔记」与卡片「我的笔记 6 条批注与书摘」仍在；
   - 概览卡 4 宫格 + 底部「活跃 5 天 · 连续打卡 5 天」，无溢出；
   - 「最近阅读」三行封面（含空封面兜底）正常；「我的阅读 → 阅读最久」封面正常显示。
+
+# 三十二、v31 批次：页数与百分比留空档 + 阅读结算的空档上限
+
+- 版本：`1.0.129 (134)` 覆盖安装。
+- 一、正文状态行（`lib/widgets/reader/reader_status_bar.dart`）：
+  - 原来左下角是一整串 `'$readPage/$bookPages $percent%'`，单个空格让「1781/1965」和「90.6%」粘成一个数；
+  - 拆成两个 `Text`（`reader-page-progress` / `reader-page-percent`），中间插一个 `SizedBox`，宽度用 `TextPainter` 实测「空格 + 两个数字」的宽度，换字体或调大系统字号都跟着走；
+  - 行高、省略策略、电池块位置不变，状态行高度仍恒定（不引入正文跳动）。
+- 二、字数 / 时长结算的空档上限（`lib/services/reading_stats_store.dart` + `lib/pages/reader_page.dart`）：
+  - 新增 `kMaxReadingGapSeconds = 120`；
+  - `_settleReadTime()` 把「距上次结算的间隔」夹到 120 秒再写时长与字数：翻页/滚动才会触发结算，所以「打开一页不动」本身不涨；但挂机 20 分钟后再滚一下，原先会把整段空档算进阅读时长（字数只受 120 秒封顶的间接约束），现在两者都按 120 秒计；
+  - `_accumulateReadCharacters()` 里的 120 秒常量改用同一常量，注释说明真正的上限是本章正文字数。
+- 回答「会不会刷字数」：不会。
+  - 静止不动没有任何结算事件，字数为 0 增长；
+  - 切后台 / 锁屏：`didChangeAppLifecycleState` 里立刻结算并把会话置灰，回前台重新计时，后台时间完全不计；
+  - 唯一残留的缝（挂机后滚一下）被这次 120 秒上限封死：单次最多 +600 字，且全章字数封顶后不再增加。
+- 测试：`flutter analyze` 无问题；`reader_interface_test` 的「clock and battery」用例改为盯百分比并新增「页数与百分比间距 > 8px」断言；全量 `flutter test` 通过 1497 项，失败 15 条与基线一致。
+- APK：签名、zipalign、ABI、16 KiB 对齐校验通过；SHA-256 `82695d06a4b7b0dc86896c5b9f75af4c467b49e42977a5dffac64ba1d0f4462b`；38,524,658 字节。
+- 真机（Redmi K20 Pro `b2f8e975`）核验：正文左下角显示「1781/1965　90.6%」，页数与百分比之间约两个数字宽的空档，右下角电量「100%」不受影响。

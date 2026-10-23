@@ -2939,7 +2939,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _settleReadTime() {
     if (!_sessionActive || _content.isEmpty) return;
     final now = DateTime.now();
-    final delta = now.difference(_readStart).inMilliseconds / 1000;
+    final gap = now.difference(_readStart).inMilliseconds / 1000;
+    // 间隔过长说明中途没在读（发呆 / 把手机搁在桌上）：只认最后
+    // kMaxReadingGapSeconds 秒，剩下的空档既不算时长也不算字数。
+    final delta = gap.clamp(0.0, kMaxReadingGapSeconds).toDouble();
     if (delta >= 1) {
       unawaited(
         _readerStore
@@ -2952,21 +2955,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// 换章 / 首次排版后重设本章的字数预算。
-  void _resetChapterChars(
-    ChapterContent content,
-    String title,
-  ) {
+  void _resetChapterChars(ChapterContent content, String title) {
     _chapterCharsTotal = content.withoutLeadingTitle(title).legacyText.length;
     _chapterCharsCounted = 0;
   }
 
   /// 把这次停留折算成字数。
   ///
-  /// 单次结算最多认 2 分钟：挂在这一页不动（去接水、锁屏前）不该继续涨字数。
+  /// 时长在 [_settleReadTime] 里已按 [kMaxReadingGapSeconds] 封顶，这里再
+  /// 夹一次只是防御；真正的上限是本章正文字数（[estimateReadCharacters]）。
   void _accumulateReadCharacters(double seconds) {
     if (_chapterCharsTotal <= 0) return;
     final chars = estimateReadCharacters(
-      seconds: seconds.clamp(0, 120).toDouble(),
+      seconds: seconds.clamp(0.0, kMaxReadingGapSeconds).toDouble(),
       chapterChars: _chapterCharsTotal,
       alreadyCounted: _chapterCharsCounted,
     );
@@ -3416,9 +3417,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 正文的夜间按钮同时切换整个 App 的深色/亮色（顶栏、我的、书架等一起变）。
     unawaited(
       setThemeMode(
-        nextPreset == ReaderThemePreset.dark
-            ? ThemeMode.dark
-            : ThemeMode.light,
+        nextPreset == ReaderThemePreset.dark ? ThemeMode.dark : ThemeMode.light,
       ),
     );
   }
@@ -3695,10 +3694,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 此时开头还在屏幕上，额外让出一条工具栏高度，避免开篇文字被盖住。
     // 这个让位是锁存的（见 _liftForToolbar），滚动过程中不会中途消失。
     return MediaQuery(
-      data: base.copyWith(
-        viewInsets: EdgeInsets.zero,
-        padding: _stableInsets,
-      ),
+      data: base.copyWith(viewInsets: EdgeInsets.zero, padding: _stableInsets),
       child: Builder(builder: _buildReader),
     );
   }
@@ -3821,8 +3817,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             listeningPill:
                                 ListeningSession.instance.bookId ==
                                 widget.bookId,
-                            estimatedPagesPerChapter:
-                                _estimatedPagesPerChapter,
+                            estimatedPagesPerChapter: _estimatedPagesPerChapter,
                           ),
                         ),
                     ],
