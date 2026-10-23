@@ -62,6 +62,21 @@ void main() {
     });
   }
 
+  testWidgets('date header exposes a visible date picker affordance', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: StatsPage())),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择日期'), findsOneWidget);
+
+    await tester.tap(find.text('选择日期'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+  });
+
   testWidgets('audio statistics reopen the original content ID', (
     tester,
   ) async {

@@ -331,28 +331,82 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   Widget _dateHeader() {
+    final palette = HomePalette.of(context);
     final textStyle = Theme.of(
       context,
     ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold);
+    // 日期本身就是「打开日期选择器」的入口，但只有一行黑字时完全看不出可点。
+    // 这里保留大字号日期，右侧补一枚「选择日期」胶囊（日历图标 + 下拉箭头），
+    // 整块仍用 InkWell 提供水波反馈；胶囊用 Wrap 承载，大字号时自动换行不撑破。
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          child: GestureDetector(
-            onTap: _pickDate,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_formatDate(_selected), style: textStyle),
-                const SizedBox(height: 4),
-                Text(
-                  _hasStats ? '每日阅读时长持续统计中' : '继续阅读后会开始生成日统计和热力图',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _pickDate,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(_formatDate(_selected), style: textStyle),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.soft,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: palette.line, width: 0.6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                LucideIcons.calendar_days,
+                                size: 14,
+                                color: palette.accentText,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                '选择日期',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: palette.accentText,
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              Icon(
+                                LucideIcons.chevron_down,
+                                size: 13,
+                                color: palette.accentText,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _hasStats ? '每日阅读时长持续统计中' : '继续阅读后会开始生成日统计和热力图',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
