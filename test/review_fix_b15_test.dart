@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fqapp/models/search_discovery.dart';
-import 'package:fqapp/models/series_detail.dart';
 import 'package:fqapp/widgets/detail/detail_description.dart';
-import 'package:fqapp/widgets/detail/detail_sections.dart';
 import 'package:fqapp/widgets/search/search_discovery.dart';
 
 void main() {
@@ -91,38 +89,5 @@ void main() {
 
     expect(find.byKey(const Key('detail_description_toggle')), findsOneWidget);
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('cast row grows with accessibility text scaling', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(400, 600));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
-    await tester.pumpWidget(
-      MaterialApp(
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: const TextScaler.linear(2.0)),
-          child: child!,
-        ),
-        home: const Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: 400,
-              child: DetailCastRow(
-                cast: [CastMember(actor: 'Actor', role: 'Role')],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(tester.takeException(), isNull);
-    expect(
-      tester.getSize(find.byKey(const Key('detail_cast_row'))).height,
-      greaterThan(118),
-    );
   });
 }

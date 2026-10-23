@@ -4,7 +4,6 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../../services/poster_cache.dart';
 import '../../models/book_detail.dart';
-import '../../models/series_detail.dart';
 import '../home/home_design.dart';
 
 /// Author row: avatar, pen name, level badge, tagline and follow action.
@@ -155,7 +154,9 @@ class _AuthorLinkChip extends StatelessWidget {
         color: HomePalette.accent.withValues(alpha: palette.dark ? 0.16 : 0.08),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: HomePalette.accent.withValues(alpha: palette.dark ? 0.35 : 0.22),
+          color: HomePalette.accent.withValues(
+            alpha: palette.dark ? 0.35 : 0.22,
+          ),
           width: 0.6,
         ),
       ),
@@ -436,160 +437,4 @@ class DetailDirectoryRow extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Horizontal cast list for a short drama: avatar, actor name and role.
-///
-/// Renders nothing when the series has no cast, so the section disappears
-/// rather than leaving an empty heading.
-class DetailCastRow extends StatelessWidget {
-  final List<CastMember> cast;
-
-  const DetailCastRow({super.key, required this.cast});
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
-    if (cast.isEmpty) return const SizedBox.shrink();
-    final textScaler = MediaQuery.textScalerOf(context);
-    final castRowHeight = 118 + (textScaler.scale(12) - 12) * 3;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              '演员表',
-              style: TextStyle(
-                color: palette.ink,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '${cast.length} 位',
-              style: TextStyle(color: palette.muted, fontSize: 12),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: castRowHeight,
-          child: ListView.separated(
-            key: const Key('detail_cast_row'),
-            scrollDirection: Axis.horizontal,
-            itemCount: cast.length,
-            separatorBuilder: (context, _) => const SizedBox(width: 14),
-            itemBuilder: (context, index) =>
-                _CastTile(member: cast[index], palette: palette),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CastTile extends StatelessWidget {
-  final CastMember member;
-  final HomePalette palette;
-
-  const _CastTile({required this.member, required this.palette});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      key: ValueKey(
-        'detail_cast_${member.id.isEmpty ? member.actor : member.id}',
-      ),
-      width: 64,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ClipOval(
-            child: SizedBox.square(
-              dimension: 56,
-              child: _CastAvatar(member: member, palette: palette),
-            ),
-          ),
-          const SizedBox(height: 7),
-          Text(
-            member.actor.isEmpty ? '未知' : member.actor,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: palette.ink,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              height: 1.25,
-            ),
-          ),
-          if (member.role.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              '饰 ${member.role}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: palette.muted,
-                fontSize: 10.5,
-                height: 1.25,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// Cast avatars are served as HEIC, which some decoders reject; fall back to the
-/// performer's initial so a tile is never blank.
-class _CastAvatar extends StatelessWidget {
-  final CastMember member;
-  final HomePalette palette;
-
-  const _CastAvatar({required this.member, required this.palette});
-
-  @override
-  Widget build(BuildContext context) {
-    final fallback = _InitialAvatar(member: member, palette: palette);
-    if (member.avatar.isEmpty) return fallback;
-    return CachedNetworkImage(
-      cacheManager: PosterCache.instance,
-      imageUrl: member.avatar,
-      fit: BoxFit.cover,
-      // 56dp avatar; decode at 2×. The cast row scrolls horizontally, so the
-      // disk cache that CachedNetworkImage adds over a bare Image.network
-      // keeps tiles from being re-downloaded every time they scroll back.
-      memCacheWidth: 112,
-      placeholder: (context, _) => fallback,
-      errorWidget: (context, _, _) => fallback,
-    );
-  }
-}
-
-class _InitialAvatar extends StatelessWidget {
-  final CastMember member;
-  final HomePalette palette;
-
-  const _InitialAvatar({required this.member, required this.palette});
-
-  @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: palette.soft,
-    child: Center(
-      child: Text(
-        member.initial,
-        style: TextStyle(
-          color: palette.muted,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    ),
-  );
 }
