@@ -2,6 +2,58 @@ import 'package:flutter/material.dart';
 
 import '../widgets/home/home_design.dart';
 
+/// 设置类页面共用外壳：顶栏 + 单卡片滚动内容，卡片内条目间自动加分隔线。
+class SettingsScaffold extends StatelessWidget {
+  const SettingsScaffold({
+    super.key,
+    required this.title,
+    required this.children,
+  });
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    return Scaffold(
+      backgroundColor: palette.canvas,
+      appBar: AppBar(
+        title: Text(title),
+        centerTitle: true,
+        backgroundColor: palette.canvas,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
+          Material(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(20),
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: palette.line, width: 0.6),
+              ),
+              child: Column(
+                children: [
+                  for (var i = 0; i < children.length; i++) ...[
+                    if (i > 0)
+                      Divider(height: 1, indent: 68, color: palette.line),
+                    children[i],
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// PiliPlus-style settings category entry (shown on the settings home page).
 class SettingsCategory {
   final IconData icon;
@@ -65,48 +117,9 @@ class SettingsCategoryPage extends StatefulWidget {
 class _SettingsCategoryPageState extends State<SettingsCategoryPage> {
   @override
   Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
-    return Scaffold(
-      backgroundColor: palette.canvas,
-      appBar: AppBar(
-        title: Text(widget.title),
-        centerTitle: true,
-        backgroundColor: palette.canvas,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          Material(
-            color: palette.surface,
-            borderRadius: BorderRadius.circular(20),
-            clipBehavior: Clip.antiAlias,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: palette.line,
-                  width: 0.6,
-                ),
-              ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < widget.items.length; i++) ...[
-                    if (i > 0)
-                      Divider(
-                        height: 1,
-                        indent: 68,
-                        color: palette.line,
-                      ),
-                    _buildRow(widget.items[i]),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+    return SettingsScaffold(
+      title: widget.title,
+      children: [for (final item in widget.items) _buildRow(item)],
     );
   }
 

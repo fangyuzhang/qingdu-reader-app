@@ -4,12 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Persisted theme-mode preference key: 'theme_mode' = 'light'|'dark'|'system'.
 const themeModeKey = 'theme_mode';
 
-/// Brand seed color for the whole app (also used by the player slider and
-/// the detail page's accent text).
-// 【青茄重构】青少年版主色：青茄绿（青）+ 珊瑚橙（茄）作为点缀色，
-// 见 home_design.dart 的 HomePalette.highlight。
-const appSeedColor = Color(0xFF2FA98C);
-
 /// Global theme-mode notifier; the settings page writes it, MaterialApp
 /// rebuilds with the new mode.
 final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(

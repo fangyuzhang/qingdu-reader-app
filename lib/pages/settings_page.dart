@@ -99,90 +99,57 @@ class SettingsPage extends StatelessWidget {
       _ => HomePalette.accent,
     };
 
-    return Scaffold(
-      backgroundColor: palette.canvas,
-      appBar: AppBar(
-        title: const Text('设置'),
-        centerTitle: true,
-        backgroundColor: palette.canvas,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          Material(
-            color: palette.surface,
-            borderRadius: BorderRadius.circular(20),
-            clipBehavior: Clip.antiAlias,
-            child: Container(
+    return SettingsScaffold(
+      title: '设置',
+      children: [
+        for (final cat in categories)
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
+            leading: Container(
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: palette.line, width: 0.6),
+                color: tintOf(cat).withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(11),
               ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < categories.length; i++) ...[
-                    if (i > 0)
-                      Divider(height: 1, indent: 68, color: palette.line),
-                    ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
-                      leading: Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: tintOf(categories[i]).withValues(alpha: 0.13),
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        child: Icon(
-                          categories[i].icon,
-                          size: 19,
-                          color: tintOf(categories[i]),
-                        ),
-                      ),
-                      title: Text(
-                        categories[i].title,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                          color: palette.ink,
-                        ),
-                      ),
-                      subtitle: Text(
-                        categories[i].subtitle,
-                        style: TextStyle(fontSize: 12.5, color: palette.muted),
-                      ),
-                      trailing: Icon(
-                        LucideIcons.chevron_right,
-                        size: 18,
-                        color: palette.muted,
-                      ),
-                      onTap: () {
-                        final cat = categories[i];
-                        final pageBuilder = cat.pageBuilder;
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder:
-                                pageBuilder ??
-                                (_) => SettingsCategoryPage(
-                                  title: cat.title,
-                                  items: cat.items,
-                                ),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ],
+              child: Icon(cat.icon, size: 19, color: tintOf(cat)),
+            ),
+            title: Text(
+              cat.title,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                color: palette.ink,
               ),
             ),
+            subtitle: Text(
+              cat.subtitle,
+              style: TextStyle(fontSize: 12.5, color: palette.muted),
+            ),
+            trailing: Icon(
+              LucideIcons.chevron_right,
+              size: 18,
+              color: palette.muted,
+            ),
+            onTap: () {
+              final pageBuilder = cat.pageBuilder;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      pageBuilder ??
+                      (_) => SettingsCategoryPage(
+                        title: cat.title,
+                        items: cat.items,
+                      ),
+                ),
+              );
+            },
           ),
-        ],
-      ),
+      ],
     );
   }
 

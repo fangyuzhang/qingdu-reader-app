@@ -53,7 +53,6 @@ class BookComment {
     if (created == null) return '';
     final reference = now ?? DateTime.now();
     final seconds = reference.difference(created).inSeconds;
-    if (seconds < 0) return '刚刚';
     if (seconds < 60) return '刚刚';
     if (seconds < 3600) return '${seconds ~/ 60}分钟前';
     if (seconds < 86400) return '${seconds ~/ 3600}小时前';

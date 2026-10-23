@@ -1637,22 +1637,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 交给排版层的行内批注块数据。
   List<ReaderInlineNote> get _inlineNotes => [
-    for (final note in _annotations)
-      ReaderInlineNote(
-        id: note.key,
-        start: note.start,
-        end: note.end,
-        quote: note.text,
-        thought: note.thought,
-        isExcerpt: !note.isAnnot,
-        category: note.category,
-        tags: note.tags,
-        markerType: note.markerType,
-        markerLabel: note.displayMarkerLabel,
-        markerColorValue: note.effectiveMarkerColorValue,
-        markStyle: note.markStyle,
-        markColorValue: note.effectiveMarkColorValue,
-      ),
+    for (final note in _annotations) _inlineNoteOf(note),
   ];
 
   /// 加载本章批注/书摘（切章、切书、存储变化时都会重新走一遍）。
@@ -2568,22 +2553,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       paragraphBubbles: const {},
       underlinedParagraphs: const {},
       inlineNotes: [
-        for (final note in annotations)
-          ReaderInlineNote(
-            id: note.key,
-            start: note.start,
-            end: note.end,
-            quote: note.text,
-            thought: note.thought,
-            isExcerpt: !note.isAnnot,
-            category: note.category,
-            tags: note.tags,
-            markerType: note.markerType,
-            markerLabel: note.displayMarkerLabel,
-            markerColorValue: note.effectiveMarkerColorValue,
-            markStyle: note.markStyle,
-            markColorValue: note.effectiveMarkColorValue,
-          ),
+        for (final note in annotations) _inlineNoteOf(note),
       ],
     );
     return _ScrollSegment(
@@ -4789,3 +4759,20 @@ class _ScrollSegment {
   /// 与 `itemExtentBuilder` 的逐项高度之和一致，段起点据此累加。
   double get extent => layout.contentHeight;
 }
+
+/// 一条批注/书摘 → 排版层行内块；当前章与相邻章的加载路径共用。
+ReaderInlineNote _inlineNoteOf(ReaderAnnotation note) => ReaderInlineNote(
+  id: note.key,
+  start: note.start,
+  end: note.end,
+  quote: note.text,
+  thought: note.thought,
+  isExcerpt: !note.isAnnot,
+  category: note.category,
+  tags: note.tags,
+  markerType: note.markerType,
+  markerLabel: note.displayMarkerLabel,
+  markerColorValue: note.effectiveMarkerColorValue,
+  markStyle: note.markStyle,
+  markColorValue: note.effectiveMarkColorValue,
+);
