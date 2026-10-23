@@ -530,8 +530,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   bool _eyeCareMuted = false;
 
   // ===== 【青茄重构·新增】阅读字数统计 =====
-  /// 本次会话已计入字数的章节，来回翻页不重复累加。
-  final Set<String> _countedChapters = <String>{};
+  /// 当前章正文长度，以及本次进入该章后已经计入的字数。
+  ///
+  /// 字数 = 停留时长 × 阅读速度，并用本章长度封顶：目录跳到最后一章、
+  /// 一路狂滑不看，时长极小，折算出来也近乎 0；读得再久也不会超过本章字数。
+  int _chapterCharsTotal = 0;
+  int _chapterCharsCounted = 0;
 
   /// The live text selection — a whole paragraph right after a long press,
   /// then reshaped character-by-character by dragging a handle. Cleared on an
@@ -1840,6 +1844,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     ReaderChapterTurn? chapterTurn,
   }) async {
     if (widget.chapters.isEmpty) return;
+    _settleReadTime();
     final generation = ++_loadGeneration;
     final chapter = _chapter;
     _saveTimer?.cancel();
@@ -1943,12 +1948,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_loadIdeas(selectedChapter, generation));
       unawaited(_loadUnderlines());
       unawaited(_loadAnnotations());
-      // 【青茄重构·新增】按章记一次阅读字数（同一章本次会话只计一次）。
-      if (_countedChapters.add(selectedChapter.itemId)) {
-        ReadingStatsStore.instance.addCharacters(
-          content.withoutLeadingTitle(selectedChapter.title).legacyText.length,
-        );
-      }
+      // 本章的字数预算按正文长度重置，之后由停留时长逐步折算。
+      _resetChapterChars(content, selectedChapter.title);
       if (!selectedLoaded.fetched && content.needsRefresh()) {
         unawaited(_refreshCachedChapter(selectedChapter));
       }
@@ -2714,6 +2715,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 只把「当前章」指向新段，并把它需要的装饰数据补上。
   void _switchScrollSegment(int index) {
     if (index < 0 || index >= _scrollSegments.length) return;
+    // 先把停在旧章上的时间结算掉，否则会被算到新章头上。
+    _settleReadTime();
     final segment = _scrollSegments[index];
     final chapterIndex = widget.chapters.indexWhere(
       (chapter) => chapter.itemId == segment.chapter.itemId,
@@ -2760,8 +2763,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // 段评拉回来。气泡开着时 IdeasRevision 会让该段按完整数据重排，
     // 几何变化走 _resetScrollWindow 的补偿路径，不会跳屏。
     unawaited(_loadIdeas(segment.chapter, _loadGeneration));
-    _settleReadTime();
     unawaited(_persistProgress());
+    _resetChapterChars(segment.content, segment.chapter.title);
   }
 
   /// 滚停后裁掉窗口头部过远的段（保留活动段之前两段，还能往回滚）。
@@ -2943,8 +2946,33 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             .accumulateReadTime(widget.bookId, 'book', delta)
             .catchError((_) {}),
       );
+      _accumulateReadCharacters(delta);
     }
     _readStart = now;
+  }
+
+  /// 换章 / 首次排版后重设本章的字数预算。
+  void _resetChapterChars(
+    ChapterContent content,
+    String title,
+  ) {
+    _chapterCharsTotal = content.withoutLeadingTitle(title).legacyText.length;
+    _chapterCharsCounted = 0;
+  }
+
+  /// 把这次停留折算成字数。
+  ///
+  /// 单次结算最多认 2 分钟：挂在这一页不动（去接水、锁屏前）不该继续涨字数。
+  void _accumulateReadCharacters(double seconds) {
+    if (_chapterCharsTotal <= 0) return;
+    final chars = estimateReadCharacters(
+      seconds: seconds.clamp(0, 120).toDouble(),
+      chapterChars: _chapterCharsTotal,
+      alreadyCounted: _chapterCharsCounted,
+    );
+    if (chars <= 0) return;
+    _chapterCharsCounted += chars;
+    ReadingStatsStore.instance.addCharacters(chars);
   }
 
   void _captureScrollProgress({bool updateTextOffset = false}) {

@@ -18,6 +18,7 @@ import 'services/audio_preferences.dart';
 import 'services/backend_service.dart';
 import 'services/detail_snapshot_cache.dart';
 import 'services/library_store.dart';
+import 'services/reading_stats_store.dart';
 import 'services/share_service.dart';
 import 'services/poster_cache.dart';
 import 'services/shelf_store.dart';
@@ -114,6 +115,13 @@ Future<void> _initializeOptionalData() async {
   unawaited(PosterCache.instance.enforceBudget());
   // 详情页快照盒：首帧之后再打开，之后每次进详情都是同步命中。
   unawaited(DetailSnapshotCache.instance.load());
+  // 字数口径 v2：把旧的「打开整章即整章计数」重算成「时长 × 阅读速度」。
+  // 只跑一次（store 内部用 schema 版本位兜底），失败就沿用旧数据。
+  unawaited(
+    ReadingStatsStore.instance
+        .migrateToTimeEstimate(LibraryStore.instance.readTimeSnapshot())
+        .catchError((_) {}),
+  );
 }
 
 class FqApp extends StatefulWidget {

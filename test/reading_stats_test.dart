@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -76,5 +78,65 @@ void main() {
     expect(formatCharacterCount(12345), '1.2 万字');
     expect(formatCharacterCount(1234567), '123 万字'); // ≥100 万不保留小数
     expect(formatCharacterCount(12345678), '1235 万字');
+  });
+
+  group('字数估算（时长 × 速度，按本章封顶）', () {
+    test('几乎不停留时近似为 0，不会把整章算上', () {
+      expect(estimateReadCharacters(seconds: 0, chapterChars: 6000), 0);
+      expect(estimateReadCharacters(seconds: 1, chapterChars: 6000), 5);
+    });
+
+    test('按 300 字/分钟折算', () {
+      expect(estimateReadCharacters(seconds: 60, chapterChars: 9000), 300);
+      expect(estimateReadCharacters(seconds: 600, chapterChars: 9000), 3000);
+    });
+
+    test('不超过本章正文长度', () {
+      expect(estimateReadCharacters(seconds: 3600, chapterChars: 800), 800);
+    });
+
+    test('同一章已计入的部分不再重复', () {
+      expect(
+        estimateReadCharacters(
+          seconds: 60,
+          chapterChars: 800,
+          alreadyCounted: 600,
+        ),
+        200,
+      );
+      expect(
+        estimateReadCharacters(
+          seconds: 60,
+          chapterChars: 800,
+          alreadyCounted: 800,
+        ),
+        0,
+      );
+    });
+  });
+
+  test('迁移：旧的虚高字数按真实阅读时长重算，且只跑一次', () async {
+    SharedPreferences.setMockInitialValues({
+      'reading_stats_v1': jsonEncode({
+        'days': {'2026-10-20': 300000, '2026-10-21': 214000},
+        'total': 514000,
+      }),
+    });
+    store.resetForTest();
+    await store.init();
+    expect(store.totalChars, 514000);
+
+    await store.migrateToTimeEstimate({
+      'book-1': {'2026-10-20': 600.0},
+    });
+    expect(store.dayChars['2026-10-20'], 3000);
+    // 时长表里没有这天：留 1 字占位，只为保住连续打卡
+    expect(store.dayChars['2026-10-21'], 1);
+    expect(store.totalChars, 3001);
+
+    await store.migrateToTimeEstimate({
+      'book-1': {'2026-10-20': 600.0},
+    });
+    expect(store.totalChars, 3001);
   });
 }
