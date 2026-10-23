@@ -468,39 +468,8 @@ class _AudioNarrationBodyState extends State<AudioNarrationBody> {
     Offset globalPosition,
     SubtitleCue cue,
   ) async {
-    final overlay = Overlay.of(context).context.findRenderObject();
-    if (overlay is! RenderBox) return;
-    final palette = HomePalette.of(context);
-    final selected = await showMenu<bool>(
-      context: context,
-      color: palette.surface,
-      position: RelativeRect.fromRect(
-        Rect.fromPoints(globalPosition, globalPosition + const Offset(1, 1)),
-        Offset.zero & overlay.size,
-      ),
-      items: [
-        PopupMenuItem<bool>(
-          value: true,
-          height: 44,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.play, size: 17, color: palette.accentText),
-              const SizedBox(width: 10),
-              Text(
-                '从本句听',
-                style: TextStyle(
-                  color: palette.ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-    if (selected == true && mounted) {
+    final confirmed = await _confirmListenFromHere(context, globalPosition);
+    if (confirmed && mounted) {
       widget.onListenFrom?.call(Duration(milliseconds: cue.startMs));
     }
   }
@@ -676,39 +645,9 @@ class _TtsNarrationBodyState extends State<TtsNarrationBody> {
   }
 
   Future<void> _showMenu(BuildContext context, Offset at, int index) async {
-    final overlay = Overlay.of(context).context.findRenderObject();
-    if (overlay is! RenderBox) return;
-    final palette = HomePalette.of(context);
-    final selected = await showMenu<bool>(
-      context: context,
-      color: palette.surface,
-      position: RelativeRect.fromRect(
-        Rect.fromPoints(at, at + const Offset(1, 1)),
-        Offset.zero & overlay.size,
-      ),
-      items: [
-        PopupMenuItem<bool>(
-          value: true,
-          height: 44,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.play, size: 17, color: palette.accentText),
-              const SizedBox(width: 10),
-              Text(
-                '从本句听',
-                style: TextStyle(
-                  color: palette.ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-    if (selected == true) widget.onListenFrom?.call(index);
+    if (await _confirmListenFromHere(context, at)) {
+      widget.onListenFrom?.call(index);
+    }
   }
 
   @override
@@ -1169,5 +1108,40 @@ class _SkipLabel extends StatelessWidget {
   }
 }
 
-/// Official two-card voice area: the left card lists the selectable voices
-/// (智能朗读 / 真人讲书) and the right card is the 边听边读 entry.
+/// 「从本句听」菜单：有声书字幕与系统朗读两个视图的菜单项逐行相同，
+/// 这里只负责弹出菜单，回答用户是否确认从这句开始听。
+Future<bool> _confirmListenFromHere(BuildContext context, Offset at) async {
+  final overlay = Overlay.of(context).context.findRenderObject();
+  if (overlay is! RenderBox) return false;
+  final palette = HomePalette.of(context);
+  final selected = await showMenu<bool>(
+    context: context,
+    color: palette.surface,
+    position: RelativeRect.fromRect(
+      Rect.fromPoints(at, at + const Offset(1, 1)),
+      Offset.zero & overlay.size,
+    ),
+    items: [
+      PopupMenuItem<bool>(
+        value: true,
+        height: 44,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.play, size: 17, color: palette.accentText),
+            const SizedBox(width: 10),
+            Text(
+              '从本句听',
+              style: TextStyle(
+                color: palette.ink,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+  return selected == true;
+}
