@@ -5,7 +5,8 @@
 按「面向青少年的纯净阅读器」定位删掉非阅读内容，补齐阅读侧的深度功能。
 
 - 上游项目：https://github.com/ch6vip/fqapp （GNU GPL v3）
-- 本分支：https://github.com/fangyuzhang/fqapp-qingqie
+- 本分支：https://github.com/fangyuzhang/qingqie-reader-app （**私有仓库**）
+  - 历史仓库 `fangyuzhang/fqapp-qingqie`、`fangyuzhang/qingqie-reader` 已停止更新，仅作存档，不要往那里推
 - 协议：沿用 **GPL-3.0**（见 `LICENSE`，未改动上游版权与署名）
 - 代码标注约定：新增/修改处以 `【青茄重构·新增】`、`【青茄重构·删除】`、
   `【青茄重构】` 注释标出，便于审查归属
@@ -795,3 +796,68 @@ flutter test             # 1954 passed / 10 skipped
   - `fqapp-src-1.0.129-20261023.tar.gz`：HEAD 源码快照；
   - `qingqie-1.0.129-release.apk`：基准安装包。
 - GitHub 远端：`https://github.com/fangyuzhang/qingqie-reader-app`（私有），`master` 已同步，标签与 Release `baseline-1.0.129-20261023` 附基准 APK；旧仓库 `fangyuzhang/qingqie-reader` 未改动。
+
+# 三十七、v35 批次：UI 可访问性与首页 / 我的 交互收口（2026-10-23）
+
+- 版本：仍为 `1.0.129 (134)`。本批只动视觉层与交互入口，不新增依赖、不改状态流转，因此不升版本号。
+- 起点：按 apple-design-skill（只取通用原则，忽略 iOS 专属惯例）对 `lib/` 做一次视觉层审查，落到 Android / Flutter 语境后集中修复；数值以 Material 为准（命中区 ≥ 48dp，间距取 4 的倍数）。
+
+## 一、无障碍：小字号对比度
+
+先算后改。原值全部低于 WCAG AA 的小字号门槛 4.5:1，改后留有余量且不改变品牌色的填充用法。
+
+| 位置 | 颜色 | 对比度 | 文件 |
+| --- | --- | --- | --- |
+| 全局次要文字（浅色） | `#6C7A73` → `#5E6B64` | 4.33:1 → **5.37:1**（canvas `#FAFBF6`） | `lib/services/app_theme.dart` |
+| 首页次要文字 | `#6C7A73` → `#5E6B64` | 同上，与全局 token 对齐 | `lib/widgets/home/home_design.dart` |
+| 首页强调小字 | `accentStrong #1F8A72` → `#176B58` | 4.25:1 → **6.16:1**（canvas）/ 5.69:1（soft `#EEF3EC`） | `lib/widgets/home/home_design.dart` |
+| 阅读器强调色（浅色系） | `#9B6743` → `#8A5B39` | 3.78:1 → 5.49 / 4.97 / **4.59:1**（米白 / 青绿 / 纸张） | `lib/widgets/reader/reader_theme.dart` |
+| 阅读器辅助文字 | 正文色 60% → 80% alpha | 4.01 / 3.64 / 3.08:1 → **7.51 / 6.47 / 5.02:1** | `lib/widgets/reader/reader_theme.dart` |
+| 状态行字号 | 10sp → **11sp**（行高同步固定） | 小字号更易读，行高固定避免抖动 | `lib/widgets/reader/reader_status_bar.dart` |
+| 书架进度角标 | 9sp → **11sp**，深青渐变 → 深珊瑚渐变 | 角标在封面上不再被背景吞掉 | `lib/widgets/bookshelf_card.dart` |
+| 封面信息 chip | 9sp → **11sp** | 与角标同一档 | `lib/widgets/cover_tag_chip.dart`、`lib/widgets/home/home_media_card.dart` |
+
+说明：填充色仍用原 `accent`，只把小字前景换成更深的 `accentText`，品牌观感不变。
+
+## 二、命中区补到 48dp
+
+视觉尺寸刻意保持不变，只扩可点范围，避免"看起来变小 / 变大"的连锁改版：
+
+- `lib/pages/library_page.dart`：分组 chip（27dp 胶囊 / 48dp 命中区）、tab 行（~35dp 文字+指示条 / 48dp）、版式分段（原 40×30 → 40×48，图标仍 17dp）。
+- `lib/pages/notes_page.dart`：批注类型筛选行 40dp → 48dp（`ChoiceChip` 在 `padded` 下自带 48dp）。
+- `lib/pages/stats_page.dart`：日期区域整体可点，命中区随行高撑开。
+
+## 三、首页
+
+- **分类卡文案**：`精选 N 本` → `精选书单 · 查看全部`。原因是「全部」页会继续从书城追加书目（真机进入「古典名著」显示"已载入 40 本"），写死本地数量必然误导。
+- **横向书架滑到底继续滑 = 查看全部**：新增 `_CategoryRail`，`NotificationListener<ScrollNotification>` 在到达末端后累计 `overscroll`，约 **72dp** 触发一次 `HapticFeedback.selectionClick()` 并打开该分类「全部」。阈值下限防止正常甩动误触，上限防止"滑不动"的错觉。
+- **删除滚动悬浮搜索按钮**：移除 `_searchFabVisible`、`_onHomeScroll`、`_searchFab` 与包裹的 `NotificationListener`，搜索只保留固定顶栏入口。少一层滚动监听，滚动帧更稳。
+
+## 四、我的 / 统计 / 设置
+
+- `lib/pages/stats_page.dart`：日期旁补「📅 选择日期 ⌄」胶囊，整块可点；大字号下改用 `Wrap`，日期与按钮不再互相挤压；`DatePickerDialog` 可正常打开。
+- `lib/pages/notes_page.dart`：时间轴日期 `maxLines: 1`，不再折成两行把条目顶歪。
+- `lib/pages/settings_page.dart`：主题当前值改用 `muted` token；服务状态改用 `ColorScheme` 语义色，不再写死绿/红。
+
+## 五、测试
+
+- `test/home_page_test.dart`：新增文案断言（`精选书单 · 查看全部`）、横向滑到末端跳转「全部」、下滑后**不出现**浮动搜索按钮。
+- `test/stats_page_widget_test.dart`：新增日期按钮可见性与 `DatePickerDialog` 打开断言。
+- 结果：`flutter analyze` 0 问题；全量 `flutter test` **通过 1488、跳过 10、失败 0**（较 v34 的 1485 增加 3 条，均为本轮新增用例）。
+
+## 六、APK 与真机
+
+- Release APK：**38,524,655 字节**，SHA-256 `130b302f6aa8310974c19b090053383189d9d273692bb75182b013b70dd31041`。
+- `scripts/verify_android_apk.py` 全项 passed：zip 条目 / Native 库 / ELF 16 KiB / zip 16 KiB / 签名 / 清单元数据 / APK 未被改动；报告 `build/apk-verification/wsl-native-v35/report.json`。
+- 清单核对：`com.fqapp.fqapp`、`1.0.129 (134)`、`minSdk 24`、`targetSdk 36`、6 个 `arm64-v8a` 原生库。
+- 真机（Redmi K20 Pro `b2f8e975`）覆盖安装复核：
+  - 首页下滑不再出现浮动搜索按钮；
+  - 横向书架滑到「古典名著」末端继续右滑，进入全部页并显示"已载入 40 本"；
+  - 我的页日期胶囊可点，日期弹层正常，选择后统计范围刷新；
+  - 笔记时间轴日期单行显示，条目不再错位。
+
+## 七、本批未做（有意留下）
+
+- 日期选择器文案仍为英文，需要引入 `flutter_localizations` 并给 `MaterialApp` 配 locale，属于新增依赖，未在本批处理。
+- 墨水屏背景下仍有 93 处直接引用 `HomePalette.accent / highlight`，替换为语义色属中风险改动，未全量执行。
+- 阅读器批注块内 3 个 16dp 图标按钮热区不足 48dp，但其宽度参与分页折算，改动会移动分页点，暂缓。
