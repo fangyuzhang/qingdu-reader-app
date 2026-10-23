@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../models/media_item.dart';
+import '../services/book_title_cleaner.dart';
 import '../services/poster_cache.dart';
 import 'home/home_design.dart';
 import 'shelf/shelf_design.dart';
@@ -220,7 +221,10 @@ class _DefaultCover extends StatelessWidget {
       accent.withValues(alpha: 0.14),
       scheme.surfaceContainerHighest,
     );
-    final cleaned = _cleanBookInfo(item.title, item.author);
+    final (cleanedTitle, cleanedAuthor) = splitTitleAndAuthor(
+      item.title,
+      item.author,
+    );
     return LayoutBuilder(
       builder: (context, constraints) => CustomPaint(
         size: Size(constraints.maxWidth, constraints.maxHeight),
@@ -229,63 +233,12 @@ class _DefaultCover extends StatelessWidget {
           accentColor: accent,
           titleColor: palette.ink,
           authorColor: palette.muted,
-          title: cleaned.title,
-          author: cleaned.author,
+          title: cleanedTitle,
+          author: cleanedAuthor,
         ),
       ),
     );
   }
-}
-
-class _CleanedCoverInfo {
-  final String title;
-  final String author;
-  const _CleanedCoverInfo({required this.title, required this.author});
-}
-
-/// 智能清洗封面展示的书名与作者：
-/// 1. 若标题混入了「作者：xxx」「by xxx」，自动提取出干净作者名，并从书名中剔除；
-/// 2. 剥离无意义的打包噪音标签（如 (精校版)、[全本]、(校对版)），还原本真书名。
-_CleanedCoverInfo _cleanBookInfo(String rawTitle, String rawAuthor) {
-  var title = rawTitle.trim();
-  var author = rawAuthor.trim();
-
-  if (author.isEmpty || author == '未知作者') {
-    final authorMatch = RegExp(
-      r'[（(\[【]?\s*作者\s*[:：\s]+\s*([^）)\]】\s]+)[）)\]】]?',
-    ).firstMatch(title);
-    if (authorMatch != null) {
-      author = authorMatch.group(1)?.trim() ?? '';
-      title = title.replaceRange(authorMatch.start, authorMatch.end, '').trim();
-    } else {
-      final byMatch = RegExp(
-        r'[（(\[【]?\s*by\s*[:：\s]+\s*([^）)\]】\s]+)[）)\]】]?',
-        caseSensitive: false,
-      ).firstMatch(title);
-      if (byMatch != null) {
-        author = byMatch.group(1)?.trim() ?? '';
-        title = title.replaceRange(byMatch.start, byMatch.end, '').trim();
-      }
-    }
-  }
-
-  title = title
-      .replaceAll(
-        RegExp(
-          r'[（(\[【]\s*(?:精校版?|校对版?|全本|全集|完结|完本|精修版?|无错版?|未删节|未删减|手打|更新|排版|精编)[^）)\]】]*[）)\]】]',
-        ),
-        '',
-      )
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-
-  title = title.replaceAll(RegExp(r'^[_\-—\s,，:：]+|[_\-—\s,，:：]+$'), '').trim();
-  author = author
-      .replaceAll(RegExp(r'^(?:作者|by)[:：\s]*', caseSensitive: false), '')
-      .trim();
-
-  if (title.isEmpty) title = rawTitle.trim();
-  return _CleanedCoverInfo(title: title, author: author);
 }
 
 class _DefaultCoverPainter extends CustomPainter {
