@@ -757,3 +757,22 @@ flutter test             # 1954 passed / 10 skipped
   - 全量 `flutter test`：通过 1470、跳过 10、失败 15，失败集合与本轮开工前基线完全一致（`comprehensive_ui_loading`×3、`reader_annotation`×2、`reader_paragraph_actions`×5、`reader_system_bars`×5），无新增失败；
   - APK：签名 / zipalign / ABI / 16 KiB 对齐校验通过；SHA-256 `c3a7abc81dfd16c2127e3a7eac91d4cfe5e382ed1c967b5f5ccd24134d2a7801`，38,524,656 字节；
   - 真机（Redmi K20 Pro `b2f8e975`）覆盖安装并启动，首页、书架、笔记、我的均正常渲染。
+
+# 三十五、v34 批次：用例与改版对齐，全量测试归零
+
+- 版本：`1.0.129 (134)` 覆盖安装；本批只改用例与注释，不改产品行为。
+- 背景：上一轮记录「失败 15 条与基线一致」，逐条核对后确认全部是功能改版后没同步的旧断言，不是新回归。按现行为修正后，全量测试从 15 失败变为 0 失败。
+- 一、系统栏（`test/reader_system_bars_test.dart`）：
+  - 旧用例「状态栏常显：阅读器全程不再请求沉浸模式」对应中间方案，现产品是「工具栏收起→沉浸，展开→edge-to-edge」；
+  - 改写为「工具栏收起时沉浸，展开时恢复系统栏」：用 `SystemChannels.platform` 记录 `SystemChrome.setEnabledSystemUIMode`，断言进入正文为 `immersiveSticky`、点中间展开为 `edgeToEdge` 且原生 `setImmersive(false)`、再点收起回到沉浸、切后台恢复后仍沉浸、被其他页盖住恢复、退出阅读页恢复；
+  - 段评弹层用例改为「打开时恢复系统栏，关闭后重新沉浸」；
+  - 4 条安全区用例原先点「收起阅读菜单」tooltip，该按钮已按需求换成「加入书架」，改为再次点击正文收起菜单。
+- 二、批注插入位置（`test/reader_annotation_test.dart`）：批注已按需求插在「批注行的下一行」，段落会在行尾切成前后两块；断言改为「前块是原文前缀 + 后块是剩余正文」，定位用例额外校验字符与原文一一对应。
+- 三、段落操作（`test/reader_paragraph_actions_test.dart`）：听书按钮按需求改为常显，4 条原本断言「拖动选区后不显示」的用例改为 `findsOneWidget`；标签已改为「从本段开始听书」，文案断言同步。
+- 四、详情下载（`test/comprehensive_ui_loading_test.dart`）：下载入口已改成 AppBar 图标按钮（与加入书架互换），改按 `detail_download_button` 点击。
+- 五、注释纠偏：`reader_paragraph_menu.dart` 与 `reader_text_selection.dart` 里「拖动选区去掉从本段听」的旧注释改成当前行为。
+- 验证：
+  - `flutter analyze` 0 问题；
+  - 全量 `flutter test`：通过 1485、跳过 10、失败 0；
+  - APK：签名 / zipalign / ABI / 16 KiB 对齐校验通过；SHA-256 `ab549937230946903db5bdffe0491be81cf1de14622acbdd0cb016ed8c77bb7f`，38,524,657 字节；
+  - 真机（`b2f8e975`）覆盖安装：设置首页（单卡片 + 分隔线）、分类页「外观」渲染正常，深色模式与墨水屏开关位置不变。
