@@ -9,6 +9,7 @@ import '../services/api_client.dart';
 import '../services/app_theme.dart';
 import '../services/audio_preferences.dart';
 import '../services/backend_service.dart';
+import '../services/debug_tools.dart';
 import '../services/library_store.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/home/home_design.dart';
@@ -17,6 +18,7 @@ import 'cached_books_page.dart';
 import 'library_backup_page.dart';
 import 'log_viewer_page.dart';
 import 'settings_category_page.dart';
+import 'stylus_probe_page.dart';
 import 'system_tts_settings_page.dart';
 
 /// Settings home: a list of category entries (PiliPlus multi-level
@@ -81,7 +83,13 @@ class SettingsPage extends StatelessWidget {
         icon: LucideIcons.cpu,
         title: '服务',
         subtitle: '本地后端状态',
-        items: [_backendItem(), _statusItem(), _logItem()],
+        items: [
+          // 手写笔能力探测：调试工具，见 services/debug_tools.dart 的开关说明。
+          if (debugToolsEnabled) _stylusProbeItem(),
+          _backendItem(),
+          _statusItem(),
+          _logItem(),
+        ],
       ),
       SettingsCategory(
         icon: LucideIcons.info,
@@ -376,6 +384,16 @@ class SettingsPage extends StatelessWidget {
       ).showSnackBar(const SnackBar(content: Text('无法打开 Web UI')));
     }
   }
+
+  SettingsItem _stylusProbeItem() => SettingsItem(
+    icon: LucideIcons.pen_line,
+    title: '手写笔探测（调试）',
+    subtitle: '实测压感/倾斜/设备类型，发布前移除',
+    onTap: (context, setState) => Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const StylusProbePage()),
+    ),
+  );
 
   SettingsItem _logItem() => SettingsItem(
     icon: LucideIcons.terminal,
