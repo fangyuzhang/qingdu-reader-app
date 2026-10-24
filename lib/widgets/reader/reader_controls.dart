@@ -32,6 +32,13 @@ class ReaderControls extends StatefulWidget {
   final bool showCache;
 
   final bool autoTurnActive;
+
+
+  /// 进入手写批注模式（第 6 组；null = 隐藏入口，滚动模式/排版未就绪）。
+  final VoidCallback? onInk;
+
+  /// 查看本章墨迹列表。
+  final VoidCallback? onInkList;
   final VoidCallback onAutoTurn;
 
   const ReaderControls({
@@ -59,6 +66,8 @@ class ReaderControls extends StatefulWidget {
     this.showCache = true,
     this.autoTurnActive = false,
     required this.onAutoTurn,
+    this.onInk,
+    this.onInkList,
   });
 
   @override
@@ -129,6 +138,18 @@ class _ReaderControlsState extends State<ReaderControls> {
                             icon: LucideIcons.headphones,
                             label: '听书',
                             onTap: widget.onListen,
+                          ),
+                        if (widget.onInk != null)
+                          _Action(
+                            icon: LucideIcons.pen_line,
+                            label: '批注',
+                            onTap: () => widget.onInk!(),
+                          ),
+                        if (widget.onInkList != null)
+                          _Action(
+                            icon: LucideIcons.signature,
+                            label: '墨迹',
+                            onTap: () => widget.onInkList!(),
                           ),
                         _Action(
                           key: const ValueKey('reader-settings'),

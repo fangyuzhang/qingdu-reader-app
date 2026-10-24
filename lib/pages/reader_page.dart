@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/book_comment.dart';
+import '../models/ink_annotation.dart';
 import '../models/chapter_ideas.dart';
 import '../models/media_item.dart';
 import '../services/api_client.dart';
@@ -25,6 +26,7 @@ import '../services/reader_mark_style.dart';
 import '../services/reader_preferences.dart';
 import '../services/reader_tap_zones.dart';
 import '../services/app_log.dart';
+import '../services/ink_annotation_store.dart';
 import '../services/reader_annotation_store.dart';
 import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
@@ -35,6 +37,10 @@ import '../widgets/chapter_cache_sheet.dart';
 import '../widgets/reader/reader_appearance_sheet.dart';
 import '../widgets/reader/reader_bubble.dart';
 import '../widgets/reader/reader_chapter_layout.dart';
+import '../widgets/reader/annotation/ink_canvas.dart';
+import '../widgets/reader/annotation/ink_strokes_painter.dart';
+import '../widgets/reader/annotation/ink_controller.dart';
+import '../widgets/reader/annotation/ink_toolbar.dart';
 import '../widgets/reader/reader_controls.dart';
 import '../widgets/reader/reader_cutout_insets.dart';
 import '../widgets/reader/reader_illustration.dart';
@@ -522,6 +528,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _annotationRevision = 0;
   int _layoutAnnotationRevision = -1;
   late final VoidCallback _annotationListener;
+
+  // ===== 【第 6 组】手写墨迹批注（固定布局批注模式，分页模式专用）=====
+  /// 非空 = 批注模式中；整页墨迹按「章 + 排版版本 + 页」一条记录存取。
+  InkController? _ink;
+  String _inkVersion = '';
+  Size _inkViewport = Size.zero;
+  Timer? _inkDebounce;
+
+  /// 本章全部墨迹（只读态：锚点区间以虚线并入正文标记层）。
+  List<InkAnnotation> _chapterInk = const [];
 
   // ===== 【青茄重构·新增】护眼提醒 =====
   /// 连续阅读提醒间隔（青少年护眼边界，不做家长监护）。
@@ -1635,6 +1651,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         style: note.markStyle,
         colorValue: note.effectiveMarkColorValue,
       ),
+    ..._inkUnderlines,
   ];
 
   /// 交给排版层的行内批注块数据。
@@ -1660,6 +1677,301 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _annotations = loaded;
       ++_annotationRevision;
     });
+  }
+
+  // ==================== 【第 6 组】手写墨迹批注 ====================
+
+  InkAnnotationStore get _inkStore => InkAnnotationStore.instance;
+
+  /// 墨迹锚点区间在正文标记层的只读投影：虚线 + 墨色，与用户划线区分。
+  List<ReaderRangeUnderline> get _inkUnderlines => [
+    for (final ink in _chapterInk)
+      if (ink.hasTextAnchor)
+        ReaderRangeUnderline(
+          bookId: ink.bookId,
+          chapterId: ink.chapterId,
+          start: ink.startOffset!,
+          end: ink.endOffset!,
+          text: '',
+          createdAt: ink.createdAt,
+          style: ReaderMarkStyle.dashed,
+          colorValue: InkAnnotation.defaultColorValue,
+        ),
+  ];
+
+  /// 章节装载时同步本章墨迹；批注模式开着则先落盘退出（换章不延续会话）。
+  Future<void> _loadChapterInk() async {
+    if (_ink != null) await _exitInkMode(silent: true);
+    final chapterId = _chapter.itemId;
+    List<InkAnnotation> loaded;
+    try {
+      loaded = await _inkStore.loadByChapter(widget.bookId, chapterId);
+    } catch (_) {
+      loaded = const [];
+    }
+    if (!mounted || chapterId != _chapter.itemId) return;
+    setState(() => _chapterInk = loaded);
+  }
+
+  /// 排版版本指纹：字号/缩放/视口 + 页号。字号或分页参数变化 → 新版本，
+  /// 旧墨迹不再按原坐标覆盖，只保留锚点区间投影（AnchorProjector 处理）。
+  String _inkLayoutVersion(int pageIndex) {
+    final layout = _chapterLayout;
+    if (layout == null) return 'flow:p$pageIndex';
+    final spec = layout.spec;
+    final fontSize = spec.bodyStyle.fontSize ?? 0.0;
+    return 'flow:'
+        '$fontSize:'
+        '${spec.textScaler.scale(fontSize).toStringAsFixed(1)}:'
+        '${spec.viewport.width.round()}x${spec.viewport.height.round()}'
+        ':p$pageIndex';
+  }
+
+  /// 进入批注模式：分页模式 + 排版就绪才可用；排版就此冻结（版本号定格）。
+  void _enterInkMode() {
+    if (!_paged || _chapterLayout == null || _ink != null) return;
+    _inkVersion = _inkLayoutVersion(_pageIndex);
+    final controller = InkController(onChanged: _scheduleInkSave);
+    _inkStore.loadByChapter(widget.bookId, _chapter.itemId).then((list) {
+      if (!mounted || _ink == null) return;
+      final strokes = [
+        for (final a in list.where((a) => a.layoutVersion == _inkVersion))
+          ...a.strokes,
+      ];
+      _ink!.seed(strokes);
+    });
+    _ink = controller;
+    _closeSelectionBar(clearSelection: true);
+    setState(() {});
+    _notifyInkMismatchOnce();
+  }
+
+  /// 进入批注模式时提示锚点失配的墨迹（正文被外部改动过的旧批注）。
+  void _notifyInkMismatchOnce() {
+    final layout = _chapterLayout;
+    if (layout == null || _chapterInk.isEmpty) return;
+    final text = layout.textInRange(0, layout.textLength);
+    final mismatched = _chapterInk
+        .where((a) => a.verifyAgainst(text) == InkAnchorStatus.mismatch)
+        .length;
+    if (mismatched > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$mismatched 条手写批注的位置可能有变化，可在「墨迹」列表查看'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _exitInkMode({bool silent = false}) async {
+    _inkDebounce?.cancel();
+    await _saveInk();
+    if (!mounted) return;
+    // 先把画布/工具栏从树上摘除，下一帧再 dispose 控制器——画布 painter
+    // 仍挂在树上时销毁其 repaint 依赖，在 MIUI 真机上会冻结渲染面。
+    final controller = _ink;
+    _ink = null;
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller?.dispose());
+    await _loadChapterInk();
+  }
+
+  void _scheduleInkSave() {
+    _inkDebounce?.cancel();
+    _inkDebounce = Timer(const Duration(milliseconds: 600), () {
+      unawaited(_saveInk());
+    });
+  }
+
+  Future<void> _saveInk() async {
+    final controller = _ink;
+    final layout = _chapterLayout;
+    if (controller == null || layout == null || _inkVersion.isEmpty) return;
+    final chapterId = _chapter.itemId;
+    final key = InkAnnotation.keyFor(
+      bookId: widget.bookId,
+      chapterId: chapterId,
+      layoutVersion: _inkVersion,
+    );
+    try {
+      if (controller.strokes.isEmpty) {
+        await _inkStore.delete(key);
+        return;
+      }
+      final pageIndex = _pageIndex.clamp(0, layout.pages.length - 1);
+      final page = layout.pages[pageIndex];
+      final chapterText = layout.textInRange(0, layout.textLength);
+      final (before, after) = InkAnnotation.contextOf(
+        chapterText,
+        page.start,
+        page.end,
+      );
+      final existing = (await _inkStore.loadByChapter(widget.bookId, chapterId))
+          .where((a) => a.key == key)
+          .firstOrNull;
+      await _inkStore.save(
+        InkAnnotation(
+          bookId: widget.bookId,
+          chapterId: chapterId,
+          format: InkAnnotation.kFormatFlow,
+          pageWidth: _inkViewport.width,
+          pageHeight: _inkViewport.height,
+          layoutVersion: _inkVersion,
+          strokes: controller.strokes,
+          createdAt:
+              existing?.createdAt ?? DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+          startOffset: page.start,
+          endOffset: page.end,
+          contextBefore: before,
+          contextAfter: after,
+        ),
+      );
+    } catch (_) {
+      // 存储不可用不阻断书写；下次编辑仍会重试整条覆写。
+    }
+  }
+
+  /// 批注模式中的翻页：旧页落盘，新页换版本号并载入其墨迹。
+  void _switchInkPage(int newPageIndex) {
+    unawaited(
+      _saveInk().then((_) {
+        if (!mounted || _ink == null) return;
+        _inkVersion = _inkLayoutVersion(newPageIndex);
+        _inkStore.loadByChapter(widget.bookId, _chapter.itemId).then((list) {
+          if (!mounted || _ink == null) return;
+          final strokes = [
+            for (final a in list.where((a) => a.layoutVersion == _inkVersion))
+              ...a.strokes,
+          ];
+          _ink!.seed(strokes);
+        });
+      }),
+    );
+  }
+
+  /// 墨迹列表（查看/跳转锚点；失配条目给出提示入口）。
+  Future<void> _showInkList() async {
+    final layout = _chapterLayout;
+    final ink = _chapterInk;
+    if (layout == null) return;
+    final text = layout.textInRange(0, layout.textLength);
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.signature, size: 18, color: scheme.onSurface),
+                    const SizedBox(width: 8),
+                    Text(
+                      '本章手写批注（${ink.length}）',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (ink.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                  child: Text(
+                    '还没有手写批注。工具栏点「批注」进入手写模式。',
+                    style: TextStyle(fontSize: 13, color: scheme.outline),
+                  ),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: ink.length,
+                    itemBuilder: (context, index) {
+                      final item = ink[index];
+                      final status = item.verifyAgainst(text);
+                      final quote = item.hasTextAnchor
+                          ? text.substring(
+                              item.startOffset!.clamp(0, text.length),
+                              item.endOffset!.clamp(0, text.length),
+                            )
+                          : '';
+                      return ListTile(
+                        key: ValueKey('reader-ink-item-$index'),
+                        leading: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: CustomPaint(
+                            painter: InkStrokesPainter(
+                              strokes: item.strokes,
+                              canvasWidth: 56,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          quote.isEmpty ? '（纯页批注）' : quote,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 13, color: scheme.onSurface),
+                        ),
+                        subtitle: Text(
+                          status == InkAnchorStatus.exact
+                              ? '锚点正常'
+                              : status == InkAnchorStatus.mismatch
+                              ? '位置可能有变化'
+                              : '未校验',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: status == InkAnchorStatus.mismatch
+                                ? scheme.error
+                                : scheme.outline,
+                          ),
+                        ),
+                        trailing: TextButton(
+                          onPressed: () {
+                            Navigator.pop(sheetContext);
+                            if (item.hasTextAnchor) {
+                              _jumpToOffset(item.startOffset!);
+                            }
+                          },
+                          child: const Text('跳转'),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 跳到章内字符偏移（分页切页 / 滚动滚窗）。
+  void _jumpToOffset(int offset) {
+    final layout = _chapterLayout;
+    if (layout == null) return;
+    if (_paged) {
+      final page = layout.pageForOffset(offset).clamp(
+        0,
+        layout.pages.length - 1,
+      );
+      setState(() => _pageIndex = page);
+    } else {
+      final dy = layout.scrollForTextOffset(offset);
+      _scrollController.jumpTo(
+        dy.clamp(0, _scrollController.position.maxScrollExtent),
+      );
+    }
   }
 
   /// 把当前选区写成批注（带想法）或书摘（仅收藏原文）。
@@ -1935,6 +2247,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_loadIdeas(selectedChapter, generation));
       unawaited(_loadUnderlines());
       unawaited(_loadAnnotations());
+      unawaited(_loadChapterInk());
       // 本章的字数预算按正文长度重置，之后由停留时长逐步折算。
       _resetChapterChars(content, selectedChapter.title);
       if (!selectedLoaded.fetched && content.needsRefresh()) {
@@ -2728,6 +3041,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _needsRestore = false;
     });
     unawaited(_loadUnderlines());
+    unawaited(_loadChapterInk());
     // 【青茄修复·滚动无缝】静默换章把 _ideas 清空了，工具栏「本章评论」
     // 入口（要求 total > 0）会随之消失；按整章加载同样的路径把新章的
     // 段评拉回来。气泡开着时 IdeasRevision 会让该段按完整数据重排，
@@ -2983,6 +3297,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     // the action bar's anchor would be stale. Reselecting is one long press.
     _closeSelectionBar(clearSelection: true);
     if (!_progressReady || _changingChapter || page == _pageIndex) return;
+    // 手写批注模式：翻页 = 换批注目标页（旧页落盘、新页载入），墨迹不跨页。
+    if (_ink != null) _switchInkPage(page);
     setState(() {
       _pageIndex = page;
       _textOffset = _chapterLayout!.pages[page].start;
@@ -3784,7 +4100,31 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             offset: Offset(0, _toolbarLift),
                             child: SizedBox.expand(
                               key: _viewportKey,
-                              child: _buildContent(preset, windowPadding),
+                              child: _ink == null
+                                  ? _buildContent(preset, windowPadding)
+                                  : Stack(
+                                      children: [
+                                        Positioned.fill(
+                                          child: _buildContent(
+                                            preset,
+                                            windowPadding,
+                                          ),
+                                        ),
+                                        // 画布尺寸即批注页面快照（墨迹
+                                        // 归一化基准）。
+                                        Positioned.fill(
+                                          child: LayoutBuilder(
+                                            builder: (context, constraints) {
+                                              _inkViewport = constraints
+                                                  .biggest;
+                                              return InkCanvas(
+                                                controller: _ink!,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                             ),
                           ),
                         ),
@@ -3821,12 +4161,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
                 _menuEdge(
                   top: true,
-                  child: _ReaderToolbarPresence(
-                    key: _toolbarKey,
-                    child: _buildToolbar(preset),
-                  ),
+                  child: _ink != null
+                      ? const SizedBox.shrink()
+                      : _ReaderToolbarPresence(
+                          key: _toolbarKey,
+                          child: _buildToolbar(preset),
+                        ),
                 ),
-                _menuEdge(top: false, child: _buildReaderControls(preset)),
+                _menuEdge(
+                  top: false,
+                  child: _ink != null
+                      ? Padding(
+                          key: const Key('reader-ink-layer'),
+                          padding: EdgeInsets.only(bottom: windowPadding.bottom),
+                          child: InkToolbar(
+                            controller: _ink!,
+                            onDone: () =>
+                                unawaited(_exitInkMode()),
+                          ),
+                        )
+                      : _buildReaderControls(preset),
+                ),
               ],
             ),
           ),
@@ -4486,6 +4841,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       showCache: !widget.localOnly,
       autoTurnActive: _autoTurnTimer != null,
       onAutoTurn: _toggleAutoTurn,
+      onInk: _paged && _chapterLayout != null ? _enterInkMode : null,
+      onInkList: _chapterInk.isNotEmpty ? _showInkList : null,
     );
   }
 

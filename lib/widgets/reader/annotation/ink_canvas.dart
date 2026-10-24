@@ -158,7 +158,9 @@ class _InkCanvasState extends State<InkCanvas> {
                   livePoints: live,
                   liveColorValue: widget.controller.colorValue,
                   liveBaseWidth: widget.controller.baseWidth,
-                  repaint: Listenable.merge([widget.controller, _live]),
+                  // repaint 只挂稳定引用：live 的变化经上面的
+                  // ValueListenableBuilder 重建 painter 生效。
+                  repaint: widget.controller,
                 ),
                 child: const SizedBox.expand(),
               ),

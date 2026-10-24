@@ -228,7 +228,10 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
           ];
           _ink!.seed(strokes);
         });
-    if (existing != null) existing.dispose();
+    // 旧控制器同样延迟到摘除后销毁（渲染面冻结防线，见 reader 同名方法）。
+    if (existing != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => existing.dispose());
+    }
     setState(() {});
   }
 
@@ -236,11 +239,11 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
     _inkDebounce?.cancel();
     await _saveInk();
     if (!mounted) return;
-    _ink?.dispose();
+    final controller = _ink;
     _ink = null;
-    await _loadPageStrokes(_page);
-    if (!mounted) return;
     setState(() => _barsVisible = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller?.dispose());
+    await _loadPageStrokes(_page);
   }
 
   void _scheduleInkSave() {
