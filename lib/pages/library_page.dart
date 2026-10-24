@@ -9,6 +9,8 @@
 // .agents/notes/implemented/feature/2026-09-20-official-bookshelf.md
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../services/app_log.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -484,7 +486,9 @@ class _LibraryPageState extends State<LibraryPage> {
       for (final id in localBooks) {
         try {
           await ImportedBookStore.instance.deleteBook(id);
-        } catch (_) {}
+        } catch (error) {
+          AppLog.w('书架', '删除本地书失败', error: error);
+        }
       }
     } catch (_) {
       if (mounted) {

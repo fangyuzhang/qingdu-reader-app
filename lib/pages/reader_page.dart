@@ -3407,7 +3407,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     Set<String> cachedIds = {};
     try {
       cachedIds = await _diskCache.cachedChapterIds(widget.bookId);
-    } catch (_) {}
+    } catch (error) {
+      AppLog.w('阅读器', '读取章节缓存标记失败', error: error);
+    }
     if (!mounted) return;
     final selected = await showModalBottomSheet<int>(
       context: context,

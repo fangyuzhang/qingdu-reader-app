@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/media_item.dart';
+import 'app_log.dart';
 import 'api_client.dart';
 import 'audio_preferences.dart';
 import 'backend_transport.dart';
@@ -543,7 +544,9 @@ class SystemTtsPlayback extends ChangeNotifier with WidgetsBindingObserver {
     _publish();
     try {
       await SystemTts.stop();
-    } catch (_) {}
+    } catch (error) {
+      AppLog.w('听书', '停止系统朗读失败', error: error);
+    }
   }
 
   Future<void> _fail(Object e) async {
@@ -627,7 +630,9 @@ class SystemTtsPlayback extends ChangeNotifier with WidgetsBindingObserver {
     _subscription = null;
     try {
       await SystemTts.shutdown();
-    } catch (_) {}
+    } catch (error) {
+      AppLog.w('听书', '关闭系统朗读引擎失败', error: error);
+    }
     await _notificationQueue;
     await NativePlayer.stopListenForeground();
     dispose();

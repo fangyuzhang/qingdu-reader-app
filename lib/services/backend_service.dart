@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_log.dart';
 import 'backend_transport.dart';
 
 /// Manages the local backend core.
@@ -189,7 +190,9 @@ class BackendService {
     _logWriteQueue = _logWriteQueue.then((_) async {
       try {
         await file.writeAsString('$line\n', mode: FileMode.append);
-      } catch (_) {}
+      } catch (error) {
+        AppLog.w('后端', '写入 Rust 日志失败', error: error);
+      }
     });
   }
 
@@ -222,7 +225,9 @@ class BackendService {
       await _logWriteQueue;
       try {
         File(logPath).deleteSync();
-      } catch (_) {}
+      } catch (error) {
+        AppLog.w('后端', '清理 Rust 日志失败', error: error);
+      }
       _logFile = File(logPath);
 
       final rustTransport = _transport;
