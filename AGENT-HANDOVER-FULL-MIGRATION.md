@@ -222,14 +222,15 @@ gh auth login
 
 1. **不要用 Windows 盘符路径操作 WSL 内文件**。WSL 里 `/mnt/c/...` 对应 `C:\...`。
 2. **项目仓库必须在 WSL 原生路径（`~/`）**，不要放在 `/mnt/*` 下编译（9p 协议极慢）。
-3. **Flutter wrapper 的坑**：如果 shell 命中 `/mnt/d/.../Flutter` 的 Windows 版并报 `$'\r'`，把 `$HOME/flutter/bin` 前置到 `PATH`：
+3. **路径不能包含中文或非 ASCII 字符**：Dart analysis server（`flutter analyze`）在路径含中文时会崩溃（`FormatException: Unterminated string`）。E 盘的 `青茄阅读` 目录名就触发了这个问题。仓库必须复制到纯 ASCII 路径（如 `~/projects/fqapp-src`）后才能跑分析和构建。E 盘备份包仅用于文件搬运，不在此路径下直接开发。
+4. **Flutter wrapper 的坑**：如果 shell 命中 `/mnt/d/.../Flutter` 的 Windows 版并报 `$'\r'`，把 `$HOME/flutter/bin` 前置到 `PATH`：
    ```bash
    export PATH=$HOME/flutter/bin:$PATH
    ```
-4. **签名材料不要提交进 Git**。`android/keystore.properties` 和 `*.jks` 均已加入 `.gitignore`。
-5. **`android/local.properties` 会被 Flutter 自动生成**，但新电脑上的路径不同，首次 `flutter pub get` 会覆盖。
-6. **JNI 库是 git 忽略的**。如果换电脑后 `flutter test` 跳过 Rust 集成测试，是因为缺少 `.so`，用预编译库或重编即可。
-7. **Rust 构建需要 NDK**。交叉编译命令在 `scripts/build_rust_backend.sh` 中。
+5. **签名材料不要提交进 Git**。`android/keystore.properties` 和 `*.jks` 均已加入 `.gitignore`。
+6. **`android/local.properties` 会被 Flutter 自动生成**，但新电脑上的路径不同，首次 `flutter pub get` 会覆盖。
+7. **JNI 库是 git 忽略的**。如果换电脑后 `flutter test` 跳过 Rust 集成测试，是因为缺少 `.so`，用预编译库或重编即可。
+8. **Rust 构建需要 NDK**。交叉编译命令在 `scripts/build_rust_backend.sh` 中。
 
 ---
 
