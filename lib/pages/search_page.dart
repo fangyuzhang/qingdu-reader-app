@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../services/app_log.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -280,7 +282,9 @@ class _SearchPageState extends State<SearchPage> {
       if (mounted && generation == _historyGeneration) {
         setState(() => _history = history);
       }
-    } catch (_) {}
+    } catch (error) {
+      AppLog.w('搜索', '读取搜索历史失败', error: error);
+    }
   }
 
   Future<void> _confirmClearHistory() async {
@@ -306,7 +310,9 @@ class _SearchPageState extends State<SearchPage> {
     setState(() => _history = const []);
     try {
       await _historyStore.clear();
-    } catch (_) {}
+    } catch (error) {
+      AppLog.w('搜索', '清空搜索历史失败', error: error);
+    }
   }
 
   void _showHistory() {

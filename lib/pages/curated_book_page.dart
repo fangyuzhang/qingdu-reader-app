@@ -104,7 +104,7 @@ class _CuratedBookPageState extends State<CuratedBookPage> {
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
     final gradient =
-        category?.gradient ?? const [Color(0xFF2FA98C), Color(0xFF1F7F69)];
+        category?.gradient ?? CuratedCategory.defaultGradient;
 
     return Scaffold(
       backgroundColor: palette.canvas,

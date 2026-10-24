@@ -62,7 +62,7 @@ class CuratedBookCover extends StatelessWidget {
 
   Widget _fallbackCover({double radius = 14}) {
     final gradient =
-        category?.gradient ?? const [Color(0xFF2FA98C), Color(0xFF1F7F69)];
+        category?.gradient ?? CuratedCategory.defaultGradient;
     final height = width * 4 / 3;
     return SizedBox(
       key: fallbackKey,

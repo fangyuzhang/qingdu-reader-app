@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_skill/flutter_skill.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
@@ -71,7 +70,7 @@ void main() {
     // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
     // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
     RustLogSource.reader = BackendService.instance.readRustLog;
-    runApp(const ProviderScope(child: FqApp()));
+    runApp(const FqApp());
     // 【青茄修复·启动提速】Rust 后端进程的拉起（解压/端口/握手）是
     // 启动最耗时的一步，与本地数据初始化完全独立。这里就并发开跑，
     // RootShell 等待的是同一个 Future（start() 可重入），总耗时从
