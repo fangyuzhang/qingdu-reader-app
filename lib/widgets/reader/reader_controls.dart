@@ -74,13 +74,13 @@ class _ReaderControlsState extends State<ReaderControls> {
     final level = widget.preferences.followSystemBrightness
         ? widget.systemBrightness ?? widget.preferences.brightness
         : widget.preferences.brightness;
-    return Theme(
+    final sheet = Theme(
       data: preset.theme(Theme.of(context)),
       child: Material(
         color: preset.panelColor,
         elevation: 16,
         shadowColor: Colors.black38,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        // 【产品调整】底部工具栏平底，不再做顶部圆角。
         clipBehavior: Clip.antiAlias,
         child: Container(
           decoration: BoxDecoration(
@@ -148,6 +148,8 @@ class _ReaderControlsState extends State<ReaderControls> {
         ),
       ),
     );
+
+    return sheet;
   }
 
   Widget _chapterSeek(ReaderThemePreset preset) {

@@ -66,16 +66,13 @@ class _ShelfCover extends StatelessWidget {
               borderRadius: BorderRadius.circular(radius),
               child: ColoredBox(
                 color: palette.soft,
-                child: Hero(
-                  // 书架 → 详情页共用同一个 tag（两侧都取 item.id），
-                  // 只在封面图本体上飞，描边/蒙层留在书架上淡出。
-                  tag: 'book-cover-${item.id}',
-                  child: _ShelfCoverImage(
-                    item: item,
-                    fallback: fallback,
-                    width: width,
-                    height: height,
-                  ),
+                // 书架 → 详情页的封面 Hero 飞行动画已按产品要求移除：
+                // 详情页下滑到封面离屏后返回时，飞回路径观感异常。
+                child: _ShelfCoverImage(
+                  item: item,
+                  fallback: fallback,
+                  width: width,
+                  height: height,
                 ),
               ),
             ),

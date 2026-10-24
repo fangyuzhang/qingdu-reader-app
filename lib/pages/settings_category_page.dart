@@ -32,20 +32,14 @@ class SettingsScaffold extends StatelessWidget {
             color: palette.surface,
             borderRadius: BorderRadius.circular(20),
             clipBehavior: Clip.antiAlias,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: palette.line, width: 0.6),
-              ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < children.length; i++) ...[
-                    if (i > 0)
-                      Divider(height: 1, indent: 68, color: palette.line),
-                    children[i],
-                  ],
+            child: Column(
+              children: [
+                for (var i = 0; i < children.length; i++) ...[
+                  if (i > 0)
+                    Divider(height: 1, indent: 68, color: palette.line),
+                  children[i],
                 ],
-              ),
+              ],
             ),
           ),
         ],

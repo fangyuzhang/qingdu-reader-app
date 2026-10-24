@@ -39,12 +39,15 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _allKey = 'all';
 
-  /// 【青茄修复·听书分类】书单里标了 audio 的书集中在这里，点开优先听。
-  static const _listenKey = 'listen';
-
   CuratedCatalog _catalog = CuratedCatalog.empty;
   bool _loading = true;
-  String _category = _allKey;
+
+  /// 【产品调整】首页与各分类「全部」页融合为一个横滑 PageView：
+  /// 第 0 页是推荐视图，之后每页一个分类的全部书城视图。
+  /// 顶部分类条常驻并随页面切换同步高亮/滚动。
+  int _page = 0;
+  final PageController _pageController = PageController();
+  final Map<String, GlobalKey> _chipKeys = {};
 
   /// 首页推荐批次。基础顺序按日期稳定轮换，这个值只响应用户「换一批」。
   int _recommendationBatch = 0;
@@ -136,36 +139,27 @@ class _HomePageState extends State<HomePage> {
                 // 滑到再深的位置也能随时换分类或听书。
                 _topBar(palette),
                 Expanded(
-                  child: RefreshIndicator(
-                    color: HomePalette.accent,
-                    backgroundColor: palette.surface,
-                    onRefresh: () => _load(rotateRecommendations: true),
-                    child: CustomScrollView(
-                      key: const Key('home_curated'),
-                      physics: const BouncingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      slivers: [
-                        if (_loading)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 80),
-                              child: Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: HomePalette.accent,
-                                ),
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: _catalog.categories.length + 1,
+                    onPageChanged: (index) {
+                      setState(() => _page = index);
+                      // 顶部分类条同步滑动，让当前分类的 chip 保持可见。
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _revealChip(_chipKeyAt(index));
+                      });
+                    },
+                    itemBuilder: (context, index) => _KeepAlivePane(
+                      child: index == 0
+                          ? _buildRecommendFeed(palette)
+                          : CategoryBrowseView(
+                              key: ValueKey(
+                                'category-page-'
+                                '${_catalog.categories[index - 1].key}',
                               ),
+                              category: _catalog.categories[index - 1],
+                              loader: widget.categoryLoader,
                             ),
-                          )
-                        else if (_catalog.books.isEmpty)
-                          SliverToBoxAdapter(child: _empty(palette))
-                        else ...[
-                          ..._homeSlivers(palette),
-                          SliverToBoxAdapter(child: _footer(palette)),
-                        ],
-                        const SliverToBoxAdapter(child: SizedBox(height: 96)),
-                      ],
                     ),
                   ),
                 ),
@@ -215,24 +209,15 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(20, 12, 14, 0),
       child: Row(
         children: [
+          // 轮换说明文案按产品要求移除，只保留标题与「换一批」。
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '今日精选',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: palette.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '每天自动轮换，也可以手动换一批',
-                  style: TextStyle(fontSize: 11.5, color: palette.muted),
-                ),
-              ],
+            child: Text(
+              '今日精选',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: palette.ink,
+              ),
             ),
           ),
           TextButton.icon(
@@ -254,8 +239,9 @@ class _HomePageState extends State<HomePage> {
     final book = _catalog.pickOfDay(batch: _recommendationBatch);
     if (book == null) return const SizedBox.shrink();
     final category = _catalog.categoryOf(book.category);
-    final gradient =
-        category?.gradient ?? const [Color(0xFF2FA98C), Color(0xFF1F7F69)];
+    // 【产品调整】保持原尺寸布局（封面在左、文字在右），仅把分类渐变底
+    // 换成白底（palette.surface 随日夜主题）+ 细描边轻投影，文字配色
+    // 相应从白色改为 ink/muted；「今日荐读 / 适读年龄」标签不再展示。
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
       child: HomeEntrance(
@@ -265,126 +251,99 @@ class _HomePageState extends State<HomePage> {
           child: HomePressable(
             key: const Key('home-today-pick'),
             onTap: () => _openBook(book),
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(16),
             semanticLabel: '今日荐读：${book.title}',
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(22),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: gradient,
-                ),
+                color: palette.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: palette.line, width: 0.6),
                 boxShadow: [
                   BoxShadow(
-                    color: gradient.last.withValues(alpha: 0.28),
-                    blurRadius: 22,
-                    offset: const Offset(0, 10),
+                    color: Colors.black.withValues(
+                      alpha: palette.dark ? 0.28 : 0.05,
+                    ),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    right: -50,
-                    top: -60,
-                    child: Container(
-                      width: 190,
-                      height: 190,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CuratedBookCover(
+                      book: book,
+                      category: category,
+                      width: 88,
+                      showAge: false,
+                      coverUrl: _coverOf(book),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CuratedBookCover(
-                          book: book,
-                          category: category,
-                          width: 88,
-                          showAge: false,
-                          coverUrl: _coverOf(book),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            book.title,
+                            key: const Key('home-today-pick-title'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: palette.ink,
+                              fontSize: 18,
+                              height: 1.2,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            book.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: palette.muted,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // 大字号下允许撑开卡片，不再固定高度（会溢出）
+                          Text(
+                            book.blurb,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: palette.muted,
+                              fontSize: 12.5,
+                              height: 1.5,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
                             children: [
-                              Row(
-                                children: [
-                                  _Label(icon: LucideIcons.sun, text: '今日荐读'),
-                                  const SizedBox(width: 6),
-                                  _Label(text: book.age),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
                               Text(
-                                book.title,
-                                key: const Key('home-today-pick-title'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 19,
-                                  height: 1.2,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                book.author,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                '查看详情',
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.84),
-                                  fontSize: 11.5,
+                                  color: HomePalette.accent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              // 大字号下允许撑开卡片，不再固定高度（会溢出）
-                              Text(
-                                book.blurb,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.92),
-                                  fontSize: 12.5,
-                                  height: 1.5,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Text(
-                                    '查看详情',
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.95,
-                                      ),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  const Icon(
-                                    LucideIcons.arrow_right,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
-                                ],
+                              const SizedBox(width: 3),
+                              const Icon(
+                                LucideIcons.arrow_right,
+                                size: 14,
+                                color: HomePalette.accent,
                               ),
                             ],
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -400,8 +359,9 @@ class _HomePageState extends State<HomePage> {
       (_allKey, '推荐'),
       for (final category in _catalog.categories)
         (category.key, category.label),
-      (_listenKey, '听书'),
     ];
+    // 【产品调整】分类条重做：听书入口移除；chip 与 PageView 页面一一
+    // 对应——点 chip 切到该页，内容区左右滑也会带动 chip 高亮/滚动。
     return SizedBox(
       height: 46,
       child: ListView.separated(
@@ -412,7 +372,7 @@ class _HomePageState extends State<HomePage> {
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final (key, label) = entries[index];
-          final selected = _category == key;
+          final selected = key == _chipKeyAt(_page);
           return GestureDetector(
             key: Key('home-category-$key'),
             onTap: () {
@@ -420,10 +380,18 @@ class _HomePageState extends State<HomePage> {
               if (category != null) {
                 _openCategory(category);
               } else {
-                setState(() => _category = key);
+                _pageController.animateToPage(
+                  0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                );
               }
             },
             child: AnimatedContainer(
+              key: _chipKeys.putIfAbsent(
+                key,
+                () => GlobalKey(debugLabel: 'chip-$key'),
+              ),
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.symmetric(horizontal: 13),
               alignment: Alignment.center,
@@ -452,19 +420,69 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- 书单内容 ----------------
 
-  /// 按选中的标签分发内容：推荐（今日荐读 + 分类按钮 + 各分类横滑）、
-  /// 单个分类、听书。
-  List<Widget> _homeSlivers(HomePalette palette) {
-    if (_category == _listenKey) return _listenSlivers(palette);
-    if (_category == _allKey) {
-      return [
-        SliverToBoxAdapter(child: _recommendationHeading(palette)),
-        SliverToBoxAdapter(child: _todayPick(palette)),
-        SliverToBoxAdapter(child: _categoryButtons(palette)),
-        ..._contentSlivers(palette),
-      ];
-    }
-    return _contentSlivers(palette);
+  /// 推荐视图（PageView 第 0 页）：今日荐读 + 分类入口 + 各分类横滑 + 页脚。
+  Widget _buildRecommendFeed(HomePalette palette) {
+    return RefreshIndicator(
+      color: HomePalette.accent,
+      backgroundColor: palette.surface,
+      onRefresh: () => _load(rotateRecommendations: true),
+      child: CustomScrollView(
+        key: const Key('home_curated'),
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        slivers: [
+          if (_loading)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 80),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: HomePalette.accent,
+                  ),
+                ),
+              ),
+            )
+          else if (_catalog.books.isEmpty)
+            SliverToBoxAdapter(child: _empty(palette))
+          else ...[
+            SliverToBoxAdapter(child: _recommendationHeading(palette)),
+            SliverToBoxAdapter(child: _todayPick(palette)),
+            SliverToBoxAdapter(child: _categoryButtons(palette)),
+            ..._contentSlivers(palette),
+            SliverToBoxAdapter(child: _footer(palette)),
+          ],
+          const SliverToBoxAdapter(child: SizedBox(height: 96)),
+        ],
+      ),
+    );
+  }
+
+  /// 跳到某个分类的「全部」页（PageView 内切换，不再另开路由）。
+  void _goToCategory(String key) {
+    final index = _catalog.categories.indexWhere((c) => c.key == key) + 1;
+    if (index <= 0) return;
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  String _chipKeyAt(int page) =>
+      page == 0 ? _allKey : _catalog.categories[page - 1].key;
+
+  /// 让当前分类的 chip 滚回可视区（分类条 chips 较多时会溢出屏幕）。
+  void _revealChip(String key) {
+    final context = _chipKeys[key]?.currentContext;
+    if (context == null) return;
+    Scrollable.ensureVisible(
+      context,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   /// 【青茄修复·分类功能按钮】推荐页直接摆出全部分类入口，点一下切到
@@ -537,100 +555,16 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 【青茄修复·听书分类】书单里标了 audio 的书：点开优先解析有声源，
-  /// 没有音频的书源时退回文字阅读。
-  List<Widget> _listenSlivers(HomePalette palette) {
-    final audioBooks = _catalog.books
-        .where((book) => book.audio)
-        .toList(growable: false);
-    if (audioBooks.isEmpty) {
-      return [
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 60),
-            child: Center(
-              child: Text(
-                '有声书正在补充中，先去「推荐」挑一本吧',
-                style: TextStyle(fontSize: 12.5),
-              ),
-            ),
-          ),
-        ),
-      ];
-    }
-    return [
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-          child: Text(
-            '这些书都有有声版，点开直接听；个别书源缺失时会退回文字阅读。',
-            style: TextStyle(
-              fontSize: 12.5,
-              height: 1.55,
-              color: palette.muted,
-            ),
-          ),
-        ),
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        sliver: SliverList.separated(
-          itemCount: audioBooks.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final book = audioBooks[index];
-            return CuratedBookRow(
-              key: Key('home-listen-row-${book.id}'),
-              book: book,
-              category: _catalog.categoryOf(book.category),
-              coverUrl: _coverOf(book),
-              onTap: () => _openBook(book),
-              onLongPress: () => _openCuratedPage(book),
-            );
-          },
-        ),
-      ),
-    ];
-  }
-
   List<CuratedBook> _recommendedBooksOf(CuratedCategory category) =>
-      _catalog.recommendationBatchOf(category.key, batch: _recommendationBatch);
+      _catalog.recommendationBatchOf(
+        category.key,
+        batch: _recommendationBatch,
+        limit: 10,
+      );
 
   List<Widget> _contentSlivers(HomePalette palette) {
-    if (_category != _allKey) {
-      final category = _catalog.categoryOf(_category);
-      final books = _catalog.booksOf(_category);
-      return [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
-            child: Text(
-              category?.desc ?? '',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.55,
-                color: palette.muted,
-              ),
-            ),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          sliver: SliverList.separated(
-            itemCount: books.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) => CuratedBookRow(
-              book: books[index],
-              category: category,
-              coverUrl: _coverOf(books[index]),
-              onTap: () => _openBook(books[index]),
-              onLongPress: () => _openCuratedPage(books[index]),
-            ),
-          ),
-        ),
-      ];
-    }
-
+    // 单分类的就地网格已由独立浏览页承载（点分类/左滑进入），这里只渲染
+    // 推荐视图的各分类横滑板块。
     return [
       for (final category in _catalog.categories)
         if (_catalog.booksOf(category.key).isNotEmpty)
@@ -707,7 +641,8 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: tileWidth * 4 / 3 + captionHeight,
+            // 磁贴外套书架式白卡（12 内边距），高度相应加上下卡内边距。
+            height: (tileWidth - 24) * 4 / 3 + captionHeight + 10,
             child: _CategoryRail(
               key: Key('home-rail-${category.key}'),
               // 滑到末尾后继续右滑，直接进「全部」。阈值按拖动距离累计，
@@ -715,6 +650,7 @@ class _HomePageState extends State<HomePage> {
               onOpenAll: () => _openCategory(category),
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
+                physics: _MagneticSnapPhysics(itemExtent: tileWidth + 12),
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 itemCount: books.length,
                 separatorBuilder: (_, _) => const SizedBox(width: 12),
@@ -800,16 +736,8 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- 跳转 ----------------
 
-  void _openCategory(CuratedCategory category) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CategoryBrowsePage(
-          category: category,
-          loader: widget.categoryLoader,
-        ),
-      ),
-    );
-  }
+  void _openCategory(CuratedCategory category) =>
+      _goToCategory(category.key);
 
   void _openSearch() {
     Navigator.of(
@@ -897,40 +825,40 @@ class _OpeningOverlay extends StatelessWidget {
   }
 }
 
-/// 渐变卡上的小标签（图标 + 文字）。
-class _Label extends StatelessWidget {
-  const _Label({this.icon, required this.text});
+/// 分类横滑列表的磁力吸附物理：停稳时对齐到整本，
+/// 不再出现一本书一半在屏内、一半在屏外的状态。
+///
+/// 快速甩动先按惯性投影一段位移再吸附，保证一甩仍能跨多本；
+/// 慢拖松手就近吸附。吸附目标钳制在滚动范围内，末端整本完整可见。
+class _MagneticSnapPhysics extends ScrollPhysics {
+  const _MagneticSnapPhysics({required this.itemExtent, super.parent});
 
-  final IconData? icon;
-  final String text;
+  /// 单个磁贴占位宽（磁贴 + 间距）。
+  final double itemExtent;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.20),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 11, color: Colors.white),
-            const SizedBox(width: 3),
-          ],
-          Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
+  _MagneticSnapPhysics applyTo(ScrollPhysics? ancestor) =>
+      _MagneticSnapPhysics(
+        itemExtent: itemExtent,
+        parent: buildParent(ancestor),
+      );
+
+  double _snap(double pixels) =>
+      (pixels / itemExtent).roundToDouble() * itemExtent;
+
+  @override
+  Simulation? createBallisticSimulation(
+    ScrollMetrics position,
+    double velocity,
+  ) {
+    double target = _snap(position.pixels);
+    if (velocity.abs() > 600) {
+      // 惯性投影约 0.22s 的位移后再吸附。
+      target = _snap(position.pixels + velocity * 0.22);
+    }
+    target = target.clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() < 0.5) return null;
+    return ScrollSpringSimulation(spring, position.pixels, target, velocity);
   }
 }
 
@@ -954,8 +882,9 @@ class _CategoryRail extends StatefulWidget {
 }
 
 class _CategoryRailState extends State<_CategoryRail> {
-  /// 滑到末尾后再拖约 72dp 才触发：太短会被正常甩动误触，太长又像滑不动。
-  static const double _triggerOverscroll = 72;
+  /// 滑到末尾后再拖约 36dp 即触发：用户反馈 72dp 下小范围滑动进不了
+  /// 「全部」，降一倍让轻扫也能命中；仍高于普通甩动的瞬时过冲，不易误触。
+  static const double _triggerOverscroll = 36;
 
   double _pull = 0;
   bool _fired = false;
@@ -990,5 +919,27 @@ class _CategoryRailState extends State<_CategoryRail> {
       onNotification: _onScroll,
       child: widget.child,
     );
+  }
+}
+
+/// PageView 页面的保活包装：滑走的页保留滚动位置与加载状态。
+class _KeepAlivePane extends StatefulWidget {
+  const _KeepAlivePane({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlivePane> createState() => _KeepAlivePaneState();
+}
+
+class _KeepAlivePaneState extends State<_KeepAlivePane>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

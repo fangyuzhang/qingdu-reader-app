@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
+
 /// What the reader can do with a long-pressed paragraph.
 ///
 /// 【青茄重构·新增】annot（批注：写想法并生成行内批注块）与
@@ -195,79 +196,82 @@ class ReaderParagraphMenu extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.transparent,
-    child: Column(
+  Widget build(BuildContext context) {
+    final items = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // `m.java` shows upArrow when the popup hangs below the anchor and
-        // downArrow once it flips above; the other arrow is gone, so it takes
-        // no space and the painted tip always touches the paragraph.
-        if (belowAnchor)
-          _Arrow(pointingUp: true, color: _background)
-        else
-          const SizedBox.shrink(),
-        Container(
-          height: _itemHeight + _verticalPadding * 2,
-          padding: const EdgeInsets.symmetric(
-            horizontal: _multiPadding,
-            vertical: _verticalPadding,
+        if (showListening)
+          _Item(
+            key: const ValueKey('reader-action-listen'),
+            icon: LucideIcons.headphones,
+            label: '从本段开始听书',
+            width: _listenItemWidth,
+            onTap: () => onAction(ReaderParagraphAction.listen),
           ),
-          decoration: BoxDecoration(
-            color: _background,
-            borderRadius: BorderRadius.circular(_radius),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showListening)
-                _Item(
-                  key: const ValueKey('reader-action-listen'),
-                  icon: LucideIcons.headphones,
-                  label: '从本段开始听书',
-                  width: _listenItemWidth,
-                  onTap: () => onAction(ReaderParagraphAction.listen),
-                ),
-              _Item(
-                key: const ValueKey('reader-action-copy'),
-                icon: LucideIcons.copy,
-                label: '复制',
-                onTap: () => onAction(ReaderParagraphAction.copy),
-              ),
-              _Item(
-                key: const ValueKey('reader-action-underline'),
-                icon: underlined ? LucideIcons.eraser : LucideIcons.highlighter,
-                label: underlined ? (paragraphScoped ? '取消划线' : '删除划线') : '划线',
-                onTap: () => onAction(
-                  underlined
-                      ? ReaderParagraphAction.removeUnderline
-                      : ReaderParagraphAction.underline,
-                ),
-              ),
-              // 【青茄重构·新增】批注：写想法 → 红线 + 行内批注块。
-              _Item(
-                key: const ValueKey('reader-action-annot'),
-                icon: LucideIcons.message_square,
-                label: '批注',
-                onTap: () => onAction(ReaderParagraphAction.annot),
-              ),
-              // 【青茄重构·新增】书摘：收藏选中句子（无想法）。
-              _Item(
-                key: const ValueKey('reader-action-excerpt'),
-                icon: LucideIcons.bookmark,
-                label: '书摘',
-                onTap: () => onAction(ReaderParagraphAction.excerpt),
-              ),
-            ],
+        _Item(
+          key: const ValueKey('reader-action-copy'),
+          icon: LucideIcons.copy,
+          label: '复制',
+          onTap: () => onAction(ReaderParagraphAction.copy),
+        ),
+        _Item(
+          key: const ValueKey('reader-action-underline'),
+          icon: underlined ? LucideIcons.eraser : LucideIcons.highlighter,
+          label: underlined ? (paragraphScoped ? '取消划线' : '删除划线') : '划线',
+          onTap: () => onAction(
+            underlined
+                ? ReaderParagraphAction.removeUnderline
+                : ReaderParagraphAction.underline,
           ),
         ),
-        if (!belowAnchor)
-          _Arrow(pointingUp: false, color: _background)
-        else
-          const SizedBox.shrink(),
+        // 【青茄重构·新增】批注：写想法 → 红线 + 行内批注块。
+        _Item(
+          key: const ValueKey('reader-action-annot'),
+          icon: LucideIcons.message_square,
+          label: '批注',
+          onTap: () => onAction(ReaderParagraphAction.annot),
+        ),
+        // 【青茄重构·新增】书摘：收藏选中句子（无想法）。
+        _Item(
+          key: const ValueKey('reader-action-excerpt'),
+          icon: LucideIcons.bookmark,
+          label: '书摘',
+          onTap: () => onAction(ReaderParagraphAction.excerpt),
+        ),
       ],
-    ),
-  );
+    );
+    return Material(
+      color: Colors.transparent,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // `m.java` shows upArrow when the popup hangs below the anchor and
+          // downArrow once it flips above; the other arrow is gone, so it takes
+          // no space and the painted tip always touches the paragraph.
+          if (belowAnchor)
+            _Arrow(pointingUp: true, color: _background)
+          else
+            const SizedBox.shrink(),
+          Container(
+            height: _itemHeight + _verticalPadding * 2,
+            padding: const EdgeInsets.symmetric(
+              horizontal: _multiPadding,
+              vertical: _verticalPadding,
+            ),
+            decoration: BoxDecoration(
+              color: _background,
+              borderRadius: BorderRadius.circular(_radius),
+            ),
+            child: items,
+          ),
+          if (!belowAnchor)
+            _Arrow(pointingUp: false, color: _background)
+          else
+            const SizedBox.shrink(),
+        ],
+      ),
+    );
+  }
 }
 
 /// The 15x8dp tip that ties the bar to the touched line (`wr.xml`).

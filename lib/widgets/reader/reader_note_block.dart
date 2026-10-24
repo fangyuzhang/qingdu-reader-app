@@ -258,6 +258,22 @@ Future<AnnotationDraft?> showAnnotationEditor(
   List<String> knownTags = const [],
   List<ReaderMarkerType> markerTypes = const [],
 }) {
+  final sheet = _AnnotationEditorSheet(
+    quote: quote,
+    initial: initial,
+    title: title,
+    isExcerpt: isExcerpt,
+    initialCategory: initialCategory,
+    initialTags: initialTags,
+    initialMarkerType: initialMarkerType,
+    initialMarkerLabel: initialMarkerLabel,
+    initialMarkerColorValue: initialMarkerColorValue,
+    initialMarkStyle: initialMarkStyle,
+    initialMarkColorValue: initialMarkColorValue,
+    knownCategories: knownCategories,
+    knownTags: knownTags,
+    markerTypes: markerTypes,
+  );
   return showModalBottomSheet<AnnotationDraft>(
     context: context,
     isScrollControlled: true,
@@ -265,22 +281,7 @@ Future<AnnotationDraft?> showAnnotationEditor(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
     ),
-    builder: (_) => _AnnotationEditorSheet(
-      quote: quote,
-      initial: initial,
-      title: title,
-      isExcerpt: isExcerpt,
-      initialCategory: initialCategory,
-      initialTags: initialTags,
-      initialMarkerType: initialMarkerType,
-      initialMarkerLabel: initialMarkerLabel,
-      initialMarkerColorValue: initialMarkerColorValue,
-      initialMarkStyle: initialMarkStyle,
-      initialMarkColorValue: initialMarkColorValue,
-      knownCategories: knownCategories,
-      knownTags: knownTags,
-      markerTypes: markerTypes,
-    ),
+    builder: (_) => sheet,
   );
 }
 

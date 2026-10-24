@@ -91,9 +91,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('笔记'), findsOneWidget);
     expect(find.textContaining('还没有'), findsOneWidget);
-    // 三个内容 chip（全部/批注/书摘）+ 「全部类型」；
+    // 四个内容 chip（全部/批注/书摘/划线）+ 「全部类型」；
     // 其余类型是可长按拖动的 PaletteTagChip，不再是 ChoiceChip。
-    expect(find.byType(ChoiceChip), findsNWidgets(4));
+    expect(find.byType(ChoiceChip), findsNWidgets(5));
   });
 
   testWidgets('分级标签渲染 12+ 与 15+', (tester) async {
@@ -198,7 +198,7 @@ void main() {
   });
 
   testWidgets(
-    'notes timeline shows timestamps and type chips toggle off on second tap',
+    'notes timeline hides timestamps and type chips toggle off on second tap',
     (tester) async {
       final firstTime = DateTime(2026, 10, 20, 8, 5);
       final secondTime = DateTime(2026, 10, 19, 21, 30);
@@ -236,8 +236,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('notes-timeline')), findsOneWidget);
-      expect(find.text('2026-10-20 08:05'), findsOneWidget);
-      expect(find.text('2026-10-19 21:30'), findsOneWidget);
+      // 时间戳按产品要求不再在卡片内展示。
+      expect(find.text('2026-10-20 08:05'), findsNothing);
+      expect(find.text('2026-10-19 21:30'), findsNothing);
       expect(
         find.byKey(ValueKey('note-timeline-${store.notes.first.key}')),
         findsOneWidget,

@@ -33,7 +33,9 @@ void main() {
   );
 
   Widget app(HomeCategoryBooksLoader loader) => MaterialApp(
-    home: CategoryBrowsePage(category: category, loader: loader),
+    home: Scaffold(
+      body: CategoryBrowseView(category: category, loader: loader),
+    ),
   );
 
   testWidgets('分类页会合并多个检索词，不再只有少许固定书目', (tester) async {

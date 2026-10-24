@@ -494,65 +494,56 @@ class _SearchPageState extends State<SearchPage> {
             color: palette.surface,
             borderRadius: BorderRadius.circular(21),
             border: Border.all(color: palette.line, width: 0.6),
-            boxShadow: [
-              BoxShadow(
-                color: palette.ink.withValues(
-                  alpha: palette.dark ? 0.12 : 0.03,
-                ),
-                blurRadius: 6,
-                offset: const Offset(0, 1.5),
-              ),
-            ],
           ),
           child: TextField(
-            controller: _ctrl,
-            autofocus: false,
-            textInputAction: TextInputAction.search,
-            style: TextStyle(fontSize: 14.5, color: palette.ink),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: '搜索名称或作品 ID',
-              hintStyle: TextStyle(fontSize: 14, color: palette.muted),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              suffixIconConstraints: const BoxConstraints(minWidth: 48),
-              suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _ctrl,
-                builder: (context, value, _) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (value.text.isNotEmpty)
-                      IconButton(
-                        tooltip: '清空',
-                        icon: Icon(
-                          LucideIcons.x,
-                          size: 17,
-                          color: palette.muted,
+              controller: _ctrl,
+              autofocus: false,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(fontSize: 14.5, color: palette.ink),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '搜索名称或作品 ID',
+                hintStyle: TextStyle(fontSize: 14, color: palette.muted),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                suffixIconConstraints: const BoxConstraints(minWidth: 48),
+                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _ctrl,
+                  builder: (context, value, _) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (value.text.isNotEmpty)
+                        IconButton(
+                          tooltip: '清空',
+                          icon: Icon(
+                            LucideIcons.x,
+                            size: 17,
+                            color: palette.muted,
+                          ),
+                          onPressed: _clearSearchInput,
                         ),
-                        onPressed: _clearSearchInput,
+                      IconButton(
+                        tooltip: '搜索',
+                        icon: Icon(
+                          LucideIcons.search,
+                          size: 18,
+                          color: HomePalette.accent,
+                        ),
+                        onPressed: () => _search(_ctrl.text),
                       ),
-                    IconButton(
-                      tooltip: '搜索',
-                      icon: Icon(
-                        LucideIcons.search,
-                        size: 18,
-                        color: HomePalette.accent,
-                      ),
-                      onPressed: () => _search(_ctrl.text),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
+              onChanged: _onQueryChanged,
+              onSubmitted: _search,
             ),
-            onChanged: _onQueryChanged,
-            onSubmitted: _search,
           ),
-        ),
       ),
       body: Column(
         children: [
@@ -763,15 +754,6 @@ class _SearchPageState extends State<SearchPage> {
             color: palette.surface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: palette.line, width: 0.6),
-            boxShadow: [
-              BoxShadow(
-                color: palette.ink.withValues(
-                  alpha: palette.dark ? 0.12 : 0.03,
-                ),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

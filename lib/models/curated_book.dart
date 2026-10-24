@@ -138,8 +138,16 @@ class CuratedCatalog {
   }) {
     final all = booksOf(key);
     if (all.isEmpty || limit <= 0) return const [];
-    if (all.length <= limit) return all;
     final order = _dailyOrder(all, now ?? DateTime.now());
+    // limit 覆盖全部分类（首页每板块 10 本）时，批次改为对日序做轮转：
+    // 否则 start 恒为 0，「换一批」不再产生可感知的变化。
+    if (limit >= order.length) {
+      final shift = batch.abs() % order.length;
+      return List.unmodifiable([
+        for (var i = 0; i < order.length; i++)
+          order[(i + shift) % order.length],
+      ]);
+    }
     final start = (batch.abs() * limit) % order.length;
     return List<CuratedBook>.generate(
       limit,

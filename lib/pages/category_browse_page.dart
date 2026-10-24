@@ -21,18 +21,22 @@ import 'detail_page.dart';
 typedef HomeCategoryBooksLoader = Future<List<MediaItem>> Function(
     String query, int offset);
 
-/// Full category browser opened from the home category chips and “全部”.
-class CategoryBrowsePage extends StatefulWidget {
-  const CategoryBrowsePage({super.key, required this.category, this.loader});
+/// 分类「全部」浏览视图：不再作为独立页面跳转，而是内嵌在首页的
+/// PageView 里（首页顶部分类条常驻并随页面切换同步高亮）。
+/// 混入 AutomaticKeepAliveClientMixin：滑走的分类页保留加载结果，
+/// 滑回来不重新拉取。
+class CategoryBrowseView extends StatefulWidget {
+  const CategoryBrowseView({super.key, required this.category, this.loader});
 
   final CuratedCategory category;
   final HomeCategoryBooksLoader? loader;
 
   @override
-  State<CategoryBrowsePage> createState() => _CategoryBrowsePageState();
+  State<CategoryBrowseView> createState() => _CategoryBrowseViewState();
 }
 
-class _CategoryBrowsePageState extends State<CategoryBrowsePage> {
+class _CategoryBrowseViewState extends State<CategoryBrowseView>
+    with AutomaticKeepAliveClientMixin {
   static const _pageSize = 10;
   final List<MediaItem> _items = [];
   final Set<String> _seenIds = {};
@@ -172,7 +176,13 @@ class _CategoryBrowsePageState extends State<CategoryBrowsePage> {
     // 缓存是先同步读内存的：命中就能在同一帧把书铺出来。
     await _cache.load();
     if (!mounted || generation != _generation) return;
-    final cached = _cache.read(widget.category.key, targetPage);
+    // 【修复·下拉刷新两次跳动】换一批（advance）时不再先展示缓存批次：
+    // 旧逻辑缓存批次先上屏、网络批次回来再整体替换一次，用户看到内容
+    // 连跳两次，像「刷新了两遍」。现在保持当前内容不动，网络批次回来
+    // 一次性替换（RefreshIndicator 的指示器已提供加载反馈）。
+    final cached = advance
+        ? null
+        : _cache.read(widget.category.key, targetPage);
     final fresh = cached != null &&
         !force &&
         _cache.isFresh(widget.category.key, targetPage);
@@ -186,18 +196,19 @@ class _CategoryBrowsePageState extends State<CategoryBrowsePage> {
         _refreshing = !fresh;
       } else {
         if (advance) {
-          _items.clear();
-          _seenIds.clear();
-          _titleKeys.clear();
-        }
-        final seeded = advance ? const <MediaItem>[] : _seedItems();
-        if (seeded.isNotEmpty) {
-          _showBatch(seeded);
+          // 换一批：不清空、不转圈，静默等网络批次一次性替换。
           _loading = false;
           _refreshing = true;
         } else {
-          _loading = true;
-          _refreshing = false;
+          final seeded = _seedItems();
+          if (seeded.isNotEmpty) {
+            _showBatch(seeded);
+            _loading = false;
+            _refreshing = true;
+          } else {
+            _loading = true;
+            _refreshing = false;
+          }
         }
       }
     });
@@ -282,166 +293,153 @@ class _CategoryBrowsePageState extends State<CategoryBrowsePage> {
   void _open(MediaItem item) => openBookDetail(context, item);
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
     final palette = HomePalette.of(context);
-    return Scaffold(
-      backgroundColor: palette.canvas,
-      appBar: AppBar(
-        title: Text(widget.category.label),
-        backgroundColor: palette.canvas,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        actions: [
-          IconButton(
-            key: const Key('category-refresh-button'),
-            tooltip: '换一批',
-            onPressed: _loading ? null : _changeBatch,
-            icon: const Icon(LucideIcons.refresh_cw),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        color: HomePalette.accent,
-        backgroundColor: palette.surface,
-        onRefresh: _changeBatch,
-        child: CustomScrollView(
-          key: const Key('category-books-scroll'),
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: BouncingScrollPhysics(),
-          ),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 12, 14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.category.desc,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              height: 1.55,
-                              color: palette.muted,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _loading
-                                ? '正在从书城加载更多书籍…'
-                                : _refreshing
-                                    ? '已载入 ${_items.length} 本 · 正在更新'
-                                    : '已载入 ${_items.length} 本',
-                            key: const Key('category-loaded-count'),
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: palette.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton.icon(
-                      key: const Key('category-change-batch'),
-                      onPressed: _loading ? null : _changeBatch,
-                      icon: const Icon(LucideIcons.shuffle, size: 15),
-                      label: const Text('换一批'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: HomePalette.accent,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (_loading)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_error != null && _items.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
+    return RefreshIndicator(
+      color: HomePalette.accent,
+      backgroundColor: palette.surface,
+      onRefresh: _changeBatch,
+      child: CustomScrollView(
+        key: const Key('category-books-scroll'),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 12, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          LucideIcons.cloud_off,
-                          size: 38,
-                          color: palette.line,
-                        ),
-                        const SizedBox(height: 12),
                         Text(
-                          _error!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 13, color: palette.muted),
+                          widget.category.desc,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.55,
+                            color: palette.muted,
+                          ),
                         ),
-                        const SizedBox(height: 12),
-                        OutlinedButton(
-                          key: const Key('category-retry'),
-                          onPressed: _changeBatch,
-                          child: const Text('重新加载'),
+                        const SizedBox(height: 4),
+                        Text(
+                          _loading
+                              ? '正在从书城加载更多书籍…'
+                              : _refreshing
+                                  ? '已载入 ${_items.length} 本 · 正在更新'
+                                  : '已载入 ${_items.length} 本',
+                          key: const Key('category-loaded-count'),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: palette.muted,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-              )
-            else ...[
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-                sliver: SliverGrid.builder(
-                  itemCount: _items.length,
-                  gridDelegate: mediaGridDelegateFor(context),
-                  itemBuilder: (context, index) {
-                    final item = _items[index];
-                    return MediaCard(
-                      key: Key('category-book-${item.id}'),
-                      item: item,
-                      showScore: true,
-                      onTap: () => _open(item),
-                    );
-                  },
-                ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    key: const Key('category-change-batch'),
+                    onPressed: _loading ? null : _changeBatch,
+                    icon: const Icon(LucideIcons.shuffle, size: 15),
+                    label: const Text('换一批'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: HomePalette.accent,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
               ),
-              SliverToBoxAdapter(
+            ),
+          ),
+          if (_loading)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null && _items.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
-                  child: Center(
-                    child: _loadingMore
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : _hasMore
-                            ? OutlinedButton.icon(
-                                key: const Key('category-load-more'),
-                                onPressed: _loadMore,
-                                icon: const Icon(LucideIcons.plus, size: 15),
-                                label: const Text('加载更多'),
-                              )
-                            : Text(
-                                '这一批已经到底，点「换一批」继续发现',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: palette.muted,
-                                ),
-                              ),
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        LucideIcons.cloud_off,
+                        size: 38,
+                        color: palette.line,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13, color: palette.muted),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        key: const Key('category-retry'),
+                        onPressed: _changeBatch,
+                        child: const Text('重新加载'),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ],
+            )
+          else ...[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+              sliver: SliverGrid.builder(
+                itemCount: _items.length,
+                gridDelegate: mediaGridDelegateFor(context),
+                itemBuilder: (context, index) {
+                  final item = _items[index];
+                  return MediaCard(
+                    key: Key('category-book-${item.id}'),
+                    item: item,
+                    showScore: true,
+                    onTap: () => _open(item),
+                  );
+                },
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
+                child: Center(
+                  child: _loadingMore
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _hasMore
+                          ? OutlinedButton.icon(
+                              key: const Key('category-load-more'),
+                              onPressed: _loadMore,
+                              icon: const Icon(LucideIcons.plus, size: 15),
+                              label: const Text('加载更多'),
+                            )
+                          : Text(
+                              '这一批已经到底，点「换一批」继续发现',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: palette.muted,
+                              ),
+                            ),
+                ),
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }

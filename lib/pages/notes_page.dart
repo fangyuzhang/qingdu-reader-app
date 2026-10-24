@@ -22,11 +22,9 @@ import '../widgets/notes/note_tag_drag.dart';
 import '../widgets/reader/reader_note_block.dart';
 import 'reader_page.dart';
 
-enum _NotesViewMode { timeline, books, marks }
+enum _NotesViewMode { timeline, books }
 
 /// 划线视图里「只看向下划线 / 只看荧光笔」的二级切换。
-enum _MarkStyleFilter { all, underline, highlighter }
-
 /// 一条划线记录在笔记页里的展示形态。
 ///
 /// 两种历史形态统一成一个视图模型：范围划线带文字偏移（可以直接跳到那句），
@@ -118,6 +116,13 @@ class _NotesPageState extends State<NotesPage> {
   String? _hoverNoteKey;
   NoteTagDrag? _hoverTag;
 
+  /// 正在移动/删除中的角标（noteKey → (类型, 文案) 集合）。
+  ///
+  /// 松手到写库、重载完成的空档里，先把源笔记上的角标藏住：否则角标会
+  /// 先闪回原位、等异步重载后才消失，看起来像一个残影。某次重载数据
+  /// 确认源上已没有这枚角标后自动解除；写库失败时回滚恢复。
+  final Map<String, Set<(NoteTagKind, String)>> _leavingBadges = {};
+
   /// 顶部「全部类型」的拖动排序状态：正在拖的标签、起止插入位置，以及按下时各标签的中心（用固定坐标算插入点，
   /// 避免标签被挤动后坐标变化导致来回抖）。
   NoteTagDrag? _paletteDrag;
@@ -135,8 +140,8 @@ class _NotesPageState extends State<NotesPage> {
 
   /// 划线 / 荧光笔记录，以及按书过滤当前划线视图的选择。
   List<_MarkEntry> _marks = const [];
-  String? _markBookId;
-  _MarkStyleFilter _markFilter = _MarkStyleFilter.all;
+  /// 划线线型筛选（null = 全部线型）；仅当类型筛选选中「划线」时生效。
+  ReaderMarkStyle? _markStyleFilter;
 
   /// bookId → 封面地址：封面来自阅读历史，缺失时用同目录的几何封面兜底。
   Map<String, String> _covers = const {};
@@ -176,7 +181,28 @@ class _NotesPageState extends State<NotesPage> {
       _bookTitles = meta.titles;
       _marks = _buildMarks(ranges, paragraphs, entries, meta.titles);
       _loading = false;
+      _pruneLeavingBadges(entries);
     });
+  }
+
+  /// 重载数据落地后，解除已确认完成的「正在离开」隐藏：
+  /// 源笔记已不存在、或已确实不含该角标时清掉对应条目。
+  void _pruneLeavingBadges(List<ReaderAnnotation> entries) {
+    _leavingBadges.removeWhere(
+      (noteKey, _) => !entries.any((note) => note.key == noteKey),
+    );
+    for (final note in entries) {
+      final leaving = _leavingBadges[note.key];
+      if (leaving == null) continue;
+      leaving.removeWhere(
+        (badge) => switch (badge.$1) {
+          NoteTagKind.marker =>
+            !note.markerBadges.any((entry) => entry.label == badge.$2),
+          NoteTagKind.tag => !note.tags.contains(badge.$2),
+        },
+      );
+      if (leaving.isEmpty) _leavingBadges.remove(note.key);
+    }
   }
 
   /// 书名和封面只在本地查，不发网络请求：查不到的书用几何封面兜底。
@@ -346,25 +372,44 @@ class _NotesPageState extends State<NotesPage> {
   ], _orderIdOf);
 
   /// 一条笔记上挂的所有角标：类型与标签混排，顺序跟「全部类型」一致。
-  List<NoteTagDrag> _badgesOf(ReaderAnnotation note, {required bool dark}) =>
-      _sortByOrder([
-        for (final badge in note.markerBadges)
+  /// 正在移动/删除中的角标（[_leavingBadges]）暂时不显示。
+  ///
+  /// [ghost] 是拖动悬停中的磁力虚影：插到它松手后应落的排序位置上，
+  /// 让虚影直接预览落点（同一行的行内位置），行内其他角标顺次挤开。
+  List<NoteTagDrag> _badgesOf(
+    ReaderAnnotation note, {
+    required bool dark,
+    NoteTagDrag? ghost,
+  }) {
+    final markers = <NoteTagDrag>[
+      for (final badge in note.markerBadges)
+        if (!_isLeavingBadge(note.key, NoteTagKind.marker, badge.label))
           NoteTagDrag(
             label: badge.label,
             colorValue: badge.colorValue,
             kind: NoteTagKind.marker,
             sourceNoteKey: note.key,
           ),
-        for (final tag in note.tags)
+    ];
+    final tags = <NoteTagDrag>[
+      for (final tag in note.tags)
+        if (!_isLeavingBadge(note.key, NoteTagKind.tag, tag))
           NoteTagDrag(
             label: tag,
             colorValue: noteTagColorValue(tag, dark: dark),
             kind: NoteTagKind.tag,
             sourceNoteKey: note.key,
           ),
-      ], _orderIdOf);
+    ];
+    if (ghost != null) {
+      (ghost.kind == NoteTagKind.marker ? markers : tags).add(ghost);
+    }
+    return _sortByOrder([...markers, ...tags], _orderIdOf);
+  }
 
   List<ReaderAnnotation> get _visible {
+    // 「划线」类型下时间线渲染划线记录（_visibleMarks），注解列表清空。
+    if (_type == NoteTypeFilter.marks) return const [];
     return filterNoteTimeline(_all, _filters, type: _type);
   }
 
@@ -414,6 +459,11 @@ class _NotesPageState extends State<NotesPage> {
       // 视图切换一律回到全量：单书范围只属于「按书查看」里的那一层，
       // 否则时间线会莫名只剩一本书，而顶部又没有可见的筛选提示。
       _filters = _filters.without(bookId: true);
+      // 「划线」是时间线里的类型筛选；按书查看只收批注/书摘，
+      // 切走时退出划线模式，避免按书视图意外变成空列表。
+      if (mode != _NotesViewMode.timeline && _type == NoteTypeFilter.marks) {
+        _type = NoteTypeFilter.all;
+      }
       _hoverNoteKey = null;
       _hoverTag = null;
     });
@@ -458,16 +508,10 @@ class _NotesPageState extends State<NotesPage> {
     return sorted;
   }
 
-  /// 当前划线视图的数据：先按书、再按「划线 / 荧光笔」过滤。
+  /// 当前类型筛选选中「划线」时的数据：按线型筛选（null = 全部线型）。
   List<_MarkEntry> get _visibleMarks => [
     for (final mark in _marks)
-      if ((_markBookId == null || mark.bookId == _markBookId) &&
-          switch (_markFilter) {
-            _MarkStyleFilter.all => true,
-            _MarkStyleFilter.underline => !mark.isHighlighter,
-            _MarkStyleFilter.highlighter => mark.isHighlighter,
-          })
-        mark,
+      if (_markStyleFilter == null || mark.style == _markStyleFilter) mark,
   ];
 
   @override
@@ -483,20 +527,9 @@ class _NotesPageState extends State<NotesPage> {
     final bookNotes = selectedBookId == null
         ? const <ReaderAnnotation>[]
         : _bookViewNotes;
-    final marks = _viewMode == _NotesViewMode.marks
-        ? _visibleMarks
-        : const <_MarkEntry>[];
-    final exportNotes = switch (_viewMode) {
-      _NotesViewMode.timeline => visible,
-      _NotesViewMode.books => _bookViewNotes,
-      _NotesViewMode.marks => const <ReaderAnnotation>[],
-    };
-    final hasContent = switch (_viewMode) {
-      _NotesViewMode.books =>
-        selectedBookId == null ? groups.isNotEmpty : bookNotes.isNotEmpty,
-      _NotesViewMode.marks => marks.isNotEmpty,
-      _NotesViewMode.timeline => visible.isNotEmpty,
-    };
+    final showMarks = _type == NoteTypeFilter.marks;
+    final exportNotes = showMarks ? const <ReaderAnnotation>[] : visible;
+    final hasContent = showMarks ? _visibleMarks.isNotEmpty : visible.isNotEmpty;
     return Scaffold(
       backgroundColor: palette.canvas,
       appBar: AppBar(
@@ -527,8 +560,9 @@ class _NotesPageState extends State<NotesPage> {
                       selectedBookId == null
                           ? _buildBookGrid(groups)
                           : _buildBookNotes(palette, selectedBookId, bookNotes),
-                    _NotesViewMode.marks => _buildMarkList(palette, marks),
-                    _NotesViewMode.timeline => _buildNoteList(palette, visible),
+                    _NotesViewMode.timeline => showMarks
+                        ? _buildMarkTimeline(palette, _visibleMarks)
+                        : _buildNoteList(palette, visible),
                   },
           ),
         ],
@@ -589,6 +623,17 @@ class _NotesPageState extends State<NotesPage> {
     required bool lastOfDay,
   }) {
     final hovering = _hoverNoteKey == note.key;
+    final badges = _badgesOf(note, dark: palette.dark);
+    final hoverTag = hovering ? _hoverTag : null;
+    // 目标笔记已有同款角标时不画虚影（靠角标自身的吸附环提示）。
+    final ghostTag =
+        hoverTag != null &&
+            !badges.any(
+              (badge) =>
+                  badge.kind == hoverTag.kind && badge.label == hoverTag.label,
+            )
+        ? hoverTag
+        : null;
     return DragTarget<NoteTagDrag>(
       // 拖回自己身上也要接受：接受后是无操作，否则会被当成「丢到空白处」
       // 把标签删掉。
@@ -623,66 +668,118 @@ class _NotesPageState extends State<NotesPage> {
         bookTitle: _titleOf(note.bookId, note.bookTitle),
         firstOfDay: firstOfDay,
         lastOfDay: lastOfDay,
-        badges: _badgesOf(note, dark: palette.dark),
-        hoverTag: hovering ? _hoverTag : null,
+        badges: ghostTag == null
+            ? badges
+            : _badgesOf(note, dark: palette.dark, ghost: ghostTag),
+        ghostId: ghostTag?.id,
+        hoverTag: hoverTag,
         hovered: hovering,
         onOpen: _openNote,
         onEdit: _editNote,
         onDragFinished: _clearHover,
-        onRemoveTag: (tag) {
-          if (tag.kind == NoteTagKind.marker) {
-            unawaited(
-              _store.updateMarkerTags(
-                note.key,
-                note.markerBadges.where((entry) => entry.key != tag.label),
-              ),
-            );
-          } else {
-            unawaited(
-              _store.updateTags(
-                note.key,
-                note.tags.where((entry) => entry != tag.label),
-              ),
-            );
-          }
-        },
+        onRemoveTag: (tag) => unawaited(_removeBadge(note, tag)),
       ),
     );
   }
 
+  bool _isLeavingBadge(String noteKey, NoteTagKind kind, String label) =>
+      _leavingBadges[noteKey]?.contains((kind, label)) ?? false;
+
+  void _markLeavingBadge(String noteKey, NoteTagKind kind, String label) {
+    if (_isLeavingBadge(noteKey, kind, label)) return;
+    setState(() {
+      _leavingBadges
+          .putIfAbsent(noteKey, () => <(NoteTagKind, String)>{})
+          .add((kind, label));
+    });
+  }
+
+  /// 写库失败时回滚：解除隐藏并提示，角标回到原位，不留下残影误导。
+  void _rollbackLeavingBadge(String noteKey, NoteTagDrag tag) {
+    if (!mounted) return;
+    setState(() {
+      final leaving = _leavingBadges[noteKey];
+      leaving?.remove((tag.kind, tag.label));
+      if (leaving != null && leaving.isEmpty) _leavingBadges.remove(noteKey);
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('保存失败，请重试')));
+  }
+
   /// 把拖进来的标签落到 [note] 上；跨笔记拖动时从来源上摘掉。
+  ///
+  /// 摘除前先把源角标记为「正在离开」并立即隐藏：写库与重载之间有空档，
+  /// 不藏的话源角标会先闪回原位再消失，看起来像松手后留了个虚影。
   Future<void> _applyTagDrop(ReaderAnnotation note, NoteTagDrag data) async {
     final fromKey = data.sourceNoteKey;
     final source = fromKey == null || fromKey == note.key
         ? null
         : _all.where((entry) => entry.key == fromKey).firstOrNull;
-    if (data.kind == NoteTagKind.marker) {
-      final type = ReaderMarkerType(
-        label: data.label,
-        colorValue: data.colorValue,
-      );
-      final badges = [...note.markerBadges];
-      final exists = badges.any((badge) => badge.key == type.key);
-      // 目标已经有这个角标：整次拖动视为无操作，不能把来源上的删掉。
-      if (exists) return;
-      badges.add(type);
-      await _store.updateMarkerTags(note.key, badges);
-      if (source != null &&
-          source.markerBadges.any((badge) => badge.key == type.key)) {
-        await _store.updateMarkerTags(
+    bool sourceHas() => switch (data.kind) {
+      NoteTagKind.marker =>
+        source!.markerBadges.any((badge) => badge.key == data.label),
+      NoteTagKind.tag => source!.tags.contains(data.label),
+    };
+    // 目标已经有这个角标：整次拖动视为无操作，不能把来源上的删掉。
+    final targetHas = switch (data.kind) {
+      NoteTagKind.marker =>
+        note.markerBadges.any((badge) => badge.key == data.label),
+      NoteTagKind.tag => note.tags.contains(data.label),
+    };
+    if (targetHas) return;
+    final movesFromSource = source != null && sourceHas();
+    if (movesFromSource) {
+      _markLeavingBadge(source.key, data.kind, data.label);
+    }
+    try {
+      if (data.kind == NoteTagKind.marker) {
+        final type = ReaderMarkerType(
+          label: data.label,
+          colorValue: data.colorValue,
+        );
+        await _store.updateMarkerTags(note.key, [
+          ...note.markerBadges,
+          type,
+        ]);
+        if (movesFromSource) {
+          await _store.updateMarkerTags(
+            source.key,
+            source.markerBadges.where((badge) => badge.key != type.key),
+          );
+        }
+        return;
+      }
+      await _store.updateTags(note.key, [...note.tags, data.label]);
+      if (movesFromSource) {
+        await _store.updateTags(
           source.key,
-          source.markerBadges.where((badge) => badge.key != type.key),
+          source.tags.where((tag) => tag != data.label),
         );
       }
-      return;
+    } catch (_) {
+      if (movesFromSource) _rollbackLeavingBadge(fromKey!, data);
     }
-    if (note.tags.contains(data.label)) return;
-    await _store.updateTags(note.key, [...note.tags, data.label]);
-    if (source != null && source.tags.contains(data.label)) {
-      await _store.updateTags(
-        source.key,
-        source.tags.where((tag) => tag != data.label),
-      );
+  }
+
+  /// 拖到空白处 = 从这条笔记上摘掉角标。同样先隐藏再异步写库，
+  /// 避免松手后角标闪回原位、等重载才消失。
+  Future<void> _removeBadge(ReaderAnnotation note, NoteTagDrag tag) async {
+    _markLeavingBadge(note.key, tag.kind, tag.label);
+    try {
+      if (tag.kind == NoteTagKind.marker) {
+        await _store.updateMarkerTags(
+          note.key,
+          note.markerBadges.where((entry) => entry.key != tag.label),
+        );
+      } else {
+        await _store.updateTags(
+          note.key,
+          note.tags.where((entry) => entry != tag.label),
+        );
+      }
+    } catch (_) {
+      _rollbackLeavingBadge(note.key, tag);
     }
   }
 
@@ -893,7 +990,6 @@ class _NotesPageState extends State<NotesPage> {
           children: [
             tab(_NotesViewMode.timeline, '时间线', LucideIcons.list),
             tab(_NotesViewMode.books, '按书查看', LucideIcons.book_open),
-            tab(_NotesViewMode.marks, '划线', LucideIcons.highlighter),
           ],
         ),
       ),
@@ -901,7 +997,8 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   Widget _buildQuickFilters(HomePalette palette) {
-    if (_viewMode == _NotesViewMode.marks) return _buildMarkFilters(palette);
+    final marksMode = _type == NoteTypeFilter.marks;
+    final markStyleAll = _markStyleFilter == null;
     Widget chip(NoteTypeFilter type, String label, int count) {
       final active = _type == type;
       return Padding(
@@ -939,6 +1036,8 @@ class _NotesPageState extends State<NotesPage> {
                 chip(NoteTypeFilter.all, '全部', _all.length),
                 chip(NoteTypeFilter.annot, '批注', _annotCount),
                 chip(NoteTypeFilter.excerpt, '书摘', _excerptCount),
+                // 【产品调整】划线从独立视图改为与批注/书摘同类的类型筛选。
+                chip(NoteTypeFilter.marks, '划线', _marks.length),
               ],
             ),
           ),
@@ -961,23 +1060,60 @@ class _NotesPageState extends State<NotesPage> {
                   child: ChoiceChip(
                     key: const ValueKey('notes-marker-all'),
                     showCheckmark: false,
-                    selected: allTypes,
+                    // 划线类型下「全部类型」= 全部线型。
+                    selected: marksMode ? markStyleAll : allTypes,
                     label: const Text('全部类型'),
                     labelStyle: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: allTypes ? palette.accentText : palette.muted,
+                      color: (marksMode ? markStyleAll : allTypes)
+                          ? palette.accentText
+                          : palette.muted,
                     ),
                     selectedColor: palette.chipSelectedFill,
                     backgroundColor: palette.chipFill,
-                    side: palette.chipBorder(allTypes),
+                    side: palette.chipBorder(
+                      marksMode ? markStyleAll : allTypes,
+                    ),
                     onSelected: (_) => setState(
-                      () =>
-                          _filters = _filters.without(marker: true, tags: true),
+                      () => marksMode
+                          ? _markStyleFilter = null
+                          : _filters =
+                                _filters.without(marker: true, tags: true),
                     ),
                   ),
                 ),
-                for (var index = 0; index < entries.length; index++)
+                // 【产品调整】类型选中「划线」时，这一行变为线型筛选：
+                // 横线 / 波浪线 / 虚线 / 荧光笔，点选过滤划线记录。
+                if (marksMode)
+                  for (final style in ReaderMarkStyle.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        key: ValueKey('notes-mark-style-${style.name}'),
+                        showCheckmark: false,
+                        selected: _markStyleFilter == style,
+                        label: Text(
+                          '${style.label} ${_marks.where((mark) => mark.style == style).length}',
+                        ),
+                        labelStyle: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: _markStyleFilter == style
+                              ? palette.accentText
+                              : palette.muted,
+                        ),
+                        selectedColor: palette.chipSelectedFill,
+                        backgroundColor: palette.chipFill,
+                        side: palette.chipBorder(_markStyleFilter == style),
+                        onSelected: (_) => setState(
+                          () => _markStyleFilter =
+                              _markStyleFilter == style ? null : style,
+                        ),
+                      ),
+                    )
+                else
+                  for (var index = 0; index < entries.length; index++)
                   KeyedSubtree(
                     key: _paletteChipKeys.putIfAbsent(
                       entries[index].id,
@@ -1025,98 +1161,99 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   /// 划线视图的顶部：先分线型，再按书收窄。
-  Widget _buildMarkFilters(HomePalette palette) {
-    int countOf(_MarkStyleFilter filter) => switch (filter) {
-      _MarkStyleFilter.all => _marks.length,
-      _MarkStyleFilter.underline =>
-        _marks.where((mark) => !mark.isHighlighter).length,
-      _MarkStyleFilter.highlighter =>
-        _marks.where((mark) => mark.isHighlighter).length,
-    };
-    Widget styleChip(_MarkStyleFilter filter, String label) {
-      final active = _markFilter == filter;
-      return Padding(
-        padding: const EdgeInsets.only(right: 7),
-        child: ChoiceChip(
-          key: ValueKey('notes-marks-${filter.name}'),
-          showCheckmark: false,
-          selected: active,
-          label: Text('$label ${countOf(filter)}'),
-          labelStyle: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-            color: active ? palette.accentText : palette.muted,
-          ),
-          selectedColor: palette.chipSelectedFill,
-          backgroundColor: palette.chipFill,
-          side: palette.chipBorder(active),
-          onSelected: (_) => setState(() => _markFilter = filter),
-        ),
-      );
-    }
-
-    final bookIds = <String>[];
-    final bookTitles = <String, String>{};
-    for (final mark in _marks) {
-      if (bookTitles.containsKey(mark.bookId)) continue;
-      bookTitles[mark.bookId] = mark.bookTitle;
-      bookIds.add(mark.bookId);
-    }
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+  /// 「划线」类型下的时间线：划线记录沿用日期轴 + 记录卡片，与批注
+  /// 时间线同一观感（不再作为独立视图）。
+  Widget _buildMarkTimeline(HomePalette palette, List<_MarkEntry> marks) =>
+      ListView.builder(
+        key: const ValueKey('notes-mark-timeline'),
+        padding: const EdgeInsets.fromLTRB(12, 4, 16, 32),
+        itemCount: marks.length,
+        itemBuilder: (context, index) {
+          final mark = marks[index];
+          final previous = index == 0 ? null : marks[index - 1];
+          final next = index + 1 >= marks.length ? null : marks[index + 1];
+          final firstOfDay = previous == null ||
+              !_sameDay(previous.createdAt, mark.createdAt);
+          final lastOfDay =
+              next == null || !_sameDay(next.createdAt, mark.createdAt);
+          final color = Color(
+            mark.colorValue == 0
+                ? readerDefaultUnderlineColor
+                : mark.colorValue,
+          );
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            // 与批注时间线同款：时间线列以卡片实测高度撑满，需要
+            // IntrinsicHeight 给 Row 一个有界高度（stretch 才能生效）。
+            child: IntrinsicHeight(
+              child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                styleChip(_MarkStyleFilter.all, '全部'),
-                styleChip(_MarkStyleFilter.underline, '划线'),
-                styleChip(_MarkStyleFilter.highlighter, '荧光笔'),
+                SizedBox(
+                  width: 56,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        left: 44,
+                        top: firstOfDay ? 18 : 0,
+                        bottom: lastOfDay ? 20 : 0,
+                        child: Container(width: 1.5, color: palette.line),
+                      ),
+                      Positioned(
+                        left: 39.5,
+                        top: 8,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: palette.canvas,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (firstOfDay)
+                        Positioned(
+                          left: 0,
+                          top: 1,
+                          width: 38,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              _dayLabel(mark.createdAt),
+                              maxLines: 1,
+                              softWrap: false,
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                color: palette.muted,
+                                fontSize: 10,
+                                height: 1.3,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: _MarkRow(
+                    key: ValueKey('mark-row-${mark.key}'),
+                    entry: mark,
+                    onTap: () => _openMark(mark),
+                  ),
+                ),
               ],
             ),
-          ),
-        ),
-        SizedBox(
-          height: bookIds.length <= 1 ? 8 : 38,
-          child: bookIds.length <= 1
-              ? null
-              : ListView(
-                  key: const ValueKey('notes-marks-books'),
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(16, 5, 12, 2),
-                  children: [
-                    _markBookChip(palette, null, '全部书籍'),
-                    for (final id in bookIds)
-                      _markBookChip(palette, id, bookTitles[id] ?? '未知书籍'),
-                  ],
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _markBookChip(HomePalette palette, String? bookId, String label) {
-    final active = _markBookId == bookId;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: ChoiceChip(
-        key: ValueKey('notes-marks-book-${bookId ?? 'all'}'),
-        showCheckmark: false,
-        selected: active,
-        label: Text(label, overflow: TextOverflow.ellipsis),
-        labelStyle: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: active ? palette.accentText : palette.muted,
-        ),
-        selectedColor: palette.chipSelectedFill,
-        backgroundColor: palette.chipFill,
-        side: palette.chipBorder(active),
-        onSelected: (_) => setState(() => _markBookId = bookId),
-      ),
-    );
-  }
+            ),
+          ); // return Padding
+        },
+      );
 
   Widget _buildBookGrid(List<_BookNotesGroup> groups) => LayoutBuilder(
     builder: (context, constraints) {
@@ -1141,42 +1278,32 @@ class _NotesPageState extends State<NotesPage> {
     },
   );
 
-  Widget _buildMarkList(HomePalette palette, List<_MarkEntry> marks) =>
-      ListView.separated(
-        key: const ValueKey('notes-marks'),
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 32),
-        itemCount: marks.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (context, index) => _MarkRow(
-          key: ValueKey('mark-row-${marks[index].key}'),
-          entry: marks[index],
-          onTap: () => _openMark(marks[index]),
-        ),
-      );
-
   Widget _buildEmpty(HomePalette palette) {
-    final filtered = _filters.isActive || _type != NoteTypeFilter.all;
-    final (String title, String hint, IconData icon) = switch (_viewMode) {
-      _NotesViewMode.books => (
-        '没有可查看的书籍',
-        '写过的书会按最近笔记时间排列',
-        LucideIcons.book_open,
-      ),
-      _NotesViewMode.marks => (
-        _markFilter == _MarkStyleFilter.all && _markBookId == null
-            ? '还没有划线'
-            : '没有符合条件的划线',
-        '阅读时选中一句 → 划线 / 荧光笔，这里就会收进来',
-        LucideIcons.highlighter,
-      ),
-      _NotesViewMode.timeline => (
-        filtered ? '没有符合筛选条件的笔记' : '还没有笔记',
-        filtered ? '可调整书籍、时间、类型、分类或标签' : '阅读时长按选中句子 → 批注 / 书摘',
-        LucideIcons.pen_line,
-      ),
-    };
-    final clearable = _viewMode == _NotesViewMode.marks
-        ? _markFilter != _MarkStyleFilter.all || _markBookId != null
+    final showMarks = _type == NoteTypeFilter.marks;
+    final filtered = _filters.isActive ||
+        (_type != NoteTypeFilter.all && !showMarks);
+    final (String title, String hint, IconData icon) = showMarks
+        ? (
+            _markStyleFilter == null
+                ? '还没有划线'
+                : '没有符合条件的划线',
+            '阅读时选中一句 → 划线 / 荧光笔，这里就会收进来',
+            LucideIcons.highlighter,
+          )
+        : switch (_viewMode) {
+            _NotesViewMode.books => (
+              '没有可查看的书籍',
+              '写过的书会按最近笔记时间排列',
+              LucideIcons.book_open,
+            ),
+            _NotesViewMode.timeline => (
+              filtered ? '没有符合筛选条件的笔记' : '还没有笔记',
+              filtered ? '可调整书籍、时间、类型、分类或标签' : '阅读时长按选中句子 → 批注 / 书摘',
+              LucideIcons.pen_line,
+            ),
+          };
+    final clearable = showMarks
+        ? _markStyleFilter != null
         : filtered;
     return Center(
       child: Column(
@@ -1193,8 +1320,7 @@ class _NotesPageState extends State<NotesPage> {
               onPressed: () => setState(() {
                 _filters = const NoteTimelineFilters();
                 _type = NoteTypeFilter.all;
-                _markFilter = _MarkStyleFilter.all;
-                _markBookId = null;
+                _markStyleFilter = null;
               }),
               child: const Text('清除全部筛选'),
             ),
@@ -1373,6 +1499,7 @@ class _TimelineNoteRow extends StatelessWidget {
     required this.lastOfDay,
     required this.badges,
     required this.onRemoveTag,
+    this.ghostId,
     this.hoverTag,
     this.hovered = false,
     required this.onDragFinished,
@@ -1388,7 +1515,11 @@ class _TimelineNoteRow extends StatelessWidget {
   final bool lastOfDay;
 
   /// 类型与自由标签混排，已按「全部类型」的顺序排好，全部展示。
+  ///
+  /// 拖动悬停时磁力虚影（[ghostId] 标记的那枚）已插进它松手后应落的
+  /// 排序位置，渲染时用虚影角标代替普通角标即可。
   final List<NoteTagDrag> badges;
+  final String? ghostId;
   final NoteTagDrag? hoverTag;
   final bool hovered;
   final void Function(NoteTagDrag badge) onRemoveTag;
@@ -1531,32 +1662,20 @@ class _TimelineNoteRow extends StatelessWidget {
                             ),
                           ],
                         ),
-                        Row(
-                          children: [
-                            Text(
-                              _timestampLabel(note.createdAt),
-                              key: ValueKey('note-time-${note.key}'),
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: palette.muted,
-                              ),
+                        // 时间戳按产品要求不再展示，卡片内只保留章节名。
+                        if (note.chapterTitle.isNotEmpty)
+                          Text(
+                            note.chapterTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: palette.muted,
                             ),
-                            if (note.chapterTitle.isNotEmpty) ...[
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Text(
-                                  note.chapterTitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    color: palette.muted,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                          ),
+                        // 磁力虚影已插在角标列表里（见 [ghostId]），和其他
+                        // 角标同一行渲染：拖动中就能预览松手后的落点，
+                        // 不再另起一行、松手才归位。
                         if (badges.isNotEmpty) ...[
                           const SizedBox(height: 6),
                           Wrap(
@@ -1565,43 +1684,37 @@ class _TimelineNoteRow extends StatelessWidget {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               for (final badge in badges)
-                                NoteBadgeChip(
-                                  key: ValueKey(
-                                    'note-badge-${note.key}-${badge.label}',
+                                if (badge.id == ghostId)
+                                  NoteTagGhost(
+                                    key: ValueKey(
+                                      'note-ghost-${note.key}-${badge.label}',
+                                    ),
+                                    label: badge.label,
+                                    colorValue: badge.colorValue,
+                                    kind: badge.kind,
+                                  )
+                                else
+                                  NoteBadgeChip(
+                                    key: ValueKey(
+                                      'note-badge-${note.key}-${badge.label}',
+                                    ),
+                                    label: badge.label,
+                                    colorValue: badge.colorValue,
+                                    noteKey: note.key,
+                                    sourceKind: badge.kind,
+                                    // 拖回本条笔记自己时，对应的角标亮一圈：
+                                    // 这就是「已命中这里」的吸附提示。
+                                    highlighted:
+                                        hoverTag != null &&
+                                        hoverTag!.kind == badge.kind &&
+                                        hoverTag!.label == badge.label,
+                                    onDragEnd: (accepted) {
+                                      onDragFinished();
+                                      if (accepted) return;
+                                      onRemoveTag(badge);
+                                    },
                                   ),
-                                  label: badge.label,
-                                  colorValue: badge.colorValue,
-                                  noteKey: note.key,
-                                  sourceKind: badge.kind,
-                                  // 拖回本条笔记自己时，对应的角标亮一圈：
-                                  // 这就是「已命中这里」的吸附提示。
-                                  highlighted:
-                                      hoverTag != null &&
-                                      hoverTag!.kind == badge.kind &&
-                                      hoverTag!.label == badge.label,
-                                  onDragEnd: (accepted) {
-                                    onDragFinished();
-                                    if (accepted) return;
-                                    onRemoveTag(badge);
-                                  },
-                                ),
                             ],
-                          ),
-                        ],
-                        if (hoverTag != null &&
-                            !badges.any(
-                              (badge) =>
-                                  badge.kind == hoverTag!.kind &&
-                                  badge.label == hoverTag!.label,
-                            )) ...[
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: NoteTagGhost(
-                              label: hoverTag!.label,
-                              colorValue: hoverTag!.colorValue,
-                              kind: hoverTag!.kind,
-                            ),
                           ),
                         ],
                         const SizedBox(height: 8),
@@ -1628,30 +1741,32 @@ class _TimelineNoteRow extends StatelessWidget {
                         ),
                         if (note.thought.trim().isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          Text(
-                            note.thought,
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              height: 1.55,
-                              color: palette.ink,
+                          // 用户想法与原文同款底色图层：同一 badge 色的
+                          // 8% 透明底 + 同圆角/内边距，视觉与引用块成对。
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: badgeColor.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              note.thought,
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                height: 1.55,
+                                color: palette.ink,
+                              ),
                             ),
                           ),
                         ],
-                        if (note.category.trim().isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: [
-                              _MetaChip(
-                                label: note.category,
-                                icon: LucideIcons.folder,
-                              ),
-                            ],
-                          ),
-                        ],
+                        // 分类（文件夹）chip 按产品要求不再在卡片内展示；
+                        // 分类仍保留在数据与编辑器中。
                       ],
                     ),
                   ),
@@ -1933,33 +2048,6 @@ class _MarkRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.label, required this.icon});
-
-  final String label;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = HomePalette.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: palette.soft,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10, color: palette.muted),
-          const SizedBox(width: 3),
-          Text(label, style: TextStyle(fontSize: 10.5, color: palette.muted)),
-        ],
       ),
     );
   }

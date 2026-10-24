@@ -19,12 +19,16 @@ class CuratedBookCover extends StatelessWidget {
     this.width = 104,
     this.showAge = true,
     this.coverUrl,
+    this.radius = 14,
   });
 
   final CuratedBook book;
   final CuratedCategory? category;
   final double width;
   final bool showAge;
+
+  /// 封面圆角；书架式白卡内嵌时用 10（对齐 ShelfTokens.radiusCover）。
+  final double radius;
 
   /// 书城封面地址；空/缺省时只渲染文字封面。
   final String? coverUrl;
@@ -36,11 +40,11 @@ class CuratedBookCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final height = width * 4 / 3;
     final url = coverUrl?.trim() ?? '';
-    if (url.isEmpty) return _fallbackCover();
+    if (url.isEmpty) return _fallbackCover(radius: radius);
 
     final ratio = MediaQuery.devicePixelRatioOf(context);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(radius),
       child: CachedNetworkImage(
         cacheManager: PosterCache.instance,
         imageUrl: url,
@@ -50,13 +54,13 @@ class CuratedBookCover extends StatelessWidget {
         memCacheWidth: (width * ratio).round(),
         memCacheHeight: (height * ratio).round(),
         fadeInDuration: const Duration(milliseconds: 180),
-        placeholder: (_, _) => _fallbackCover(),
-        errorWidget: (_, _, _) => _fallbackCover(),
+        placeholder: (_, _) => _fallbackCover(radius: radius),
+        errorWidget: (_, _, _) => _fallbackCover(radius: radius),
       ),
     );
   }
 
-  Widget _fallbackCover() {
+  Widget _fallbackCover({double radius = 14}) {
     final gradient =
         category?.gradient ?? const [Color(0xFF2FA98C), Color(0xFF1F7F69)];
     final height = width * 4 / 3;
@@ -65,7 +69,7 @@ class CuratedBookCover extends StatelessWidget {
       width: width,
       height: height,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(radius),
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -344,50 +348,64 @@ class CuratedBookTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
+    // 【产品调整】与书架双列卡同款：白色卡片把封面/书名/作者框在一起，
+    // 封面内嵌（对齐 ShelfTokens：surface 底、radius 14、line 0.5 描边、
+    // 12 内边距、封面圆角 10）。
     return GestureDetector(
       onLongPress: onLongPress,
       child: HomePressable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         semanticLabel: '${book.title}，${book.author}',
-        child: SizedBox(
-          width: width,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CuratedBookCover(
-                book: book,
-                category: category,
-                width: width,
-                showAge: false,
-                coverUrl: coverUrl,
-              ),
-              const SizedBox(height: 8),
-              // 用 Flexible 兜住：外层横滑列表是定高的，字号放大时宁可
-              // 挤压也不允许溢出（1.8x 字号实测会差 0.15px）。
-              Flexible(
-                child: Text(
-                  book.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    height: 1.3,
-                    fontWeight: FontWeight.w600,
-                    color: palette.ink,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: palette.line, width: 0.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              width: width - 24,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CuratedBookCover(
+                    book: book,
+                    category: category,
+                    width: width - 24,
+                    showAge: false,
+                    coverUrl: coverUrl,
+                    radius: 10,
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  // 用 Flexible 兜住：外层横滑列表是定高的，字号放大时宁可
+                  // 挤压也不允许溢出（1.8x 字号实测会差 0.15px）。
+                  Flexible(
+                    child: Text(
+                      book.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        color: palette.ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Flexible(
+                    child: Text(
+                      book.author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: palette.muted),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 2),
-              Flexible(
-                child: Text(
-                  book.author,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: palette.muted),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

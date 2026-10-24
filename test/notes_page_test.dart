@@ -156,6 +156,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('notes-marker-反驳')));
     await tester.pumpAndSettle();
     expect(find.text('疑问句'), findsOneWidget);
+    // 清除全部筛选后三张卡片都回到列表；第三张在测试视口（600dp）外，
+    // 惰性列表需滚动后才构建，先滚到可见再断言。
+    await tester.drag(
+      find.byKey(const ValueKey('notes-timeline')),
+      const Offset(0, -260),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('金句内容'), findsOneWidget);
   });
 
@@ -541,7 +548,7 @@ void main() {
     expect(store.notes.first.markerBadges, isEmpty);
   });
 
-  testWidgets('划线视图列出范围划线（含荧光笔）与整段划线', (tester) async {
+  testWidgets('划线类型在时间线列出范围与整段划线，线型可筛选', (tester) async {
     final store = _NotesMemoryStore([
       _note(bookId: 'a', text: '有笔记的书', markerLabel: '疑问', createdAt: 9),
     ]);
@@ -577,23 +584,28 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('notes-view-marks')));
+    // 划线已并入类型筛选：点「划线」chip 即在时间线里列出划线记录。
+    await tester.tap(find.byKey(const ValueKey('notes-type-marks')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('notes-marks')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('notes-mark-timeline')),
+      findsOneWidget,
+    );
     expect(find.text('荧光笔画的一句'), findsOneWidget);
     expect(find.text('普通划线的一段'), findsOneWidget);
-    expect(find.text('荧光笔'), findsOneWidget);
-    expect(find.text('虚线'), findsOneWidget);
+    // 「全部类型」行已切换为线型筛选（横线/波浪线/虚线/荧光笔）。
+    expect(find.textContaining('荧光笔 '), findsOneWidget);
+    expect(find.textContaining('虚线 '), findsOneWidget);
 
     // 只看荧光笔。
-    await tester.tap(find.byKey(const ValueKey('notes-marks-highlighter')));
+    await tester.tap(find.byKey(const ValueKey('notes-mark-style-highlighter')));
     await tester.pumpAndSettle();
     expect(find.text('荧光笔画的一句'), findsOneWidget);
     expect(find.text('普通划线的一段'), findsNothing);
 
-    // 只看普通划线。
-    await tester.tap(find.byKey(const ValueKey('notes-marks-underline')));
+    // 只看虚线。
+    await tester.tap(find.byKey(const ValueKey('notes-mark-style-dashed')));
     await tester.pumpAndSettle();
     expect(find.text('荧光笔画的一句'), findsNothing);
     expect(find.text('普通划线的一段'), findsOneWidget);
@@ -619,7 +631,7 @@ void main() {
     expect(find.byKey(const ValueKey('notes-book-a')), findsOneWidget);
   });
 
-  testWidgets('把角标拖回同一张笔记：角标亮起吸附高亮，且不会把标签删掉', (tester) async {
+  testWidgets('把角标拖回同一张笔记：原位留半透明角标但无吸附环，且不会把标签删掉', (tester) async {
     final store = _NotesMemoryStore([
       _note(bookId: 'a', text: '拖回自己', markerLabel: '疑问', createdAt: 1),
     ]);
@@ -641,14 +653,21 @@ void main() {
     expect(
       tester.widget<NoteBadgeChip>(badge).highlighted,
       isTrue,
-      reason: '拖回自己时应把对应角标标成吸附态',
+      reason: '拖回自己时仍应标记吸附态',
     );
-    expect(
-      find.byWidgetPredicate(
-        (widget) => widget is Opacity && widget.opacity > 0,
-        description: '拖动中原位留下半透明角标作为吸附提示',
+    // 原位保留半透明角标提示松手落点，但不再画绿色吸附环（残影感）。
+    final draggable = tester.widget<LongPressDraggable<NoteTagDrag>>(
+      find.descendant(
+        of: badge,
+        matching: find.byType(LongPressDraggable<NoteTagDrag>),
       ),
-      findsWidgets,
+    );
+    final placeholder = draggable.childWhenDragging! as Opacity;
+    expect(placeholder.opacity, 0.5, reason: '原位应显示半透明角标');
+    expect(
+      placeholder.child,
+      isA<Container>(),
+      reason: '半透明角标外不得再套吸附环（Stack+描边）',
     );
 
     await gesture.up();
@@ -699,8 +718,129 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('notes-view-marks')));
+    await tester.tap(find.byKey(const ValueKey('notes-type-marks')));
     await tester.pumpAndSettle();
     expect(find.textContaining('还没有划线'), findsOneWidget);
+  });
+
+  testWidgets('拖动悬停时磁力虚影与角标同一行，且插在落位排序上', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(
+        bookId: 'a',
+        text: '目标',
+        markerLabel: '疑问',
+        tags: const ['重要'],
+        createdAt: 1,
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final noteKey = store.notes.first.key;
+    final from = find.byKey(const ValueKey('notes-marker-反驳'));
+    final card = find.byKey(ValueKey('note-card-$noteKey'));
+    final gesture = await tester.startGesture(tester.getCenter(from));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(card));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final ghost = find.byType(NoteTagGhost);
+    expect(ghost, findsOneWidget, reason: '悬停目标笔记时应显示磁力虚影');
+    final ghostCenter = tester.getCenter(ghost);
+    final ghostTopLeft = tester.getTopLeft(ghost);
+    // 虚影与已有角标同一行（不再另起一行），dy 应一致。
+    final marker = find.byKey(ValueKey('note-badge-$noteKey-疑问'));
+    final tag = find.byKey(ValueKey('note-badge-$noteKey-重要'));
+    expect(
+      tester.getCenter(marker).dy,
+      moreOrLessEquals(ghostCenter.dy, epsilon: 0.5),
+      reason: '磁力虚影必须和角标同一行',
+    );
+    // 默认顺序里类型在标签前：虚影应插在「疑问」与「重要」之间（落位预览）。
+    expect(tester.getCenter(marker).dx, lessThan(ghostCenter.dx));
+    expect(ghostCenter.dx, lessThan(tester.getCenter(tag).dx));
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    // 松手后真实角标落在虚影预览的槽位上（虚影比角标多一个「+」图标，
+    // 比较左上角：同行同位置，无跳变）。
+    final landed = find.byKey(ValueKey('note-badge-$noteKey-反驳'));
+    expect(landed, findsOneWidget);
+    final landedTopLeft = tester.getTopLeft(landed);
+    expect(landedTopLeft.dy, moreOrLessEquals(ghostTopLeft.dy, epsilon: 1));
+    expect(
+      landedTopLeft.dx,
+      moreOrLessEquals(ghostTopLeft.dx, epsilon: 1),
+      reason: '角标应落在虚影预览的行内槽位',
+    );
+  });
+
+  testWidgets('跨笔记移动标签松手的瞬间源角标不再闪回原位', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(
+        bookId: 'a',
+        text: '来源',
+        markerLabel: '疑问',
+        tags: const ['重要'],
+        createdAt: 2,
+      ),
+      _note(bookId: 'b', text: '目标', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final source = store.notes[0];
+    final target = store.notes[1];
+    final badge = find.byKey(ValueKey('note-badge-${source.key}-重要'));
+    final card = find.byKey(ValueKey('note-card-${target.key}'));
+    final gesture = await tester.startGesture(tester.getCenter(badge));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(card));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    // 只走一帧：松手瞬间源角标必须已隐藏，不能先闪回再等异步重载消失。
+    await tester.pump();
+    expect(find.byKey(ValueKey('note-badge-${source.key}-重要')), findsNothing);
+
+    await tester.pumpAndSettle();
+    expect(store.notes[0].tags, isNot(contains('重要')));
+    expect(store.notes[1].tags, contains('重要'));
+  });
+
+  testWidgets('角标拖到空白处松手的瞬间立即消失', (tester) async {
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '一句话', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final noteKey = store.notes.first.key;
+    final badge = find.byKey(ValueKey('note-badge-$noteKey-疑问'));
+    final gesture = await tester.startGesture(tester.getCenter(badge));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(const Offset(20, 30));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pump();
+    expect(find.byKey(ValueKey('note-badge-$noteKey-疑问')), findsNothing);
+
+    await tester.pumpAndSettle();
+    expect(store.notes.first.markerBadges, isEmpty);
   });
 }

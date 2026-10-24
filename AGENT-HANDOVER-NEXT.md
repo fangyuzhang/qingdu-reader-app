@@ -15,13 +15,13 @@
 | 项 | 值 |
 | --- | --- |
 | 代码状态 | `master` 已提交；功能提交 `236ca3b`，本交接文档随后单独提交，工作区保持干净 |
-| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1507**、跳过 **10**、失败 **0** |
+| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1510**、跳过 **10**、失败 **0** |
 | 真机 | Redmi K20 Pro，serial `b2f8e975`（adb 走 Windows 侧 exe） |
 | 当前 APK | 38,459,043 字节，SHA-256 `57972b2305c91d2222a2b2d3ed7363af5586a26837cf70a7f25a8e84d5ec1680`（`/mnt/d/APP/agent/apk/fqapp-ui-animation.apk`，版本 1.0.131+136） |
 | APK 校验 | 本批只做了安装与真机截图复核；v35 的静态校验报告仍在 `build/apk-verification/wsl-native-v35/report.json` |
 | 当前批次 | UI 动画：书架选中态 / 封面 Hero / 统一弹窗与主题渐变 / 翻页 280ms / 首屏错峰入场 |
 
-接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1507/10/0，再动手。
+接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1510/10/0，再动手。
 
 ---
 
@@ -156,7 +156,7 @@ flutter analyze
 flutter test
 ```
 
-当前期望：`analyze` 0 问题；`test` 1507 通过 / 10 跳过 / 0 失败。
+当前期望：`analyze` 0 问题；`test` 1510 通过 / 10 跳过 / 0 失败。
 
 ### 5.2 构建 release
 

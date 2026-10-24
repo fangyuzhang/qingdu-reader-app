@@ -7,7 +7,10 @@ const String noteUncategorizedFilter = '__uncategorized__';
 
 enum NoteTimePreset { all, today, sevenDays, thirtyDays, custom }
 
-enum NoteTypeFilter { all, annot, excerpt }
+/// marks = 划线记录（ReaderUnderlineStore 的数据，不在注解列表里）：
+/// 选中时时间线由笔记页直接渲染划线记录，[filterNoteTimeline] 对注解
+/// 返回空列表。
+enum NoteTypeFilter { all, annot, excerpt, marks }
 
 /// Canonical identity of one note's marker/badge, used by the notes filter.
 ///
@@ -135,6 +138,7 @@ List<ReaderAnnotation> filterNoteTimeline(
           range.end.day,
         ).add(const Duration(days: 1));
 
+  if (type == NoteTypeFilter.marks) return const [];
   final visible = notes
       .where((note) {
         if (type == NoteTypeFilter.annot && !note.isAnnot) return false;

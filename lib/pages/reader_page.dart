@@ -3702,7 +3702,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return PopScope<Object?>(
       canPop: !_controlsVisible,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _controlsVisible) _toggleControls();
+        if (didPop) {
+          // 【青茄修复·返回抖动】返回动画一开始就把系统栏还给系统：
+          // 沉浸模式是在 dispose（动画结束）时才恢复的，那时详情页已完全
+          // 可见，状态栏/手势条回归的 MediaQuery 变化会让整页让位、抖一下。
+          // 提前到 pop 起始帧，让位发生在阅读器还盖着详情页的时候。
+          if (_appliedSystemUiMode != SystemUiMode.edgeToEdge) {
+            _appliedSystemUiMode = SystemUiMode.edgeToEdge;
+            unawaited(
+              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
+            );
+          }
+          return;
+        }
+        if (_controlsVisible) _toggleControls();
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: overlayStyle,

@@ -101,9 +101,6 @@ class _LibraryPageState extends State<LibraryPage> {
   List<_ShelfEntry> _browseHistory = const [];
   bool _visible = false;
 
-  /// 已完成入场动画的条目下标：HomeEntrance 只在首屏（index 0–5）播一次，
-  /// 滚动回看不重放（HomeEntrance 的 animate 开关约定）。
-  final Set<int> _entered = {};
   late final Listenable _historyChanges;
   late final Listenable _readTimeChanges;
   late final ValueListenable<int> _shelfChanges;
@@ -253,7 +250,6 @@ class _LibraryPageState extends State<LibraryPage> {
       // 编辑态与选中集合属于当前 tab，切 tab 时回到浏览态。
       _editing = false;
       _selected.clear();
-      _entered.clear();
     });
   }
 
@@ -267,8 +263,6 @@ class _LibraryPageState extends State<LibraryPage> {
       // trip Hero's duplicate-tag assertion. Disable flights until it ends.
       _heroEnabled = false;
       _layout = layout;
-      // 版式切换后入场动画重播一次（新视图首屏），滚动回看仍不重放。
-      _entered.clear();
     });
     Future<void>.delayed(transition, () {
       if (!mounted || generation != _layoutGeneration) return;
@@ -934,19 +928,15 @@ class _LibraryPageState extends State<LibraryPage> {
         itemCount: entries.length,
         itemBuilder: (context, index) {
           final entry = entries[index];
-          return HomeEntrance(
-            index: index,
-            animate: index < 10 && _entered.add(index),
-            child: BookshelfGridCard(
-              key: ValueKey('shelf-grid-${entry.selectionKey}'),
-              item: entry.item,
-              badgeText: entry.badgeText,
-              infoText: entry.infoText,
-              editing: _editing,
-              selected: _selected.contains(entry.selectionKey),
-              onTap: () => _tap(entry),
-              onLongPress: () => _longPress(entry),
-            ),
+          return BookshelfGridCard(
+            key: ValueKey('shelf-grid-${entry.selectionKey}'),
+            item: entry.item,
+            badgeText: entry.badgeText,
+            infoText: entry.infoText,
+            editing: _editing,
+            selected: _selected.contains(entry.selectionKey),
+            onTap: () => _tap(entry),
+            onLongPress: () => _longPress(entry),
           );
         },
       ),
@@ -975,19 +965,15 @@ class _LibraryPageState extends State<LibraryPage> {
         itemCount: entries.length,
         itemBuilder: (context, index) {
           final entry = entries[index];
-          return HomeEntrance(
-            index: index,
-            animate: index < 10 && _entered.add(index),
-            child: BookshelfDoubleCard(
-              key: ValueKey('shelf-double-${entry.selectionKey}'),
-              item: entry.item,
-              badgeText: entry.badgeText,
-              subtitleText: entry.subtitleText,
-              editing: _editing,
-              selected: _selected.contains(entry.selectionKey),
-              onTap: () => _tap(entry),
-              onLongPress: () => _longPress(entry),
-            ),
+          return BookshelfDoubleCard(
+            key: ValueKey('shelf-double-${entry.selectionKey}'),
+            item: entry.item,
+            badgeText: entry.badgeText,
+            subtitleText: entry.subtitleText,
+            editing: _editing,
+            selected: _selected.contains(entry.selectionKey),
+            onTap: () => _tap(entry),
+            onLongPress: () => _longPress(entry),
           );
         },
       ),
@@ -1009,20 +995,16 @@ class _LibraryPageState extends State<LibraryPage> {
       ),
       itemBuilder: (context, index) {
         final entry = entries[index];
-        return HomeEntrance(
-          index: index,
-          animate: index < 10 && _entered.add(index),
-          child: BookshelfListCard(
-            key: ValueKey('shelf-list-${entry.selectionKey}'),
-            item: entry.item,
-            progressText: entry.readingText,
-            metaText: entry.metaText,
-            progress: entry.progress,
-            editing: _editing,
-            selected: _selected.contains(entry.selectionKey),
-            onTap: () => _tap(entry),
-            onLongPress: () => _longPress(entry),
-          ),
+        return BookshelfListCard(
+          key: ValueKey('shelf-list-${entry.selectionKey}'),
+          item: entry.item,
+          progressText: entry.readingText,
+          metaText: entry.metaText,
+          progress: entry.progress,
+          editing: _editing,
+          selected: _selected.contains(entry.selectionKey),
+          onTap: () => _tap(entry),
+          onLongPress: () => _longPress(entry),
         );
       },
     );

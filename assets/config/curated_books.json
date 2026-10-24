@@ -589,6 +589,351 @@
         "家国"
       ],
       "age": "12+"
+    },
+    {
+      "id": "rulinwaishi",
+      "title": "儒林外史",
+      "author": "吴敬梓",
+      "category": "classic",
+      "audio": true,
+      "blurb": "科举场上的众生相，笑到最后有点凉。",
+      "tags": [
+        "讽刺",
+        "世情"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "liaozhaizhiyi",
+      "title": "聊斋志异",
+      "author": "蒲松龄",
+      "category": "classic",
+      "audio": true,
+      "blurb": "狐鬼花妖，说的都是人间。",
+      "tags": [
+        "志怪",
+        "短篇"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "jinghuayuan",
+      "title": "镜花缘",
+      "author": "李汝珍",
+      "category": "classic",
+      "audio": true,
+      "blurb": "一场出海漫游，三十多个奇怪国度。",
+      "tags": [
+        "奇幻",
+        "游历"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "dongzhoulieguozhi",
+      "title": "东周列国志",
+      "author": "冯梦龙",
+      "category": "classic",
+      "audio": true,
+      "blurb": "五百年的权谋与征伐，一页一国。",
+      "tags": [
+        "历史演义"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "jidushanbojue",
+      "title": "基督山伯爵",
+      "author": "大仲马",
+      "category": "world",
+      "audio": true,
+      "blurb": "等待和希望，是人类全部的智慧。",
+      "tags": [
+        "冒险",
+        "复仇"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "geliefu_youji",
+      "title": "格列佛游记",
+      "author": "乔纳森·斯威夫特",
+      "category": "world",
+      "audio": true,
+      "blurb": "大人国小人国，照见的都是我们自己。",
+      "tags": [
+        "游记",
+        "讽刺"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "ailisi_qijing",
+      "title": "爱丽丝漫游奇境",
+      "author": "刘易斯·卡罗尔",
+      "category": "world",
+      "audio": true,
+      "blurb": "掉进兔子洞，逻辑就开始打盹。",
+      "tags": [
+        "奇幻",
+        "童话"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "muou_qiyuji",
+      "title": "木偶奇遇记",
+      "author": "卡洛·科洛迪",
+      "category": "world",
+      "audio": true,
+      "blurb": "鼻子变长的男孩，学着变成真的孩子。",
+      "tags": [
+        "成长",
+        "童话"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "mingchao_naxieshier",
+      "title": "明朝那些事儿",
+      "author": "当年明月",
+      "category": "history",
+      "audio": true,
+      "blurb": "把一个王朝讲得像小说一样好看。",
+      "tags": [
+        "通俗历史"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "wangu_jianghe",
+      "title": "万古江河",
+      "author": "许倬云",
+      "category": "history",
+      "blurb": "中国历史文化的转折与开展，视野拉到最长。",
+      "tags": [
+        "大历史"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "zhongguo_dalishi",
+      "title": "中国大历史",
+      "author": "黄仁宇",
+      "category": "history",
+      "blurb": "从技术角度看三千年，数字比道德更冷静。",
+      "tags": [
+        "大历史"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "sichou_zhilu",
+      "title": "丝绸之路：一部全新的世界史",
+      "author": "彼得·弗兰科潘",
+      "category": "history",
+      "audio": true,
+      "blurb": "世界的中心一直在路上，而不在某个帝国。",
+      "tags": [
+        "世界史"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "kunichongji",
+      "title": "昆虫记",
+      "author": "让-亨利·法布尔",
+      "category": "science",
+      "audio": true,
+      "blurb": "蹲在地里看虫子，看出了一个宇宙。",
+      "tags": [
+        "自然",
+        "观察"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "quwei_wulixue",
+      "title": "趣味物理学",
+      "author": "雅科夫·别莱利曼",
+      "category": "science",
+      "blurb": "物理定律变成魔术，秘密都在书页里。",
+      "tags": [
+        "物理",
+        "入门"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "qitang_jianwu_li",
+      "title": "七堂极简物理课",
+      "author": "卡洛·罗韦利",
+      "category": "science",
+      "audio": true,
+      "blurb": "用最短的诗讲最深的宇宙。",
+      "tags": [
+        "物理"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "bingdu_qiuxing",
+      "title": "病毒星球",
+      "author": "卡尔·齐默",
+      "category": "science",
+      "blurb": "病毒不止是敌人，也是生命演化的一部分。",
+      "tags": [
+        "生物"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "liulang_diqiu",
+      "title": "流浪地球",
+      "author": "刘慈欣",
+      "category": "scifi",
+      "audio": true,
+      "blurb": "带着家去逃亡，是人类最浪漫的固执。",
+      "tags": [
+        "短篇",
+        "硬科幻"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "shenmi_dao",
+      "title": "神秘岛",
+      "author": "儒勒·凡尔纳",
+      "category": "scifi",
+      "audio": true,
+      "blurb": "五个人一座荒岛，知识就是全部的魔法。",
+      "tags": [
+        "冒险"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "shijian_qiqi",
+      "title": "时间机器",
+      "author": "赫·乔·威尔斯",
+      "category": "scifi",
+      "blurb": "往未来开了一趟车，回来的人沉默不语。",
+      "tags": [
+        "时间"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "jidi_base",
+      "title": "基地",
+      "author": "艾萨克·阿西莫夫",
+      "category": "scifi",
+      "audio": true,
+      "blurb": "预言一个文明的崩溃，再用千年铺修复的路。",
+      "tags": [
+        "银河",
+        "史诗"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "santian_guangming",
+      "title": "假如给我三天光明",
+      "author": "海伦·凯勒",
+      "category": "growth",
+      "audio": true,
+      "blurb": "看不见的人，把世界描述得更亮。",
+      "tags": [
+        "传记",
+        "励志"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "qingtong_kuihua",
+      "title": "青铜葵花",
+      "author": "曹文轩",
+      "category": "growth",
+      "audio": true,
+      "blurb": "苦难里长出来的温柔，叫作兄妹。",
+      "tags": [
+        "童年",
+        "亲情"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "gangtie_lian",
+      "title": "钢铁是怎样炼成的",
+      "author": "尼·奥斯特洛夫斯基",
+      "category": "growth",
+      "audio": true,
+      "blurb": "人的一生应当这样度过。",
+      "tags": [
+        "励志",
+        "经典"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "lvshanqiang_annv",
+      "title": "绿山墙的安妮",
+      "author": "露西·莫德·蒙哥马利",
+      "category": "growth",
+      "audio": true,
+      "blurb": "爱想象的红发女孩，把日子过成了诗。",
+      "tags": [
+        "成长",
+        "温暖"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "fanxing_chunshui",
+      "title": "繁星·春水",
+      "author": "冰心",
+      "category": "poetry",
+      "blurb": "三言两语，装下一整个青年时代的心事。",
+      "tags": [
+        "小诗"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "peigen_suibi",
+      "title": "培根随笔",
+      "author": "弗朗西斯·培根",
+      "category": "poetry",
+      "blurb": "论读书论友谊，句句短，句句重。",
+      "tags": [
+        "随笔",
+        "理性"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "yuanyuantang_suibi",
+      "title": "缘缘堂随笔",
+      "author": "丰子恺",
+      "category": "poetry",
+      "blurb": "孩子的眼睛里，藏着大人的答案。",
+      "tags": [
+        "散文",
+        "生活"
+      ],
+      "age": "12+"
+    },
+    {
+      "id": "jibolun_shixuan",
+      "title": "纪伯伦散文诗选",
+      "author": "纪伯伦",
+      "category": "poetry",
+      "audio": true,
+      "blurb": "先知开口，每句都像给灵魂的药。",
+      "tags": [
+        "散文诗"
+      ],
+      "age": "12+"
     }
   ]
 }

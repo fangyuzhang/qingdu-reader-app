@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/models/curated_book.dart';
 import 'package:fqapp/models/media_item.dart';
-import 'package:fqapp/pages/category_browse_page.dart';
 import 'package:fqapp/pages/curated_book_page.dart';
 import 'package:fqapp/pages/detail_page.dart';
 import 'package:fqapp/pages/home_page.dart';
@@ -93,7 +92,8 @@ void main() {
     expect(find.byKey(const Key('home-category-bar')), findsOneWidget);
     expect(find.byKey(const Key('home-today-pick')), findsOneWidget);
     expect(find.byKey(const Key('home-cat-button-classic')), findsOneWidget);
-    expect(find.byKey(const Key('home-category-listen')), findsOneWidget);
+    // 听书入口按产品要求从首页分类条移除。
+    expect(find.byKey(const Key('home-category-listen')), findsNothing);
     // 两个分类标题都在（分类区按顺序渲染）
     expect(find.text('古典名著'), findsWidgets);
     expect(find.text('科普百科'), findsWidgets);
@@ -116,18 +116,20 @@ void main() {
     await tester.tap(find.byKey(const Key('home-cat-button-science')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(CategoryBrowsePage), findsOneWidget);
+    // 分类「全部」视图内嵌在首页 PageView 中：不再另开路由。
+    expect(find.textContaining('科普百科 的说明'), findsOneWidget);
+    expect(find.byKey(const Key('category-loaded-count')), findsOneWidget);
     expect(find.text('科普百科'), findsWidgets);
     expect(find.text('科普读物一'), findsOneWidget);
   });
 
-  testWidgets('听书分类列出有声书，点开走直达阅读链路', (tester) async {
+  testWidgets('有声书磁贴点开走直达音频详情链路', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    // 让「西游记」的解析命中一个 audio 源，验证听书点开直接给音频。
+    // 让「西游记」的解析命中一个 audio 源：书单里的有声书点开直接给音频。
     CuratedResolver.instance.search = (query) async {
       if (query.contains('西游记')) {
         return [
@@ -148,27 +150,15 @@ void main() {
     await tester.pumpWidget(app(HomePage(catalog: catalog)));
     await tester.pumpAndSettle();
 
-    // 「听书」在分类条最末尾，先把横条滚出来再点。
+    // 听书入口改为书单音频书本体：推荐板块的磁贴点开仍走直达链路。
+    final tile = find.byKey(const Key('home-recommend-classic-a'));
     await tester.scrollUntilVisible(
-      find.byKey(const Key('home-category-listen')),
+      tile,
       100,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const Key('home-category-bar')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
+      scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('home-category-listen')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('听书'), findsWidgets);
-    expect(find.byKey(const Key('home-listen-row-a')), findsOneWidget);
-
-    // 遮罩里是无限循环的 CircularProgressIndicator，这里不能用
-    // pumpAndSettle（永远不会 settle），用定步 pump 等解析完成。
-    await tester.tap(find.byKey(const Key('home-listen-row-a')));
+    await tester.tap(tile);
     await tester.pump();
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(milliseconds: 400));
@@ -215,7 +205,8 @@ void main() {
     await tester.tap(find.byKey(const Key('home-category-science')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(CategoryBrowsePage), findsOneWidget);
+    // chip 点击在 PageView 内就地切换到该分类的全部视图。
+    expect(find.textContaining('科普百科 的说明'), findsOneWidget);
     expect(find.text('科普百科'), findsWidgets);
     expect(find.text('时间简史'), findsOneWidget);
     expect(find.text('西游记'), findsNothing);
@@ -579,6 +570,30 @@ void main() {
       );
     });
 
+    test('limit 覆盖全部分类时，批次轮转整份日序（换一批仍有效）', () {
+      final many = CuratedCatalog(
+        categories: [category('classic', '古典名著')],
+        books: [for (var i = 0; i < 10; i++) book('t$i', '书$i', 'classic')],
+      );
+      final day = DateTime(2026, 10, 19);
+      final base = many.recommendationBatchOf(
+        'classic',
+        now: day,
+        limit: 10,
+      );
+      expect(base, hasLength(10));
+      final next = many.recommendationBatchOf(
+        'classic',
+        now: day,
+        batch: 1,
+        limit: 10,
+      );
+      expect(next, hasLength(10));
+      // 轮转一位后整体顺序可感知变化，但仍是同一份书目。
+      expect(next.map((e) => e.id).toSet(), base.map((e) => e.id).toSet());
+      expect(next.first.id, isNot(base.first.id));
+    });
+
     test('按分类取书与按 key 找分类', () {
       expect(catalog.booksOf('classic').map((b) => b.id), ['a', 'b']);
       expect(catalog.categoryOf('science')!.label, '科普百科');
@@ -646,6 +661,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(CategoryBrowsePage), findsOneWidget);
+    // 滑到末端继续滑：就地切到「古典名著」的全部视图（不再另开页面）。
+    expect(find.byKey(const Key('category-loaded-count')), findsOneWidget);
+    expect(find.textContaining('古典名著 的说明'), findsOneWidget);
   });
 }

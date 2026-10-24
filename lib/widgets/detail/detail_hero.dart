@@ -179,12 +179,9 @@ class _CoverTile extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // 与书架 `_ShelfCover` 的 tag 对齐（都取 item.id）：
-                    // 书架 → 详情页的封面连续飞行，不出现「闪一下换页」。
-                    Hero(
-                      tag: 'book-cover-${item.id}',
-                      child: StoryCover(item: item, cacheWidth: 320),
-                    ),
+                    // 封面 Hero 飞行动画已按产品要求移除（与书架侧
+                    // bookshelf_card.dart 同批）：返回时不再飞回书架。
+                    StoryCover(item: item, cacheWidth: 320),
                     Positioned(
                       left: 0,
                       top: 0,

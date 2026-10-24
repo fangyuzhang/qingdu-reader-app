@@ -350,10 +350,11 @@ class NoteBadgeChip extends StatelessWidget {
       scale: highlighted ? 1.08 : 1,
       child: highlighted ? withHalo(chip) : chip,
     );
-    // 拖动中本体被隐藏；只有「拖回自己这张卡片」时才留一个半透明
-    // 角标 + 吸附环，明确告诉用户松手会落回这里（且不改变尺寸）。
+    // 拖动中本体被隐藏；拖回自己这张卡片时，原位留半透明角标提示松手
+    // 落点，但不再画绿色吸附环（用户反馈残影感）。空位保持等大，
+    // Wrap 不重折行。
     final placeholder = highlighted
-        ? Opacity(opacity: 0.5, child: withHalo(chip))
+        ? Opacity(opacity: 0.5, child: chip)
         : Opacity(opacity: 0, child: chip);
     return LongPressDraggable<NoteTagDrag>(
       data: NoteTagDrag(

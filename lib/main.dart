@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_skill/flutter_skill.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 
@@ -32,6 +34,16 @@ void main() {
   // 且子 zone 的未捕获异常处理对绑定回调不生效。
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+    // 【开发工具·仅调试】flutter_skill 绑定：给 flutter-skill MCP server
+    // 注册 vm_service 扩展，让 AI agent 能观察/操作运行中的 app（截图、
+    // 点击、导航）。release 构建 kDebugMode 恒为 false，零开销。必须在
+    // runApp 之前、且与 runApp 同 zone（见上方的 zone mismatch 修复说明）。
+    // autoEnableIndicators 必须关：默认实现靠一个 500ms 的延迟定时器开启
+    // 点击指示器，widget 测试的 fake-async 环境等不到它触发会报
+    // 「Pending timers」；指示器由 MCP 经 enableIndicators 扩展按需开启。
+    if (kDebugMode) {
+      FlutterSkillBinding.ensureInitialized(autoEnableIndicators: false);
+    }
     // 【青茄·竖屏】全应用只接受竖屏：手机横过来时界面保持竖向，不再整体
     // 转成横向排版（阅读、听书、笔记都在竖屏完成）。清单里的
     // android:screenOrientation="portrait" 在系统层兜同一件事，避免
@@ -298,7 +310,7 @@ class _RootShellState extends State<RootShell> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 【青茄重构·删除】短剧 tab（原 index 1）已移除，剩余三页均为浅色内容页，
     // 状态栏与玻璃拟态配色只跟随系统明暗，不再需要 isDramaTab 特判。
-    final glassDark = isDark;
+    final darkNav = isDark;
     // 墨水屏模式：本 build 由 Theme 变化触发重建（上面读了 Theme.of），
     // 这里直接读 notifier 当前值即可拿到最新开关，不另加监听。
     final eink = einkModeNotifier.value;
@@ -311,7 +323,7 @@ class _RootShellState extends State<RootShell> {
         shadowColor: Colors.transparent,
         indicatorColor: eink
             ? Colors.black
-            : HomePalette.accent.withValues(alpha: glassDark ? 0.20 : 0.12),
+            : HomePalette.accent.withValues(alpha: darkNav ? 0.20 : 0.12),
         indicatorShape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
@@ -322,7 +334,7 @@ class _RootShellState extends State<RootShell> {
                 ? (eink ? Colors.white : HomePalette.accent)
                 : (eink
                       ? Colors.black
-                      : (glassDark
+                      : (darkNav
                             ? Colors.white.withValues(alpha: 0.65)
                             : palette.muted)),
           ),
@@ -336,10 +348,10 @@ class _RootShellState extends State<RootShell> {
             color: states.contains(WidgetState.selected)
                 ? (eink
                       ? Colors.black
-                      : (glassDark ? HomePalette.accent : palette.accentText))
+                      : (darkNav ? HomePalette.accent : palette.accentText))
                 : (eink
                       ? Colors.black
-                      : (glassDark
+                      : (darkNav
                             ? Colors.white.withValues(alpha: 0.65)
                             : palette.muted)),
           ),
@@ -407,28 +419,25 @@ class _RootShellState extends State<RootShell> {
           ],
         ),
       ),
-      // 【青茄修复·底栏固定】整宽实色固定条（学习番茄正式版的处理方式，
-      // 样式保持青茄配色）：不悬浮、不圆角、不毛玻璃；顶部一条细分隔线
-      // 与正文区分，SafeArea 只保手势区高度。
-      bottomNavigationBar: RepaintBoundary(
-        child: Container(
-          decoration: BoxDecoration(
-            color: eink
-                ? Colors.white
-                : (glassDark ? const Color(0xFF161619) : Colors.white),
-            border: Border(
-              top: BorderSide(
-                color: eink
-                    ? Colors.black
-                    : (glassDark
-                          ? Colors.white.withValues(alpha: 0.10)
-                          : palette.line),
-                width: eink ? 0.8 : 0.6,
-              ),
+      // 【青茄修复·底栏固定】整宽固定条（学习番茄正式版的处理方式）：
+      // 不悬浮、不圆角，顶部一条细分隔线与正文区分，SafeArea 只保手势区
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: eink
+              ? Colors.white
+              : (darkNav ? const Color(0xFF161619) : Colors.white),
+          border: Border(
+            top: BorderSide(
+              color: eink
+                  ? Colors.black
+                  : (darkNav
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : palette.line),
+              width: eink ? 0.8 : 0.6,
             ),
           ),
-          child: SafeArea(top: false, left: false, right: false, child: navBar),
         ),
+        child: SafeArea(top: false, left: false, right: false, child: navBar),
       ),
     );
   }

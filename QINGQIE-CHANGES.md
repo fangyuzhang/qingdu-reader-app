@@ -993,3 +993,218 @@ flutter test             # 1954 passed / 10 skipped
 - 仓库没有独立“书源详情”页面，任务中的该项无可改目标；书单/详情页沿用现有转场。
 - 其余未单独指定时长的 `showModalBottomSheet` 仍使用 Material 默认位移；本批只定制了任务点名的阅读设置面板。
 
+---
+
+# 四十一、v41 批次：笔记拖标签的磁力虚影与松手残影
+
+## 41.1 磁力虚影与角标同一行
+
+- 拖标签悬停到别的批注/书摘上时，磁力虚影不再画在角标行的下一行，而是直接插进角标 `Wrap` 里它松手后应落的排序位置（`_badgesOf` 的 `ghost` 参数合并后统一排序），与现有角标同一行、行内顺次挤开。
+- 松手后真实角标落在虚影预览的同一槽位，不再“先在下一行、松手跳回上一行”。
+
+## 41.2 松手后源角标不再闪回残影
+
+- 跨笔记移动/拖到空白处删除角标时，松手到异步写库、重载完成之间有空档，源角标会先闪回原位再消失，看起来像一个绿色圈状残影。
+- 新增 `_leavingBadges`（noteKey → (类型, 文案)）在松手瞬间立即隐藏源角标；某次重载数据确认源笔记已不含该角标后自动解除隐藏；写库失败时回滚恢复并提示「保存失败，请重试」。
+- 「目标笔记已有同款角标 → 整次拖动无操作」的判断移到隐藏之前，无操作时源角标不会被误隐藏。
+
+## 41.3 验证
+
+- `flutter analyze`：0 问题。
+- `flutter test test/notes_page_test.dart`：21 通过 / 0 失败（新增 3 例：虚影同行且落位预览、跨笔记松手瞬间源角标不闪回、拖空白处松手瞬间立即消失）。
+- Release APK（Windows 侧构建，ASCII 路径 `E:\fqapp-build`）：38,459,331 字节，SHA-256 `12b9a93853e59b449b83bbdb1295fb5077773f58a8f4299cf5d23c2560693dc9`（`D:\APP\agent\apk\fqapp-v41.apk`，版本 1.0.131+136），`scripts/verify_android_apk.py` 静态校验（ELF 对齐 / zipalign / 签名 / badging）通过。
+- 真机（Redmi K20 Pro `b2f8e975`，Android 11）：安装后多次真实长按拖拽——
+  - 跨笔记移动：把「待查证」角标在卡片间往返拖动多次均正确落位（含按「全部类型」顺序插入行内槽位）；
+  - 悬停磁力虚影：`adb motionevent` 注入拖拽并在目标卡上方停住，截图（像素扫描 + 视觉双重确认）显示橙色描边带「+」图标的虚影与目标卡已有标签（#B 等）**同一水平行**、无错位，目标卡出现强调色悬停描边，源卡角标按 `childWhenDragging` 隐藏；
+  - 松手后源卡无残影：多次落点后源卡截图均无残留（残影为 <100ms 瞬时现象，截图取证不可达，以单元测试「松手一帧内 `findsNothing`」为准）；
+  - 拖到空白处路径真机触发过一次删除语义，角标立即消失、数据正确；
+  - 验证完毕后笔记数据已恢复原状（角标回到原卡片原槽位）。
+- 构建环境备忘：`~/.gradle/gradle.properties` 里指向本地 VPN 代理（127.0.0.1:51981）的四行已注释——仓库走阿里云镜像可直连；VPN 恢复后按文件内注释改回端口即可。
+
+## 41.4 拖回自己时去掉绿色吸附环，保留半透明角标（用户复核反馈）
+
+- 真机复核反馈：拖动角标悬停回源卡片自己时，原位的 50% 透明角标外还套着一圈绿色吸附环（`withHalo` 的 accent 描边 + 光晕），被误读成「绿色胶囊残影」。
+- `NoteBadgeChip` 的拖动占位改为：拖回自己时原位显示**半透明角标（保留）但不再画吸附环**；`withHalo` 只保留给「拖别的同款标签到已有角标的卡片上时该角标亮一圈」的场景（body 的 highlighted）。
+- 中间版本曾把半透明角标一并去掉，按用户反馈纠正为只去环、留角标。
+- 测试更新：「把角标拖回同一张笔记」断言占位 `Opacity.opacity == 0.5` 且子级为普通 `Container`（无 Stack 描边环）；`flutter analyze` 0 问题，`flutter test test/notes_page_test.dart` 21 通过。
+- 真机复核（Redmi K20 Pro `b2f8e975`，APK `D:\APP\agent\apk\fqapp-v43.apk`，SHA-256 `dcb4163b2a5a7f36cd8e9aa621807a3350b5243fb432c250a31612532c8ddb03`）：悬停源卡片时原槽位检出半透明角标（≈#EAA2A2 色域 4164 px）、绿色吸附环 0 px、悬浮副本与卡片描边高亮正常；跨卡片移动（卡1→卡2→卡1）均正确按排序落位；验证后数据已恢复原状。
+
+---
+
+# 四十二、开发工具：接入 flutter_skill（MCP 自动化）
+
+- pubspec 新增 `flutter_skill: ^0.9.37`，pubspec.lock 同步。注意 pub.dev 上该包没有 `0.2.26` 版本，实际版本流为 0.9.x（与 flutter-skill MCP server 0.9.37 原生二进制同版本对齐）。
+- main.dart 在 runZonedGuarded 内、`WidgetsFlutterBinding.ensureInitialized()` 之后新增 `if (kDebugMode) FlutterSkillBinding.ensureInitialized(autoEnableIndicators: false);`：
+  - `FlutterSkillBinding` 是纯静态注册类（注册 `ext.flutter.flutter_skill.*` vm_service 扩展），不继承也不替代 WidgetsBinding，与现有启动序列无 zone/绑定冲突；
+  - `kDebugMode` 守卫：release 构建不注册任何扩展，零影响；
+  - `autoEnableIndicators: false` 必须带：默认实现靠一个 500ms 延迟定时器开启点击指示器，widget 测试的 fake-async 环境等不到触发，`app_bootstrap_test` 实测报「Pending timers」失败；指示器由 MCP 经 `ext.flutter.flutter_skill.enableIndicators` 按需开启，不影响功能。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1510 通过 / 10 跳过 / 0 失败，与基线一致。
+- 使用方式：debug 模式运行 app + 把 `flutter-skill server` 注册为 MCP server（npm 全局已装 `flutter-skill` 0.9.36，驱动二进制 0.9.37）。
+
+---
+
+# 四十三、v43 批次：苹果透明玻璃（Liquid Glass）可选主题
+
+## 43.1 主题基建（ThemeExtension）
+
+- 新增 `lib/feature/theme/glass_theme.dart`：`GlassStrength`（完整/精简/关闭）+ `GlassThemeExtension extends ThemeExtension`（enabled、glassBlurSigma、glassOpacity、glassBorderColor、glassHighlightColor、glassShadow、strength）。日/夜各一套工厂参数（夜间低透明度 0.35 + 白色高光描边 0.32），`disabled` 常量供默认主题与墨水屏挂载。
+- `AppTheme.createTheme` 增加 `glassMode` / `glassStrength` 参数：默认主题挂 `disabled` 扩展、玻璃主题按日夜挂对应档、墨水屏恒定 disabled（模糊在墨水屏产生量化残影）。原有关键色（eink_mode_test 锁定的 primary/canvas）零改动。
+- 状态管理沿用项目既有模式：`glassModeKey='glass_mode'` + `glassStrengthKey='glass_strength'` + 顶层 ValueNotifier + `setGlassMode`/`setGlassStrength`（app_theme.dart），main.dart 启动恢复 + 四层 ValueListenableBuilder 重建 MaterialApp。
+- 设置页「外观」新增两项：玻璃主题开关 + 玻璃效果强度（完整/精简/关闭，SimpleDialog 单选），失败 SnackBar 兜底与墨水屏项同款。
+
+## 43.2 通用组件
+
+- 新增 `lib/feature/theme/widgets/glass_container.dart`：`GlassContainer`（BackdropFilter + ClipRRect + 半透明 surface 底 + 1px 高光描边 + BoxShadow 外投影/上缘高光）。取色只走 `Theme.of(context).extension<GlassThemeExtension>()`。
+- 三级降级：默认主题/墨水屏 → 普通 Container（fallbackColor/fallbackBorderColor 由调用方传被替换容器原色，保证外观零突变）；玻璃+关闭档 → 半透明纯色 + 1px 描边（fallback 色不参与，全应用一致的玻璃配色）；玻璃+精简档 → sigma 8（完整 18）。margin 在裁剪外层避免投影被裁。
+
+## 43.3 玻璃化范围（外围 UI，正文零接触）
+
+- 阅读器：顶部工具栏、底部菜单（目录/夜间/听书/设置）、排版面板、长按操作条、批注编辑弹窗、目录抽屉。实现为「玻璃开关分支」：默认主题逐字保留原组件（Material/AnimatedContainer/写死色），玻璃模式才渲染 GlassContainer——比 fallback 方案更保真（保住 elevation、路由手柄、换色动画）。`ReaderThemePreset.theme` 为 copyWith 构造，GlassThemeExtension 自动透传进阅读器子主题。
+- 书架：`_GroupChip` 分组 chips、RootShell 底部导航（GlassContainer 圆角 0，fallback 保留 eink/glassDark/白 三元与顶部描边宽度 0.8/0.6）。顶栏 tab 行无可玻璃背景面（保持原样）；PopupMenu 菜单底由框架绘制无插入点（未动，列入限制）。
+- 搜索/详情/设置类：搜索框、搜索历史卡、详情 4 处卡片、目录/书评底部弹层（原圆角 28/24 保留）、SettingsScaffold 外壳、TTS 引擎卡。
+- 全局对话框：`showAppDialog` 玻璃分支（本地 Theme 覆盖 dialogTheme 透明 + Center/IntrinsicHeight 收缩玻璃卡）覆盖 AlertDialog/SimpleDialog 共 12 处；reader 点击区域编辑器与 _MarkerColorPickerDialog 两个特殊对话框保持原样。
+- SnackBar：玻璃主题下 snackBarTheme backgroundColor 88% 半透明（原色不变体），默认主题逐字节不变。
+- 书架卡片本体、拖拽/选中动画、阅读器正文背景与分页滚动、reader_theme.dart：零改动（reviewer 审计 + git status 终审确认）。
+
+## 43.4 验证
+
+- `flutter analyze`：0 问题。全量 `flutter test`：**1522 通过 / 10 跳过 / 0 失败**（基线 1510 + 新增 glass_theme_test.dart 12 例：扩展参数/lerp/相等性、createTheme 三态接线、持久化往返、GlassContainer 三级降级 widget 测试）。
+- 多 agent 协同：1 调研员（全量代码地图）+ 主控（基建）+ 4 执行者（阅读器/书架/页面/对话框并行）+ 1 审查员（七条硬约束审计零违规）。
+- 真机（Redmi K20 Pro，release 覆盖安装）：默认主题外观与改动前一致；玻璃主题日/夜的阅读器工具栏（毛玻璃透出正文模糊）、书架 chips、底部导航、玻璃对话框均生效；重启应用后玻璃开关状态持久化恢复；批注数据完好。
+- 回归：默认 ↔ 玻璃来回切换 3 次，截图像素采样对比——两次默认状态完全一致（RGB 差 0.0，无残留），玻璃状态有明确材质差异（底栏 RGB 差 10.2）。
+- 已知限制：①本机（MIUI Android 11）`dumpsys gfxinfo` 对 Flutter 自绘 surface 统计恒为 0 帧，拖拽帧率无法用 adb 采集（BackdropFilter 仅外围少数常驻，正文与书架卡不在玻璃层）；②PopupMenu 菜单底与下拉菜单无法插入玻璃层；③底栏 extendBody:false 下毛玻璃采样到纯色背景、观感接近半透明；④墨水屏下玻璃开关仍可打开但被压制（提示文案待优化）。
+
+
+---
+
+# 四十四、v44 批次：笔记卡片信息降噪与想法背景图层
+
+- 笔记时间线卡片不再展示：①分类（文件夹 + 分类名，如 QA_C）chip——分类仍保留在数据与编辑器中，仅卡片内不渲染，`_MetaChip` 组件随之移除；②卡片内时间戳（如 2026-10-21 13:04）——章节名保留；时间线左侧的日期分组标签（10/21）不变。
+- 用户想法（thought）增加与原文引用块同款的背景图层：同一 badge 色 8% 透明底、8px 圆角、同内边距，视觉与原文块成对。
+- 测试适配（行为变更随产品要求）：`qingqie_reader_features_test` 时间戳断言改为 findsNothing（用例更名 hides timestamps）；`notes_page_test` 多选用例末尾的第三张卡片断言改为先拖动列表滚动到可见再断言（测试视口 600dp 下第三张卡片位于惰性列表缓存外，属用例脆弱性而非功能回归）。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1522 通过 / 10 跳过 / 0 失败；真机复核笔记卡片（西游记/三体）：分类 chip 与时间戳消失、想法背景图层与原文块同款。
+
+---
+
+# 四十五、v45 批次：移除书架 ↔ 详情页封面 Hero 飞行动画
+
+- 移除书架封面（bookshelf_card.dart）与详情页封面（detail_hero.dart）共用的 `Hero(tag: 'book-cover-<id>')`：详情页下滑到封面滚出屏幕后返回时，封面会从屏幕顶部异常飞回书架卡片，观感差。删除后返回直接落位，无过场。
+- 两侧均为删除 Hero 包装、保留封面组件本体，默认外观不变；书架版式切换的 HeroMode 保留（无 Hero 时为空操作，为后续可能的 Hero 预留）。
+- 验证：`flutter analyze` 0 问题；bookshelf_card / detail_page / detail_redesign / library_shelf 测试全过（Hero 无测试引用）；真机复核——详情页下滑至封面滚出屏幕后返回，首帧即书架完整状态、无飞行封面。
+
+---
+
+# 四十六、v46 批次：首页今日精选卡改版（书架卡片样式）
+
+- 「今日精选」标题下移除副文案「每天自动轮换，也可以手动换一批」（换一批按钮保留）。
+- 精选卡调整（保持原尺寸布局：封面 88px 在左、文字在右）：①移除「今日荐读」标签与适读年龄（15+）标签；②卡片背景由分类渐变改为白底（palette.surface，随日夜主题）+ 0.6 描边 + 轻投影；③文字配色由白色改为 ink/muted（白底上可读），「查看详情」用 accent 强调。长按进荐读页、点击进详情、换一批、相关 Key 全部保留。（初版曾把封面改成一整幅置顶导致卡片过大，按用户反馈恢复原尺寸。）
+- 测试适配：home_page_test 分类卡片用例先滚动再断言（精选卡改为整幅封面后变高，分类卡片区位于首屏缓存外）。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1522 通过 / 10 跳过 / 0 失败；真机（浅色/夜间各一）复核：副文案消失、标签消失、卡片白底（浅色）与完整封面含作者名。
+
+---
+
+# 四十七、v47 批次：首页书单磁贴白卡化 + 阅读器底部工具栏平底
+
+- 首页「古典名著」等分类磁贴（CuratedBookTile）套上书架双列卡同款白卡：palette.surface 底、radius 14、line 0.5 描边、12 内边距、封面内嵌且圆角降为 10（CuratedBookCover 新增 radius 参数，默认 14 不影响其他调用点）。横滑列表定高相应加卡内边距（(tileWidth-24)×4/3 + captionHeight + 10）。封面、书名、作者名被白卡框在一起，与书架观感一致。
+- 阅读器底部工具栏（目录/夜间/听书/设置）按产品要求去掉顶部 22 圆角改为平底：默认主题 Material 与玻璃主题 GlassContainer 两个分支同步。目录抽屉、排版面板不受影响。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1522 通过 / 10 跳过 / 0 失败；真机复核首页磁贴白卡与阅读器平底工具栏。
+
+---
+
+# 四十八、v48 批次：首页分类板块 10 本 + 轻扫进全部阈值下调
+
+- 首页每个分类板块的推荐书目从 4 本扩到 10 本：`_recommendedBooksOf` 传 `limit: 10`；书单资产（curated_books.json）每个分类补足到 10 本（共新增 28 本：古典名著/世界文学/历史人文/科普百科/科幻想象/成长青春/诗歌散文各 +4，均为对应分类的真实经典书目，含作者/简介/标签/适龄）。
+- `recommendationBatchOf`：当 limit 覆盖全部分类时（limit >= 书目总数），「换一批」批次改为对日序做整份轮转——否则 start 恒为 0，换一批不再有可感知变化。新增单测覆盖该轮转行为。
+- 横滑到末尾后进入分类「全部」的过冲阈值由 72dp 降为 36dp：用户反馈滑到最后一本后小范围左滑无法触发；36dp 下轻扫（约 100 物理像素）即可命中，仍高于普通甩动的瞬时过冲，不易误触。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1523 通过 / 10 跳过 / 0 失败（新增 limit 覆盖全类的轮转单测）；真机复核：分类板块磁贴含新增书目、滑到末端后 110px（约 40dp）小滑直接进入「历史人文」全部页。
+
+---
+
+# 四十九、v49 批次：修复阅读器返回详情页时的让位抖动
+
+- 现象：详情页 →「继续阅读」→ 返回时整页抖一下——系统状态栏与手势条是在阅读器 dispose（返回动画结束后）才恢复的，此时详情页已完全可见，MediaQuery 安全区从 0 跳回真实高度，整页让位。
+- 修复：阅读器 `PopScope.onPopInvokedWithResult` 在 pop 提交（didPop，返回动画起始帧）时立即 `SystemUiMode.edgeToEdge` 恢复系统栏——让位发生在阅读器还盖着详情页的时候；阅读器自身布局由既有的 `_stableInsets` 冻结安全区兜底，退出帧不跳。dispose 的恢复调用保留兜底（_appliedSystemUiMode 幂等去重，不会重复调用）。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1523/10/0；真机取证——沉浸态顶部无状态栏，返回动画期间（back 后首帧）状态栏系统图标已恢复且详情页布局稳定。
+
+---
+
+# 五十、v50 批次：首页分类导航重构 + 板块磁力吸附
+
+## 50.1 分类条与浏览页导航重构
+
+- 首页分类条：移除「听书」入口（听书页面整体删除）；点分类 chip 直接进入该分类的全部浏览页；在分类条上向左滑 = 按顺序进入下一个分类的全部页。
+- 首页内容区左右滑：内容区横向拖动（板块磁贴自身的横滑优先）= 进入下一个分类的全部页。
+- CategoryBrowsePage：①AppBar 下方新增**常驻分类条**（当前分类高亮），在任何滚动位置都能切换其他分类；②点分类 chip 就地切换（清空重载、列表回顶）；③内容区左右横滑 = 上一个/下一个分类；④「推荐」视图即首页（浏览页不设推荐 chip，返回键回首页）。
+- 首页单分类的就地网格视图删除（由浏览页承载），`_listenSlivers`/`_listenKey` 移除；书单音频书的直达音频链路保留（推荐板块磁贴点开仍直接给音频详情）。
+
+## 50.2 板块磁力吸附
+
+- 新增 `_MagneticSnapPhysics`：分类横滑列表停稳时吸附到整本位置，消除「一本书一半在屏内一半在屏外」的状态。快速甩动按惯性投影约 0.22s 位移后再吸附（一甩可跨多本），慢拖松手就近吸附；吸附目标钳制在滚动范围，末端整本完整可见。与「滑到末尾继续滑进全部」的过冲机制兼容（吸附物理只改 ballistic 段）。
+
+## 50.3 配套调整
+
+- CuratedBookTile（首页磁贴）按书架双列卡参数内嵌封面：封面宽 = 磁贴宽 - 24（12 内边距），封面圆角 14 → 10（CuratedBookCover 新增 radius 参数，默认 14 不影响其他调用点）；横滑列表定高相应更新。
+- 测试适配：首页听书分类用例改写为「有声书磁贴直达音频详情」；首页断言听书 chip 不存在。
+
+## 50.4 验证
+
+- `flutter analyze` 0 问题；全量 `flutter test` 1523 通过 / 10 跳过 / 0 失败。
+- 真机复核：首页左滑进入「古典名著」全部页；浏览页常驻分类条点「世界文学」就地切换；右滑横滑回到「古典名著」；板块慢拖松手后磁贴全部整本对齐（磁力吸附生效）。
+
+---
+
+# 五十一、v51 批次：首页与分类全部页融合（不再跳转）
+
+- 首页与 7 个分类「全部」页融合为一个 PageView：第 0 页推荐视图，之后每页一个分类的全部书城视图（CategoryBrowseView 内嵌，AutomaticKeepAlive 保留加载结果与滚动位置）。右滑回推荐/上一个分类，左滑进下一个分类，不再另开路由。
+- 顶部分类条常驻并与页面双向同步：页面切换 → chip 高亮跟随并自动滚动保持可见（GlobalKey + Scrollable.ensureVisible）；点 chip → animateToPage 对应页。
+- 分类功能按钮卡、板块「全部」、磁贴滑到末尾的过冲，全部改为 PageView 内切页（_goToCategory），不再 push 路由。
+- CategoryBrowsePage 重构为 CategoryBrowseView 内嵌视图（去 Scaffold/AppBar，混入 AutomaticKeepAliveClientMixin），category_browse_page.dart 仅保留文件名。
+- 测试适配：分类入口类用例改断言 PageView 内的就地切换（分类描述文案 + category-loaded-count），CategoryBrowseView 用例补 Scaffold 承载。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1523 通过 / 10 跳过 / 0 失败；真机复核：精选卡区域左滑就地切到「古典名著」全部页（已载入 42 本）、顶部分类条同步高亮并滚动到可见位置。
+
+---
+
+# 五十二、v52 批次：划线并入类型筛选 + 修复下拉刷新双跳变
+
+## 52.1 划线并入类型筛选
+
+- 顶部视图切换移除「划线」独立视图（只剩时间线 / 按书查看）；「划线」成为与批注/书摘同行的类型筛选 chip（NoteTypeFilter 新增 marks，filterNoteTimeline 对 marks 返回空注解列表，时间线改渲染划线记录）。
+- 类型选中「划线」时，「全部类型」行整行切换为线型筛选：实线 / 波浪线 / 虚线 / 荧光笔（带各自计数），点选过滤划线记录，再点取消；「全部类型」在划线模式下等价于全部线型。
+- 划线记录沿用批注时间线同款日期轴 + 卡片（_buildMarkTimeline：左侧日期/轴线/线型色点 + _MarkRow 卡片），不再是无轴列表。
+- 切到「按书查看」自动退出划线模式（按书视图只收批注/书摘）；原划线视图的书筛选行随视图一并移除。
+
+## 52.2 修复下拉刷新"一次刷新两次"（18:51 用户反馈）
+
+- 根因：CategoryBrowseView 的换一批（advance）流程先读缓存批次并立即上屏，网络批次返回后再整体替换一次——内容连跳两次，观感即"刷新了两遍"。
+- 修复：advance 时不读缓存、不清空当前列表，保持内容不动，网络批次回来一次性替换（RefreshIndicator 指示器提供加载反馈）；首次铺屏的非 advance 路径的缓存/种子逻辑不变。
+
+## 52.3 验证
+
+- `flutter analyze` 0 问题；全量 `flutter test` 1523 通过 / 10 跳过 / 0 失败（划线用例改写为类型筛选 + 线型筛选；空态 chip 计数 4→5）。
+- 真机：类型行「划线 5」点选后第二行变为线型 chips（实线1/波浪线1/虚线1/荧光笔2）+ 时间线列划线记录；线型单选过滤正确；古典名著页下拉刷新单次换批（42 本旧批 → 40 本新批一次性替换）。
+
+---
+
+# 五十三、v53 批次：移除书架卡片错峰入场动画
+
+- 书架三档版式（宫格 / 双列 / 列表）的卡片不再包裹 HomeEntrance 错峰入场动画（每卡延迟 40ms、上浮+淡入 260ms）——用户反馈启动进书架与隔段时间再进书架时的"加载动画"观感差。卡片与 `_entered` 播放记录状态一并移除；首页的错峰入场保留不变。
+- 该动画原会在三种场景重播：启动首次挂载书架、书架内部 tab/版式切换（_entered.clear()）、以及因状态重建触发的首屏卡片；全部随包装移除而消失。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1523/10/0；真机取证——点书架后 0.35s（原动画中段）与 2s 截图卡片区像素差异 0.0，切走 6s 再回书架同样 0.0：进入即完整呈现，无任何透明度/位移动画。
+
+---
+
+# 五十四、v54 批次：整体移除玻璃主题
+
+- 按用户要求删除 v43 引入的整套玻璃主题：`lib/feature/theme/`（GlassThemeExtension / GlassContainer）、`test/glass_theme_test.dart`、app_theme 的玻璃 key/notifier/set 函数与 createTheme 玻璃参数、main.dart 的两层玻璃 ValueListenableBuilder 与底栏 GlassContainer（还原实色条 + 顶部描边）、设置页「玻璃主题/玻璃效果强度」两项、全部 15 个使用文件的玻璃分支/包装还原为原容器（阅读器工具栏/底部菜单/排版面板/长按条/批注弹窗/目录抽屉/搜索/详情/设置类页面/全局对话框/SnackBar）。
+- 保留：日间/夜间/跟随系统主题、墨水屏模式及 v44-v53 的全部功能（笔记卡改造、首页分类 PageView、磁力吸附、10 本扩容、划线类型筛选、下拉刷新修复、书架去入场动画、返回抖动修复等）。用户持久化的 glass_mode 偏好 key 不再被读取，自然回到默认主题。
+- 连带处理：reader_page.dart 在清理过程中误伤后续批次改动，已从 git 基线恢复并重做 v49 返回抖动修复（PopScope pop 起始帧恢复系统栏）。
+- 验证：`flutter analyze` 0 问题；全量 `flutter test` 1511 通过 / 10 跳过 / 0 失败（较上批少 12 = 已删的玻璃测试）；真机复核首页/书架/详情/设置均为默认主题外观，无玻璃残留。
+
+---
+
+# 五十五、v55 批次：修复「本地服务启动失败」（构建产物 .so 损坏）
+
+- 现象：v54 装机后 Rust 后端进程起不来，日志 `linker: libfqapi_core.so .dynamic section header was not found`——APK 内的 .so 比源文件少 145 字节（打包截断）。
+- 根因：构建目录的 gradle 中间产物在某次目录被锁/清理时损坏，后续增量构建持续复用坏拷贝（UP-TO-DATE）；与代码无关（仓库 jniLibs 源文件哈希未变）。
+- 修复：弃用旧构建目录，全新目录完整重拷 + 干净构建。新 APK 内 .so 与历史正常版本（v43）逐字节一致（6,444,168 / sha256 前缀 93d22767），gradle 打包对 .so 的 8 字节规范化属正常差异。
+- 验证：装机后 logcat 出现 `fqapi_core: core init: port=8080`，无 linker 错误；首页正常（书城链路依赖后端）。
