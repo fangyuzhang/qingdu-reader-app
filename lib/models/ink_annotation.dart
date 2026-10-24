@@ -77,7 +77,8 @@ class InkStroke {
 
   final List<InkPoint> points;
 
-  /// 保存时页面尺度下的笔宽逻辑像素（渲染时按当前页宽等比缩放）。
+  /// 笔宽：以页宽 1000 为基准的逻辑像素（渲染时 × 当前画布宽/1000，
+  /// 见 InkStrokesPainter.widthBasis），跨字号/跨屏等比缩放。
   final double baseWidth;
 
   final int colorValue;
