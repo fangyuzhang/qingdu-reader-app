@@ -1,12 +1,12 @@
 # 青茄阅读 · 当前状态交接（AGENT-HANDOVER-NEXT）
 
-> 更新时间：2026-10-24
-> 仓库：`/home/fy/projects/fqapp-src`（WSL2 **原生路径**，不是 `/mnt/c` 上的副本）
-> 远端：`https://github.com/fangyuzhang/qingqie-reader-app`（**私有**）
-> 分支：`master`　功能基线：`236ca3b`（UI 交互动画）　HEAD：以 `git log --oneline -1` 为准（其后的文档同步提交）
-> 版本：`1.0.131+136`　包名：`com.fqapp.fqapp`
+> 更新时间：2026-10-24 22:30 (UTC+8)
+> 仓库：E:\项目\青茄阅读\repo\fqapp-src（Windows 侧路径；WSL 内为 /mnt/e/项目/青茄阅读/repo/fqapp-src）
+> 远端：https://github.com/fangyuzhang/qingdu-reader-app（已改名，旧地址 qingqie-reader-app 自动重定向）
+> 分支：master（HEAD de66506，已与远端同步）；本地另有已合并的 refactor/slim-optimize 分支可删
+> 版本：1.0.131+136　包名：com.fqapp.fqapp
 
-本文是**唯一有效的当前状态说明**。`AGENT-HANDOVER.md` 是早期总交接归档，里面的 HEAD、测试数字、工作树描述都已过期，只能当历史背景读。
+本文是唯一有效的当前状态说明。AGENT-HANDOVER.md 是早期归档。逐批变更细节看 QINGQIE-CHANGES.md（已记到第 55 批 + 瘦身重构）；本次优化验收报告在 OPTIMIZATION-REPORT.md，护栏在 OPTIMIZATION-GUARDRAILS.md。
 
 ---
 
@@ -14,232 +14,134 @@
 
 | 项 | 值 |
 | --- | --- |
-| 代码状态 | `master` 已提交；功能提交 `236ca3b`，本交接文档随后单独提交，工作区保持干净 |
-| 测试基线 | `flutter analyze` 0 问题；`flutter test` 通过 **1510**、跳过 **10**、失败 **0** |
-| 真机 | Redmi K20 Pro，serial `b2f8e975`（adb 走 Windows 侧 exe） |
-| 当前 APK | 38,459,043 字节，SHA-256 `57972b2305c91d2222a2b2d3ed7363af5586a26837cf70a7f25a8e84d5ec1680`（`/mnt/d/APP/agent/apk/fqapp-ui-animation.apk`，版本 1.0.131+136） |
-| APK 校验 | 本批只做了安装与真机截图复核；v35 的静态校验报告仍在 `build/apk-verification/wsl-native-v35/report.json` |
-| 当前批次 | UI 动画：书架选中态 / 封面 Hero / 统一弹窗与主题渐变 / 翻页 280ms / 首屏错峰入场 |
-
-接手第一件事：跑第 5 节的 `flutter analyze && flutter test`，确认基线仍是 1510/10/0，再动手。
+| 测试基线 | flutter analyze 0 问题；flutter test 1511 通过 / 10 跳过 / 0 失败 |
+| 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe） |
+| 已装 APK | 最新 release（含 v41–v55 + 瘦身重构），构建产物完好（.so 已修复） |
+| 远端同步 | master 已推送并校验 SHA 一致 |
+| 当前代码形态 | 玻璃主题已整体移除；首页为 PageView 融合导航；笔记划线并入类型筛选 |
 
 ---
 
-## 1. 环境与固定命令
+## 1. 绝对环境事实（新 agent 必读，全是踩过的坑）
 
-### 1.1 路径
+### 1.1 路径与验证
 
-| 项目 | 值 |
+1. flutter analyze / flutter test / flutter build 绝不能在中文路径下执行——仓库在 E:\项目\青茄阅读\...，Dart analysis server 遇中文路径直接崩溃（FormatException）。
+   标准流程：改 E:\项目\青茄阅读\repo\fqapp-src → robocopy 同步到 E:\fqapp-build2（ASCII 构建副本）→ 在副本里跑验证：
+
+   cd /e/ && robocopy "E:\项目\青茄阅读\repo\fqapp-src\lib" "E:\fqapp-build2\lib" //MIR //NFL //NDL //NJH //NP
+   robocopy "E:\项目\青茄阅读\repo\fqapp-src\test" "E:\fqapp-build2\test" //MIR //NFL //NDL //NJH //NP
+   cp "E:\项目\青茄阅读\repo\fqapp-src\pubspec.yaml" /e/fqapp-build2/
+   cd /e/fqapp-build2 && flutter pub get && flutter analyze && flutter test
+
+2. E:\fqapp-build（无 2）是废弃目录，勿用：曾因构建中被锁/强删导致 gradle 中间产物损坏，打出的 APK 里 libfqapi_core.so 被截断 145 字节，装机后报「本地服务启动失败」（v55 事故）。构建目录损坏的修法：换全新目录完整 robocopy + flutter pub get + 干净构建；验收标准是 APK 内 .so 长度 6,444,168（与源文件差 8 字节为 gradle 规范化，正常）。E:\fqapp-build 现仍被进程锁着删不净，重启后可 cmd //c "rmdir /S /Q E:\fqapp-build" 清掉。
+3. robocopy 多源 cp 陷阱：cp a b /目标/ 会把文件散拷到目标根目录制造幽灵文件（analyze 报不带 lib/ 前缀的诡异错误）。每次 cp 必须逐文件写全目标路径；见幽灵错误先 ls /e/fqapp-build2/*.dart 查散件。
+
+### 1.2 工具链（Windows 侧，本机全部就绪）
+
+| 工具 | 位置 / 版本 |
 | --- | --- |
-| 仓库 | `/home/fy/projects/fqapp-src` |
-| Flutter | `$HOME/flutter/bin/flutter` |
-| JDK | `$HOME/jdk17`（17） |
-| Android SDK | `$HOME/Android/Sdk`（build-tools `36.0.0`） |
-| NDK | `28.2.13676358` |
-| adb（Windows 侧） | `/mnt/d/APP/DevTools/Android/Sdk/platform-tools/adb.exe` |
-| 真机 serial | `b2f8e975` |
-| APK 中转 | `/mnt/d/APP/agent/apk/` |
+| Flutter | D:\APP\DevTools\Flutter（3.47.7 stable，与锁定版本一致；Git Bash 里直接 flutter 可用） |
+| JDK 17 | D:\APP\DevTools\JDK（JAVA_HOME 已设） |
+| Android SDK | D:\APP\DevTools\Android\Sdk（NDK 28.2.13676358、build-tools 36 均在） |
+| Gradle | 项目 gradlew 9.1.0，缓存在 ~/.gradle（9.1.0 已缓存，无需下载） |
+| Python | 系统 Python + PIL/numpy（截图像素分析用） |
 
-### 1.2 每次开新 shell 先导出
+### 1.3 构建与签名
 
-```bash
-export PATH=$HOME/flutter/bin:$HOME/jdk17/bin:$PATH
-export JAVA_HOME=$HOME/jdk17
-export ANDROID_HOME=$HOME/Android/Sdk
-export ANDROID_SDK_ROOT=$HOME/Android/Sdk
-cd /home/fy/projects/fqapp-src
-```
+首次准备（副本已配好，重建副本时需要）：
+  cd /e/fqapp-build2 && rm -f android/local.properties
+  sed -i 's|storeFile=.*|storeFile=C:/Users/zjh30/WorkBuddy/2026-10-19-08-17-51/release-signing/qingqie-release.jks|' android/keystore.properties
+  flutter pub get
 
-> 坑：默认 `PATH` 可能先命中 `/mnt/d/.../flutter` 的包装脚本，报 `$'\r': command not found`。
-> 把 `$HOME/flutter/bin` 放在最前面即可。所有构建都应在 WSL 原生路径执行，`/mnt/*` 走 9p，编译会慢一大截。
+构建 + 装机：
+  flutter build apk --release --target-platform android-arm64
+  ADB=/d/APP/DevTools/Android/Sdk/platform-tools/adb.exe
+  $ADB -s b2f8e975 install -r build/app/outputs/flutter-apk/app-release.apk
+  $ADB -s b2f8e975 shell am start -n com.fqapp.fqapp/.MainActivity
 
----
+- keystore 密码在 E:\项目\青茄阅读\signing\SIGNING-SECRETS.txt；android/keystore.properties 是 git 忽略的本地文件。
+- ~/.gradle/gradle.properties 里的 VPN 代理（127.0.0.1:51981）已被注释——仓库走阿里云镜像可直连。若用户开了 VPN 导致构建失败，按文件内注释改回端口。
+- APK 归档惯例：cp <apk> /d/APP/agent/apk/fqapp-vNN.apk。
 
-## 2. 仓库与 Git 规则
+### 1.4 Git 与推送（重点：Windows 侧没有凭据）
 
-- 远端只有一个：`origin` → `https://github.com/fangyuzhang/qingqie-reader-app.git`，**私有仓库**。
-- 历史仓库 `fangyuzhang/fqapp-qingqie`、`fangyuzhang/qingqie-reader` 已停用，不要往那边推。
-- 本机直连 `github.com:443` 会超时（TLS 被中断），推送走镜像：全局 `gitconfig` 已配 `url."https://ghproxy.net/https://github.com/".insteadOf`，仓库内另配了 `credential."https://ghproxy.net".helper`（运行时用 `gh auth token` 取令牌）。`remote.origin.url` 保持标准写法即可，`git remote -v` 显示展开后的 ghproxy 地址属正常。
-- 推送后务必用 `git ls-remote --heads origin master` 核对远端 SHA 等于本地 `git rev-parse HEAD`。
-- 提交粒度：一个批次一条提交，标题用 `area: 结果`，正文写「为什么 / 怎么验 / 影响面」。
-- 文档与代码同批提交：改了行为就同步 `QINGQIE-CHANGES.md`；改了状态就同步本文。
-- 不要执行 `git reset --hard`、`git checkout .`、`git clean -fdx`：`build/`、`release-archives/`、`rust/target/` 虽被忽略，但删掉要重建很久。
+- Windows 侧 git push 不可用：无 gh CLI、无 token、直连 github.com 被断。
+- 推送必须走 WSL（原机凭据都在里面）：
 
----
+  wsl -d Ubuntu-24.04 -- bash -c "export PATH=/home/fy/.local/bin:\$PATH; cd /mnt/e/项目/青茄阅读/repo/fqapp-src && git push origin master"
 
-## 3. 当前功能状态
+  （WSL 内 gh 已登录 fangyuzhang，ghproxy 镜像规则在 WSL 的 ~/.gitconfig。仓库本地 credential helper 用了裸 gh，必须先 export PATH，否则 Invalid username or token。）
+- 推送后校验：git ls-remote origin master 与 git rev-parse HEAD 一致。
+- git 身份已配：青茄阅读 <dev@qingqie.local>（仓库本地 config）。
+- 提交规范（AGENTS.md）：area: 结果，正文写 为什么/怎么验/影响面。
 
-### 3.1 首页
+### 1.5 真机验证手法（视觉取证链）
 
-- 本地精选书单，按天轮换；推荐 / 7 个阅读分类 / 听书三个区。
-- 固定顶栏含搜索入口。**下滑不再浮出搜索按钮**（已移除，含滚动监听）。
-- 分类卡文案统一「精选书单 · 查看全部」，不再写「精选 N 本」（「全部」页会追加书城结果，数量对不上）。
-- 横向书架 `_CategoryRail`：滑到末端后继续右滑累计约 `72dp` → 轻震动 + 进入该分类「全部」。
+- 截图：$ADB exec-out screencap -p > x.png，用 python PIL 做像素分析（定位按钮/对比前后帧/验证动画消失：两帧卡片区 diff=0.0 即无动画）。
+- 坐标陷阱：内部 Read 工具看截图是缩放的，显示坐标 × 1.187 ≈ 真实坐标；视觉模型报的坐标不可靠，一律用像素扫描定位（按图标颜色聚类找中心）。
+- dumpsys gfxinfo 对 Flutter 自绘 surface 统计恒 0 帧（MIUI Android 11 限制），帧率取证不可行。
+- input motionevent DOWN/MOVE/UP 可注入长按拖拽（DOWN 后静置 ≥0.9s 再 MOVE）；input draganddrop 长按保持不稳定。注入中途截图可能打断手势流。
+- 证据截图归档：E:\项目\青茄阅读\releases\glass-theme-shots\。
 
-### 3.2 搜索 / 详情
+### 1.6 脚本/工具坑（改代码时）
 
-- 综合 / 小说 / 听书三类；支持关键词与作品 ID；结果只保留 `book`、`audio`。
-- 详情页首屏拆成「detail 先到先上屏 + 快照同帧渲染」，并预热续读章节正文与插图。
-- 按钮位置：左下「加入书架」（略放大），右上「下载」；正文工具栏右上角同样是「加入书架」。
-
-### 3.3 阅读器
-
-- 分页 / 上下滚动两种模式；5 套背景（米白、青绿、纸张、夜间、墨水屏）；字号、行距、亮度可调。
-- 上下滚动跨章无缝：章首继续下拖接上一章末尾，窗口只增不减。
-- 工具栏与系统状态栏**覆盖**正文，不挤压正文；仅第一页留顶部安全区。
-- 沉浸态联动：工具栏收起 → `immersiveSticky`（状态栏 + 手势条隐藏）；展开 → `edgeToEdge`；退出恢复。
-- 全应用锁竖屏（`main.dart` + `MainActivity` 双保险）。
-- 长按按句选择，弹出「从本段开始听书 + 4 个操作」；预选项未点击就点别处时，按当前线型直接落笔。
-- 批注插入在**批注行的下一行**；行内批注块支持疑问 / 反驳 / 感悟 / 待查证 + 自定义类型。
-- 状态行：左下 `当前页/总页数` + 百分比，右下电量；两者间留约两个数字宽的空档。
-
-### 3.4 笔记
-
-- 三个视图：时间线 / 按书查看（与首页同款封面网格）/ 划线。
-- 按书、时间、类型、标签可单独或组合筛选；类型筛选行命中区 48dp。
-- 时间轴日期强制单行，不再折行把条目顶歪。
-
-### 3.5 书架
-
-- 在读 / 想读 / 读完分组 + 浏览历史；封面立体与列表双模式；批量整理；离线缓存。
-- 分组 chip、tab、版式分段命中区均 48dp，视觉尺寸刻意不变。
-- 进度角标 11sp，深珊瑚渐变；列表模式用字重与颜色拉开书名 / 作者 / 进度层次。
-
-### 3.6 听书
-
-- 真人讲书与系统朗读共用同一套听书详情页：小封面 + 当前章节、整章逐句可滚正文、当前句高亮、「从本句听」、页码与全书进度。
-- 系统朗读逐句送引擎，正文只亮当前句，不再整段一起亮。
-- 悬浮胶囊：工具栏展开时是 232×48 可拖动胶囊（暂停 / 关闭 / 听书设置），收起时收为底部 128×38 小按钮（继续听书 / 停止听书）。
-- 定时关闭、语速、音色在胶囊的「听书设置」里。
-- 护眼提醒（连续 45 分钟）层级最高，弹窗期间胶囊不渲染。
-- 切章无音源时自动转系统朗读；退出听书不再出现黑屏「已关闭」页，直接回详情。
-
-### 3.7 我的 / 统计
-
-- 入口只剩：AppBar 右上角「日夜切换 + 设置」；body 是 `StatsPage(header: ...)`。
-- 「阅读热力图」与「每日记录」已合并为一套：点击热力图进详情，详情内含每日阅读时长，不再两套并行实现。
-- 日期旁有「📅 选择日期 ⌄」胶囊，整块可点，大字号下 `Wrap` 换行不挤压。
-- 设置页：主题当前值用 `muted` token，服务状态用 `ColorScheme` 语义色。
+- python heredoc 陷阱：python - <<'PYEOF' 里的中文长段/反引号会被 bash 吞导致锚点失配或命令替换。改文件一律用 Write 写 .py 临时文件再 python file.py，跑完删除。
+- Edit 工具锚点必须字节级精确（注意 en-dash、中文标点）；大范围删除区间前先用括号配平扫描（剥离字符串/注释后数括号）确认边界，删完必须立即 analyze——本会话两次事故（reader_page 误删 build/_showCache/_menuEdge 共 5 个方法；多余闭括号）都是删区间过宽，靠 analyze/format 定位修复。
+- git checkout -- <file> 恢复单文件时注意：基线之前的 HEAD 是旧代码，会连带丢掉该文件上的近期批次改动（本会话曾因此重做 v49 修复）。恢复前先 git diff <file> | grep "^-" 确认要丢什么。
 
 ---
 
-## 4. 代码地图
+## 2. 当前代码形态（v41–v55 + 瘦身重构后的最终状态）
 
-| 文件 | 职责 |
-| --- | --- |
-| `lib/main.dart` | 入口、底部导航、竖屏锁定、全局主题注入 |
-| `lib/services/app_theme.dart` | `ThemeData` / `ColorScheme` / 文本色 token（浅色 muted `#5E6B64`） |
-| `lib/widgets/app_dialog.dart` | 全应用统一弹窗：180ms 淡入 + 轻微上滑；墨水屏/减少动画瞬时 |
-| `lib/widgets/home/home_design.dart` | 首页配色 `HomePalette`（muted、accentText、soft） |
-| `lib/pages/home_page.dart` | 首页、分类区、`_CategoryRail`（滑到底进全部） |
-| `lib/pages/library_page.dart` | 书架、分组 chip / tab / 版式分段 |
-| `lib/pages/reader_page.dart` | 阅读器主体、分页与滚动、结算阅读时长与字数 |
-| `lib/widgets/reader/reader_theme.dart` | 5 套阅读背景与正文 / 辅助文字 / 强调色 |
-| `lib/widgets/reader/reader_status_bar.dart` | 阅读器状态行（页码、百分比、电量） |
-| `lib/widgets/reader/reader_note_block.dart` | 行内批注块 |
-| `lib/pages/notes_page.dart` | 笔记三视图与筛选 |
-| `lib/pages/stats_page.dart` | 热力图、每日阅读、日期入口 |
-| `lib/pages/mine_page.dart` | 我的页骨架（AppBar + StatsPage header） |
-| `lib/services/reading_stats_store.dart` | 字数与时长口径、旧数据迁移 |
-| `lib/widgets/book_thumb.dart` | 统一小封面 |
-| `rust/` | `fqapi_core`：签名、解密、loopback 适配 |
-| `native/` | CENC 解密库（CMake） |
+### 2.1 主题系统
 
----
+- AppTheme.createTheme(brightness, {einkMode})（lib/services/app_theme.dart）+ 顶层 themeModeNotifier / einkModeNotifier + main.dart 双层 ValueListenableBuilder；220ms 日夜插值（eink 瞬时）。
+- 玻璃主题已整体删除（v54，用户反馈「太丑」）：lib/feature/ 已删、全部使用点还原实色。用户偏好 key glass_mode/glass_strength 可能还留在设备 SharedPreferences 里，无人读取，无害。
+- HomePalette（widgets/home/home_design.dart）仍是取色中枢：accent=0xFF2FA98C，muted=#5E6B64，accentText 浅色 #176B58。
 
-## 5. 构建与验证
+### 2.2 首页（lib/pages/home_page.dart，~945 行）
 
-### 5.1 校验
+- PageView 融合导航（v51）：第 0 页推荐视图，第 1–7 页各分类全部书城（CategoryBrowseView 内嵌于 lib/pages/category_browse_page.dart，KeepAlive 保活）。顶部分类条常驻，_revealChip（GlobalKey + Scrollable.ensureVisible）随翻页同步高亮/滚动。
+- 磁贴（CuratedBookTile）套书架式白卡（v47）；分类兜底渐变已收敛为 CuratedCategory.defaultGradient（瘦身 2B）。
+- 板块横滑 _MagneticSnapPhysics（磁力吸附，整本对齐，甩动惯性投影 0.22s）；滑到末尾过冲 36dp 进分类全部页（v48，从 72 下调）。
+- 每板块 10 本（v48）：_recommendedBooksOf limit:10；书单 assets/config/curated_books.json 每分类 10 本（补过 28 本）；recommendationBatchOf 在 limit≥总数时按批次轮转日序（换一批仍有效）。
+- 精选卡（v46 最终版）：原尺寸布局（封面 88px 左、文字右），白底 palette.surface + 0.6 描边；无「今日荐读/年龄」标签，无轮换副文案。用户明确否决过整幅大封面版本。
+- 听书页/听书 chip 已删（v50）；书单 audio 书走磁贴直达音频详情。
+- 下拉刷新（CategoryBrowseView._loadBatch）：advance 时不读缓存不清屏，网络批次一次性替换（v52 修复「刷两次」）。
 
-```bash
-flutter analyze
-flutter test
-```
+### 2.3 笔记（lib/pages/notes_page.dart，~2100 行）
 
-当前期望：`analyze` 0 问题；`test` 1510 通过 / 10 跳过 / 0 失败。
+- 视图只有 时间线/按书查看（划线不再是独立视图，v52）；类型行 = 全部/批注/书摘/划线（NoteTypeFilter.marks）。
+- 选「划线」后「全部类型」行切换为线型 chips（实线/波浪线/虚线/荧光笔，key notes-mark-style-*）；时间线渲染 _buildMarkTimeline（日期轴+线型色点+_MarkRow）。
+- 卡片（v44）：无时间戳（保留章节名）、无分类 chip（_MetaChip 已删）、想法（thought）有与原文同款 8% 色底。
+- 拖拽（v41 系列）：磁力虚影插进角标排序落位（ghostId 机制）；_leavingBadges 松手瞬间隐藏源角标防残影（写库失败回滚+SnackBar）；拖回自己 = 半透明角标无绿环（v41.4，用户明确要求只删绿环保留半透明）。
 
-### 5.2 构建 release
+### 2.4 阅读器（lib/pages/reader_page.dart，4598 行——瘦身后）
 
-```bash
-flutter build apk --release --target-platform android-arm64
-```
+- ChapterDirectorySheet 已拆到 lib/widgets/reader/chapter_directory_sheet.dart（public，瘦身 2C）。
+- 底部工具栏平底（无顶圆角，v47）；正文区域永不加任何视觉特效。
+- 返回详情页抖动已修（v49）：PopScope.onPopInvokedWithResult didPop 分支立即恢复 edgeToEdge（_appliedSystemUiMode 幂等）；dispose 兜底保留。
+- _stableInsets 冻结安全区机制（工具栏显隐正文不跳）；墨水屏 eink 主题在 _createEinkTheme。
 
-产物 `build/app/outputs/flutter-apk/app-release.apk`。签名读 `android/keystore.properties`（已被 Git 忽略），缺失会直接失败，不会退回 debug 证书。
+### 2.5 书架（lib/pages/library_page.dart）
 
-### 5.3 APK 静态校验
+- 卡片无入场动画（v53 移除 HomeEntrance，_entered 已删；首页的错峰动画保留）。
+- 封面 Hero 飞行动画已删（v45，bookshelf_card + detail_hero 两侧）。
+- 长按=进编辑模式（多选），编辑态内拖拽排序。
 
-```bash
-python3 scripts/verify_android_apk.py \
-  --apk build/app/outputs/flutter-apk/app-release.apk \
-  --build-tools $HOME/Android/Sdk/build-tools/36.0.0 \
-  --report-dir build/apk-verification/wsl-native
-```
+### 2.6 禁改区（AGENTS.md / 护栏文件为准）
 
-覆盖：zip 条目数、Native 库清单、ELF 16 KiB 对齐、zip 16 KiB 对齐、签名、清单元数据、APK 未被改动。
+rust/、native/、android 构建协议代码、lib/widgets/reader/reader_theme.dart（正文背景）、正文绘制/分页/滚动/书签/进度路径、lib/widgets/shelf/ 卡片本体。技术锁：FRB 2.13.0、仅 arm64-v8a、16KiB 对齐。完整清单见 OPTIMIZATION-GUARDRAILS.md（硬边界部分长期有效）。README.md 的九条界面交互约定改 UI 前必读。
 
-### 5.4 装机与取证
+### 2.7 瘦身重构结果（已合并）
 
-```bash
-ADB=/mnt/d/APP/DevTools/Android/Sdk/platform-tools/adb.exe
-cp build/app/outputs/flutter-apk/app-release.apk /mnt/d/APP/agent/apk/fqapp-v37.apk
-$ADB -s b2f8e975 install -r /mnt/d/APP/agent/apk/fqapp-v37.apk
-$ADB -s b2f8e975 shell am start -n com.fqapp.fqapp/.MainActivity
-$ADB -s b2f8e975 exec-out screencap -p > /tmp/shot.png
-```
+三波（2A/2B/2C）：空 catch 8 处补 AppLog.w（app_log.dart 自身 1 处保留防递归）；flutter_riverpod 移除；渐变常量收敛；ChapterDirectorySheet 拆分。评估后主动跳过的：24 处 showModalBottomSheet 不收敛（异构）、30 处异步骨架不统一、4 个大文件不拆（理由在 OPTIMIZATION-REPORT.md §3–4）。提交 b1e51c4 / 08f8bc1 / da62b2a，merge e7ee4e0。
 
 ---
 
-## 6. 真机复核清单
+## 3. 开发调试设施
 
-每批 UI 改动至少覆盖这些点（本轮已全部通过，回归时照单重跑）：
-
-- [ ] 首页下滑不出现浮动搜索按钮；顶栏搜索仍可进搜索页。
-- [ ] 首页横向书架滑到末端继续右滑 → 进入对应分类「全部」，且有轻震动。
-- [ ] 「全部」页显示真实数量（如「古典名著」已载入 40 本），文案不再是固定 6 本。
-- [ ] 我的页日期胶囊可点，选择日期后统计范围刷新。
-- [ ] 笔记时间轴日期单行，条目不错位。
-- [ ] 笔记「全部类型」行同时列出批注类型与自由标签；点类型/标签只做切换，再点取消，没有「类型 X / 清除」二级按钮。
-- [ ] 长按类型或标签拖到笔记上可打标；把笔记上的角标拖到空白处即取消；拖到另一条笔记即移动。
-- [ ] 长按标签拖到另一个标签后面可换序，重启应用后顺序保留。
-- [ ] 「按书查看」选中一本书后停留在本视图，顶部有返回条，不自动跳回时间线。
-- [ ] 5 套阅读背景下正文与辅助文字都清晰（尤其夜间、墨水屏）。
-- [ ] 系统字号放大后，书架 chip、笔记筛选、我的页日期不溢出。
-- [ ] 正文工具栏显隐时正文不上下移动。
-- [ ] 沉浸态状态栏与手势条隐藏，展开后恢复，退出阅读页恢复。
-- [ ] 听书胶囊双形态、护眼弹窗置顶、切章可继续播放。
-
----
-
-## 7. 已知问题与下一步
-
-| 优先级 | 问题 | 说明 |
-| --- | --- | --- |
-| 中 | 日期选择器文案是英文 | 需引入 `flutter_localizations` 并在 `MaterialApp` 配 `zh_CN`，属新增依赖 |
-| 中 | 墨水屏仍有 93 处直接引用 `HomePalette.accent / highlight` | 逐处替换为语义色，涉及分页折算时需回归阅读器 |
-| 低 | 批注块内 3 个 16dp 图标热区不足 48dp | 宽度参与分页折算，改动会移动分页点 |
-| 低 | 听书详情页长文本滚动性能 | 超大章节建议做窗口化，目前整章渲染 |
-
----
-
-## 8. 禁忌清单
-
-1. 不要恢复短剧 / 漫剧 / 漫画的任何入口；`shortplay` 命名只用于兼容既有数据与解密库。
-2. 不要把工具栏改成挤压正文的布局。
-3. 不要给分类卡写回「精选 N 本」这类固定数量。
-4. 不要重新加回首页滚动悬浮搜索按钮。
-5. 不要用 `git reset` / `checkout .` 清理工作区。
-6. 不要在 `/mnt/*` 上跑构建。
-7. 不要提交 keystore、密码、真实用户数据或抓包内容。
-8. 不要把「全部」页的追加逻辑改成一次性替换，否则首屏会闪空。
-
----
-
-## 9. 文档索引
-
-| 文档 | 内容 |
-| --- | --- |
-| `README.md` | 产品范围、功能、交互约定、构建与验证 |
-| `QINGQIE-CHANGES.md` | 从 v1 到 v35 的逐批改造记录（含对比度数值与验证证据） |
-| `AGENT-HANDOVER-NEXT.md` | 本文，当前状态 |
-| `AGENT-HANDOVER.md` | 早期总交接归档，仅作历史背景 |
-| `DEVELOPMENT.md` | 开发约定 |
+- flutter_skill（调试绑定）：main.dart 里 if (!kReleaseMode) FlutterSkillBinding.ensureInitialized(autoEnableIndicators: false)——autoEnableIndicators 必须 false（500ms 定时器会让 widget 测试报 Pending timers）。依赖 flutter_skill: ^0.9.37（pub 上没有 0.2.26 这种版本，外部文档若写 0.2.x 是错的）。
+- flutter-skill MCP：注册在 C:\Users\zjh30\.zcode\cli\config.json（stdio，cmd /c C:\Users\zjh30\.flutter-skill\start-mcp.cmd）。wrapper 先删单实例锁 ~/.flutter_skill.lock 再启动（该 server 单实例锁与 ZCode 会话隔离冲突，stale 锁会 Connection closed）。npm 全局包 flutter-skill 0.9.36 驱动 0.9.37 原生二进制（二进制是手动从 v0.9.37 release 下载放到 ~/.flutter-skill/bin/ 的，v0.9.36 release 不存在）。
+- agent skills：25 个 Flutter/Dart 官方 
