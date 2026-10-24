@@ -74,6 +74,11 @@ b1e51c4 refactor(2A): 空catch补日志 + 移除未使用的 flutter_riverpod
 
 ---
 
+## 7. 推送状态（如实记录）
+
+- 本地合并已完成（master HEAD = e7ee4e0，含 merge commit）。
+- **push 未完成**：本机无 gh CLI、无 GH_TOKEN、~/.gitconfig 的 ghproxy 镜像规则属原迁移机未随包携带；直连 github.com 被 TLS 中断。需在新机配置  + insteadOf 规则后执行 （远端当前落后本地多个提交，含 v41–v55 全部成果）。
+
 ## 附：验证环境说明
 
 - 静态分析与测试在 ASCII 路径构建副本（`E:\fqapp-build2`，与仓库 `//MIR` 同步）执行：仓库所在中文路径会使 Dart analysis server 崩溃（`FormatException`，交接文档已记录）。
