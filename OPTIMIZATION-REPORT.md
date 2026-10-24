@@ -74,10 +74,11 @@ b1e51c4 refactor(2A): 空catch补日志 + 移除未使用的 flutter_riverpod
 
 ---
 
-## 7. 推送状态（如实记录）
+## 7. 推送状态
 
-- 本地合并已完成（master HEAD = e7ee4e0，含 merge commit）。
-- **push 未完成**：本机无 gh CLI、无 GH_TOKEN、~/.gitconfig 的 ghproxy 镜像规则属原迁移机未随包携带；直连 github.com 被 TLS 中断。需在新机配置  + insteadOf 规则后执行 （远端当前落后本地多个提交，含 v41–v55 全部成果）。
+- **已完成**：master 已推送至远端（2701d7e..57ff047），ls-remote 校验远端 SHA 与本地 HEAD 一致。
+- 实际链路：Windows 侧无 gh CLI / token，改用 WSL(Ubuntu-24.04) 内原机 gh 登录态（账号 fangyuzhang）+ ghproxy 镜像完成推送；GitHub 提示仓库已更名为 fangyuzhang/qingdu-reader-app（旧地址自动重定向），remote URL 已同步更新。
+- 后续推送方式：在 WSL 内 `export PATH=$HOME/.local/bin:$PATH` 后于仓库目录执行 `git push origin master`；或把仓库本地 credential helper 中的裸 gh 换成全路径 /home/fy/.local/bin/gh。
 
 ## 附：验证环境说明
 
