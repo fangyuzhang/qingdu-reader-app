@@ -576,10 +576,10 @@ class _HomePageState extends State<HomePage> {
     final books = _recommendedBooksOf(category);
     final width = MediaQuery.sizeOf(context).width;
     final tileWidth = ((width - 20 * 2 - 12 * 2) / 2.6).clamp(96.0, 132.0);
-    // 横滑列表高度必须跟随字号：固定 44px 的文字块在 1.8x 字号下会溢出。
+    // 横滑列表高度必须跟随字号（1.8x 字号下固定 44px 会溢出）；定高与磁贴
+    // 解剖的换算收口在 CuratedBookTile.heightFor，两处各写一份会少算白卡
+    // 内边距，把书名/作者压到重叠。
     final scaler = MediaQuery.textScalerOf(context);
-    final captionHeight =
-        8 + scaler.scale(13.5) * 1.3 + 2 + scaler.scale(11) * 1.3 + 6;
     return Padding(
       padding: const EdgeInsets.only(top: 14),
       child: Column(
@@ -641,8 +641,10 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            // 磁贴外套书架式白卡（12 内边距），高度相应加上下卡内边距。
-            height: (tileWidth - 24) * 4 / 3 + captionHeight + 10,
+            height: CuratedBookTile.heightFor(
+              tileWidth: tileWidth,
+              textScaler: scaler,
+            ),
             child: _CategoryRail(
               key: Key('home-rail-${category.key}'),
               // 滑到末尾后继续右滑，直接进「全部」。阈值按拖动距离累计，

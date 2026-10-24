@@ -345,6 +345,29 @@ class CuratedBookTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final String? coverUrl;
 
+  static const _titleFontSize = 13.5;
+  static const _authorFontSize = 11.0;
+  static const _captionLineHeight = 1.3;
+
+  /// 外层横滑列表的定高。必须与 build 里的卡片解剖一一对应：白卡上下内边距
+  /// 12×2 + 间距 8/2 + 书名/作者各一行（行高 _captionLineHeight）。高度只
+  /// 在这里算一份——首页少算时两个 Flexible 文本会被压到字形重叠
+  /// （作者名盖到书名上）；末尾 2px 是舍入余量，宁留白不挤压。
+  static double heightFor({
+    required double tileWidth,
+    required TextScaler textScaler,
+  }) {
+    const cardPadding = 12.0;
+    final coverSide = tileWidth - cardPadding * 2;
+    return coverSide * 4 / 3 +
+        cardPadding * 2 +
+        8 +
+        textScaler.scale(_titleFontSize) * _captionLineHeight +
+        2 +
+        textScaler.scale(_authorFontSize) * _captionLineHeight +
+        2;
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
@@ -384,11 +407,12 @@ class CuratedBookTile extends StatelessWidget {
                   Flexible(
                     child: Text(
                       book.title,
+                      key: const Key('curated-tile-title'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13.5,
-                        height: 1.3,
+                        fontSize: _titleFontSize,
+                        height: _captionLineHeight,
                         fontWeight: FontWeight.w600,
                         color: palette.ink,
                       ),
@@ -398,9 +422,16 @@ class CuratedBookTile extends StatelessWidget {
                   Flexible(
                     child: Text(
                       book.author,
+                      key: const Key('curated-tile-author'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: palette.muted),
+                      // 行高显式与 heightFor 对账：缺省行高随字体浮动
+                      // （中文常 >1.3），公式对不上时两行重新压回重叠。
+                      style: TextStyle(
+                        fontSize: _authorFontSize,
+                        height: _captionLineHeight,
+                        color: palette.muted,
+                      ),
                     ),
                   ),
                 ],

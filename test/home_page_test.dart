@@ -665,4 +665,31 @@ void main() {
     expect(find.byKey(const Key('category-loaded-count')), findsOneWidget);
     expect(find.textContaining('古典名著 的说明'), findsOneWidget);
   });
+
+  testWidgets('推荐磁贴的书名与作者行不重叠', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(app(HomePage(catalog: catalog)));
+    await tester.pumpAndSettle();
+
+    // 列表定高若少算白卡内边距，两个 Flexible 文本会被压缩、字形互相
+    // 盖住（作者名叠在书名上）。用文字盒矩形断言作者行不高于书名行底。
+    final tile = find.byKey(const Key('home-recommend-classic-a'));
+    final title = tester.getRect(
+      find.descendant(
+        of: tile,
+        matching: find.byKey(const Key('curated-tile-title')),
+      ),
+    );
+    final author = tester.getRect(
+      find.descendant(
+        of: tile,
+        matching: find.byKey(const Key('curated-tile-author')),
+      ),
+    );
+    expect(author.top, greaterThanOrEqualTo(title.bottom - 0.5));
+  });
 }
