@@ -14,6 +14,13 @@ class CuratedCategory {
     required this.gradient,
   });
 
+  /// 分类缺失/数据不完整时的兜底渐变:品牌绿 -> 深青。
+  /// 书单模型、荐读页与文字封面共用一份,避免三处字面量漂移。
+  static const List<Color> defaultGradient = [
+    Color(0xFF2FA98C),
+    Color(0xFF1F7F69),
+  ];
+
   final String key;
   final String label;
 
@@ -31,9 +38,7 @@ class CuratedCategory {
       key: json['key']?.toString() ?? '',
       label: json['label']?.toString() ?? '',
       desc: json['desc']?.toString() ?? '',
-      gradient: raw.length >= 2
-          ? raw
-          : const [Color(0xFF2FA98C), Color(0xFF1F7F69)],
+      gradient: raw.length >= 2 ? raw : defaultGradient,
     );
   }
 }
