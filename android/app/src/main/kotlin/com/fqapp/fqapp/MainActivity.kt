@@ -1,5 +1,6 @@
 package com.fqapp.fqapp
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -27,7 +28,16 @@ class MainActivity : FlutterActivity() {
         // 「App 自己保存的主题」把窗口底色与状态栏图标亮度摆正，之后由页面
         // 内的 SystemUiOverlayStyle 接管。
         applyStartupThemeColors()
+        // 文件管理器/浏览器「打开方式」交给本应用的 PDF：冷启动路径，
+        // 引擎就绪前先记在插件静态字段里，Dart 启动后 consume。
+        PdfViewIntentPlugin.capture(intent)
         super.onCreate(savedInstanceState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // 应用已在运行时再收到 ACTION_VIEW PDF 的热启动路径。
+        PdfViewIntentPlugin.capture(intent)
     }
 
     private fun applyStartupThemeColors() {
@@ -72,6 +82,9 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(ReaderDevicePlugin())
         flutterEngine.plugins.add(SystemTtsPlugin())
         flutterEngine.plugins.add(LocalBookPickerPlugin())
+        // 文件管理器/浏览器 ACTION_VIEW PDF 的导入通道（配合 manifest 的
+        // application/pdf intent-filter）。
+        flutterEngine.plugins.add(PdfViewIntentPlugin())
         flutterEngine.plugins.add(LibraryBackupPlugin())
         flutterEngine.plugins.add(FanqieAccountPlugin())
         // 官方系统分享是 Intent.ACTION_SEND；没有可分享的应用时回 false。

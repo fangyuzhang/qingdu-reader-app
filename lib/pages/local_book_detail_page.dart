@@ -8,11 +8,13 @@ import '../services/chapter_cache_store.dart';
 import '../services/library_store.dart';
 import '../services/reader_history.dart';
 import '../widgets/home/home_design.dart';
+import 'pdf_reader_page.dart';
 import 'reader_page.dart';
 
 /// 本地导入书/离线缓存书的详情与目录页。
 ///
 /// 点书永远先落在这里；用户点章节或底部按钮后才进入正文。
+/// PDF 固定版式书（[pdfPath] 非空）没有章节目录，直接进 PdfReaderPage。
 class LocalBookDetailPage extends StatefulWidget {
   const LocalBookDetailPage({
     super.key,
@@ -25,6 +27,7 @@ class LocalBookDetailPage extends StatefulWidget {
     this.readerStore,
     this.chapterCache,
     this.chapterLoader,
+    this.pdfPath,
   });
 
   final String bookId;
@@ -37,15 +40,21 @@ class LocalBookDetailPage extends StatefulWidget {
   final ChapterCache? chapterCache;
   final Future<String> Function(Chapter chapter)? chapterLoader;
 
+  /// PDF 源文件绝对路径；非空表示固定版式书，进入 PdfReaderPage。
+  final String? pdfPath;
+
   @override
   State<LocalBookDetailPage> createState() => _LocalBookDetailPageState();
 }
 
 class _LocalBookDetailPageState extends State<LocalBookDetailPage> {
   int? _resumeIndex;
+  int? _resumePdfPage;
   bool _loadingHistory = true;
 
   ReaderStore get _readerStore => widget.readerStore ?? LibraryStore.instance;
+
+  bool get _isPdf => widget.pdfPath != null;
 
   @override
   void initState() {
@@ -70,13 +79,35 @@ class _LocalBookDetailPageState extends State<LocalBookDetailPage> {
         index = episode.toInt().clamp(0, widget.chapters.length - 1);
       }
     }
+    int? pdfPage;
+    if (_isPdf && saved?['positionVersion'] == 3) {
+      final page = num.tryParse(saved?['page']?.toString() ?? '');
+      if (page != null && page >= 1) pdfPage = page.toInt();
+    }
     setState(() {
       _resumeIndex = index < 0 ? null : index;
+      _resumePdfPage = pdfPage;
       _loadingHistory = false;
     });
   }
 
   Future<void> _open(int index) async {
+    if (_isPdf) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => PdfReaderPage(
+            bookId: widget.bookId,
+            title: widget.title,
+            cover: widget.cover,
+            pdfPath: widget.pdfPath!,
+            initialPage: _resumePdfPage ?? 1,
+          ),
+        ),
+      );
+      if (mounted) await _loadHistory();
+      return;
+    }
     if (widget.chapters.isEmpty) return;
     final safeIndex = index.clamp(0, widget.chapters.length - 1);
     await Navigator.push<void>(
@@ -113,73 +144,109 @@ class _LocalBookDetailPageState extends State<LocalBookDetailPage> {
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(child: _header(palette)),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
-              child: Row(
-                children: [
-                  Text(
-                    '目录',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: palette.ink,
-                    ),
+          if (_isPdf)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: palette.soft,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const Spacer(),
-                  Text(
-                    '共 ${widget.chapters.length} 章',
-                    style: TextStyle(fontSize: 12, color: palette.muted),
+                  child: Row(
+                    children: [
+                      Icon(
+                        LucideIcons.file_text,
+                        size: 16,
+                        color: palette.accentText,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'PDF 固定版式 · 按页阅读，进度自动保存。',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: palette.muted,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ),
-          if (!hasChapters)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: Text(
-                  '这本书没有可用章节',
-                  style: TextStyle(color: palette.muted),
                 ),
               ),
             )
-          else
-            SliverList.builder(
-              itemCount: widget.chapters.length,
-              itemBuilder: (context, index) {
-                final chapter = widget.chapters[index];
-                return ListTile(
-                  key: ValueKey('local-book-chapter-${chapter.itemId}'),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 22),
-                  leading: SizedBox(
-                    width: 34,
-                    child: Text(
-                      '${index + 1}',
+          else ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+                child: Row(
+                  children: [
+                    Text(
+                      '目录',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: palette.ink,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '共 ${widget.chapters.length} 章',
                       style: TextStyle(fontSize: 12, color: palette.muted),
                     ),
-                  ),
-                  title: Text(
-                    chapter.title.isEmpty ? '第 ${index + 1} 章' : chapter.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Icon(
-                    LucideIcons.chevron_right,
-                    size: 17,
-                    color: palette.muted,
-                  ),
-                  onTap: () => _open(index),
-                );
-              },
+                  ],
+                ),
+              ),
             ),
+            if (!hasChapters)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    '这本书没有可用章节',
+                    style: TextStyle(color: palette.muted),
+                  ),
+                ),
+              )
+            else
+              SliverList.builder(
+                itemCount: widget.chapters.length,
+                itemBuilder: (context, index) {
+                  final chapter = widget.chapters[index];
+                  return ListTile(
+                    key: ValueKey('local-book-chapter-${chapter.itemId}'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 22),
+                    leading: SizedBox(
+                      width: 34,
+                      child: Text(
+                        '${index + 1}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: palette.muted,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      chapter.title.isEmpty ? '第 ${index + 1} 章' : chapter.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Icon(
+                      LucideIcons.chevron_right,
+                      size: 17,
+                      color: palette.muted,
+                    ),
+                    onTap: () => _open(index),
+                  );
+                },
+              ),
+          ],
           const SliverToBoxAdapter(child: SizedBox(height: 90)),
         ],
       ),
-      bottomNavigationBar: !hasChapters
-          ? null
-          : SafeArea(
+      bottomNavigationBar: (_isPdf || hasChapters)
+          ? SafeArea(
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
@@ -191,20 +258,27 @@ class _LocalBookDetailPageState extends State<LocalBookDetailPage> {
                   ),
                   onPressed: _loadingHistory
                       ? null
-                      : () => _open(_resumeIndex ?? 0),
+                      : () => _open(_isPdf ? 0 : (_resumeIndex ?? 0)),
                   icon: Icon(
-                    _resumeIndex == null
-                        ? LucideIcons.book_open
-                        : LucideIcons.play,
+                    _isPdf
+                        ? (_resumePdfPage == null
+                              ? LucideIcons.book_open
+                              : LucideIcons.play)
+                        : (_resumeIndex == null
+                              ? LucideIcons.book_open
+                              : LucideIcons.play),
                     size: 18,
                   ),
                   label: Text(
-                    _resumeIndex == null ? '开始阅读' : '继续阅读',
+                    (_isPdf ? _resumePdfPage == null : _resumeIndex == null)
+                        ? '开始阅读'
+                        : '继续阅读',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
-            ),
+            )
+          : null,
     );
   }
 
@@ -272,7 +346,9 @@ class _LocalBookDetailPageState extends State<LocalBookDetailPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '本地保存，无需联网。点选目录章节后再进入正文。',
+                    _isPdf
+                        ? '本地保存，无需联网。PDF 按原版式整页阅读。'
+                        : '本地保存，无需联网。点选目录章节后再进入正文。',
                     style: TextStyle(
                       color: palette.muted,
                       fontSize: 12,

@@ -18,6 +18,10 @@ import 'book_title_cleaner.dart';
 export 'book_title_cleaner.dart' show splitTitleAndAuthor;
 
 const _maxBookFileBytes = 32 * 1024 * 1024;
+
+/// PDF 走固定版式阅读（pdfrx/PDFium），源文件整体留存而非抽成章节文本；
+/// 图文书常见体积更大，上限放宽到 64 MB（Kotlin 选择器同步放行）。
+const _maxPdfFileBytes = 64 * 1024 * 1024;
 const _maxExpandedEpubBytes = 64 * 1024 * 1024;
 const _maxEpubEntries = 4000;
 const _maxImportedChapters = 20000;
@@ -53,6 +57,9 @@ class ImportedBook {
   final List<Chapter> chapters;
   final String directory;
   final String? coverFile;
+
+  /// 固定版式源文件（PDF）在书目录内的文件名；TXT/EPUB 为 null。
+  final String? sourceFile;
   final List<String> _chapterFiles;
 
   ImportedBook._({
@@ -65,8 +72,11 @@ class ImportedBook {
     required this.coverFile,
     required List<Chapter> chapters,
     required List<String> chapterFiles,
+    this.sourceFile,
   }) : chapters = List.unmodifiable(chapters),
        _chapterFiles = List.unmodifiable(chapterFiles);
+
+  bool get isPdf => format == 'pdf';
 
   /// Absolute path of the stored cover, or null when the book has none.
   ///
@@ -74,6 +84,13 @@ class ImportedBook {
   /// cleared, app reinstalled) falls back to the default cover at draw time.
   String? get coverPath {
     final file = coverFile;
+    if (file == null) return null;
+    return '$directory${Platform.pathSeparator}$file';
+  }
+
+  /// PDF 源文件的绝对路径（书目录内），TXT/EPUB 为 null。
+  String? get sourcePath {
+    final file = sourceFile;
     if (file == null) return null;
     return '$directory${Platform.pathSeparator}$file';
   }
@@ -86,7 +103,7 @@ class ImportedBook {
     cover: coverPath ?? '',
     author: author,
     badge: '本地',
-    ep: chapters.length.toString(),
+    ep: chapters.isEmpty ? '' : chapters.length.toString(),
     kind: 'book',
   );
 
@@ -97,6 +114,7 @@ class ImportedBook {
     'format': format,
     'addedAt': addedAt.millisecondsSinceEpoch,
     'cover': coverFile,
+    if (sourceFile != null) 'source': sourceFile,
     'chapters': [
       for (var index = 0; index < chapters.length; index++)
         {
@@ -135,12 +153,17 @@ class ParsedImportedBook {
   final ParsedBookCover? cover;
   final List<ParsedBookChapter> chapters;
 
+  /// PDF 原始字节（固定版式：不抽文本，阅读时由 pdfrx 解析）；
+  /// TXT/EPUB 为 null。
+  final Uint8List? sourceBytes;
+
   ParsedImportedBook({
     required this.title,
     required this.author,
     required this.format,
     required List<ParsedBookChapter> chapters,
     this.cover,
+    this.sourceBytes,
   }) : chapters = List.unmodifiable(chapters);
 }
 
@@ -214,8 +237,9 @@ class ImportedBookStore {
     }
     final byteLength = sourceByteLength ?? bytes.lengthInBytes;
     if (byteLength < 0) throw const FormatException('文件长度无效');
-    if (byteLength > _maxBookFileBytes) {
-      throw const FormatException('请选择小于 32 MB 的 TXT 或 EPUB 文件');
+    final isPdf = fileName.toLowerCase().endsWith('.pdf');
+    if (byteLength > (isPdf ? _maxPdfFileBytes : _maxBookFileBytes)) {
+      throw const FormatException('请选择小于 32 MB 的 TXT/EPUB 或 64 MB 的 PDF 文件');
     }
     final parsedData = await Isolate.run<Map<String, Object?>>(() {
       final parsed = parseImportedBookBytes(
@@ -229,6 +253,7 @@ class ImportedBookStore {
         'format': parsed.format,
         'coverBytes': parsed.cover?.bytes,
         'coverExtension': parsed.cover?.extension,
+        'sourceBytes': parsed.sourceBytes,
         'chapters': [
           for (final chapter in parsed.chapters)
             {'title': chapter.title, 'text': chapter.text},
@@ -236,6 +261,7 @@ class ImportedBookStore {
       };
     });
     final coverBytes = parsedData['coverBytes'];
+    final sourceBytes = parsedData['sourceBytes'];
     final parsed = ParsedImportedBook(
       title: parsedData['title']! as String,
       author: parsedData['author']! as String,
@@ -246,6 +272,7 @@ class ImportedBookStore {
               extension: parsedData['coverExtension']! as String,
             )
           : null,
+      sourceBytes: sourceBytes is Uint8List ? sourceBytes : null,
       chapters: [
         for (final chapter in parsedData['chapters']! as List)
           ParsedBookChapter(
@@ -260,6 +287,16 @@ class ImportedBookStore {
     final target = Directory('${root.path}${Platform.pathSeparator}$id');
     await staging.create();
     try {
+      // PDF 固定版式：留存源文件本身；版面与文本在阅读时由 pdfrx 解析，
+      // 抽成章节文本反而丢掉版式（见 EXTENSION-SURVEY-REPORT.md §4.4 路线B）。
+      String? sourceFile;
+      final pdfBytes = parsed.sourceBytes;
+      if (pdfBytes != null) {
+        sourceFile = 'source.pdf';
+        await File(
+          '${staging.path}${Platform.pathSeparator}$sourceFile',
+        ).writeAsBytes(pdfBytes, flush: true);
+      }
       final chapters = <Chapter>[];
       final files = <String>[];
       for (var index = 0; index < parsed.chapters.length; index++) {
@@ -295,6 +332,7 @@ class ImportedBookStore {
         coverFile: coverFile,
         chapters: chapters,
         chapterFiles: files,
+        sourceFile: sourceFile,
       );
       await File(
         '${staging.path}${Platform.pathSeparator}book.json',
@@ -392,6 +430,11 @@ class ImportedBookStore {
     if (raw['id'] != expectedId || raw['chapters'] is! List) return null;
     final title = raw['title']?.toString().trim() ?? '';
     if (title.isEmpty) return null;
+    final format = raw['format']?.toString() ?? '';
+    // PDF 的源文件名按封面同等严格校验：只认本仓库写死的名字，禁止路径。
+    final rawSource = raw['source']?.toString() ?? '';
+    final sourceFile =
+        format == 'pdf' && rawSource == 'source.pdf' ? rawSource : null;
     final chapters = <Chapter>[];
     final files = <String>[];
     for (final value in raw['chapters'] as List) {
@@ -414,7 +457,12 @@ class ImportedBookStore {
       );
       files.add(file);
     }
-    if (chapters.isEmpty || chapters.length != files.length) return null;
+    // PDF 允许零章节（固定版式没有章节目录），但必须有合法源文件；
+    // TXT/EPUB 至少要有一章。
+    if (chapters.isEmpty != files.isEmpty ||
+        (format == 'pdf' ? sourceFile == null : chapters.isEmpty)) {
+      return null;
+    }
     final addedAt = raw['addedAt'];
     // The cover name is validated like the chapter files: it must be one of the
     // names this store writes and must not contain a path separator. A stored
@@ -428,7 +476,7 @@ class ImportedBookStore {
       id: expectedId,
       title: title,
       author: raw['author']?.toString() ?? '',
-      format: raw['format']?.toString() ?? '',
+      format: format,
       addedAt: DateTime.fromMillisecondsSinceEpoch(
         addedAt is num ? addedAt.toInt() : 0,
       ),
@@ -436,6 +484,7 @@ class ImportedBookStore {
       coverFile: coverFile,
       chapters: chapters,
       chapterFiles: files,
+      sourceFile: sourceFile,
     );
   }
 }
@@ -455,7 +504,30 @@ ParsedImportedBook parseImportedBookBytes({
     return _parseTxt(title, text);
   }
   if (extension == 'epub') return _parseEpub(title, bytes);
-  throw const FormatException('仅支持 TXT 和 EPUB 文件');
+  if (extension == 'pdf') return _parsePdf(title, bytes);
+  throw const FormatException('仅支持 TXT、EPUB 和 PDF 文件');
+}
+
+/// PDF 分支：只做魔数校验，源字节原样留存。
+///
+/// 版面/文本/字符坐标都在阅读时由 pdfrx（PDFium）解析——导入阶段抽文本
+/// 既丢版式（第 4 组要求固定版式渲染），也无法生成墨迹锚定需要的字符
+/// 位置表（那是渲染引擎按当前视口实时产出的）。
+ParsedImportedBook _parsePdf(String fileTitle, Uint8List bytes) {
+  final header = String.fromCharCodes(bytes.take(1024));
+  if (!header.contains('%PDF-')) {
+    throw const FormatException('不是有效的 PDF 文件');
+  }
+  if (bytes.lengthInBytes < 8) {
+    throw const FormatException('PDF 文件不完整');
+  }
+  return ParsedImportedBook(
+    title: fileTitle,
+    author: '',
+    format: 'pdf',
+    chapters: const [],
+    sourceBytes: bytes,
+  );
 }
 
 ParsedImportedBook _parseTxt(String fileTitle, String source) {

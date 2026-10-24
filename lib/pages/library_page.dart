@@ -362,7 +362,9 @@ class _LibraryPageState extends State<LibraryPage> {
     final store = ImportedBookStore.instance;
     final book = await store.book(item.id);
     if (!mounted) return;
-    if (book == null || book.chapters.isEmpty) {
+    // PDF 固定版式书没有章节目录（源文件整体留存），其余格式至少一章。
+    final usable = book != null && (book.isPdf || book.chapters.isNotEmpty);
+    if (!usable) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('本地书籍文件不可用')));
@@ -380,8 +382,10 @@ class _LibraryPageState extends State<LibraryPage> {
           cover: book.coverPath ?? '',
           chapters: book.chapters,
           readerStore: readerStore,
-          chapterLoader: (chapter) =>
-              store.chapterText(book.id, chapter.itemId),
+          pdfPath: book.sourcePath,
+          chapterLoader: book.isPdf
+              ? null
+              : (chapter) => store.chapterText(book.id, chapter.itemId),
         ),
       ),
     );

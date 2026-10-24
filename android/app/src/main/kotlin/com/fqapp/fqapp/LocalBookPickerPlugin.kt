@@ -80,7 +80,13 @@ class LocalBookPickerPlugin : FlutterPlugin, ActivityAware,
             type = "*/*"
             putExtra(
                 Intent.EXTRA_MIME_TYPES,
-                arrayOf("text/plain", "application/epub+zip", "application/zip", "application/octet-stream"),
+                arrayOf(
+                    "text/plain",
+                    "application/epub+zip",
+                    "application/zip",
+                    "application/octet-stream",
+                    "application/pdf",
+                ),
             )
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -126,11 +132,15 @@ class LocalBookPickerPlugin : FlutterPlugin, ActivityAware,
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(16 * 1024)
             var total = 0
+            // PDF goes to fixed-layout reading and keeps the whole source file,
+            // so it gets a larger cap than the reflowable TXT/EPUB formats.
+            val maxBytes =
+                if (name.lowercase().endsWith(".pdf")) MAX_PDF_FILE_BYTES else MAX_FILE_BYTES
             while (true) {
                 val count = input.read(buffer)
                 if (count < 0) break
                 total += count
-                require(total <= MAX_FILE_BYTES) { "请选择小于 32 MB 的 TXT 或 EPUB 文件" }
+                require(total <= maxBytes) { "请选择小于 32 MB 的 TXT/EPUB 或 64 MB 的 PDF 文件" }
                 output.write(buffer, 0, count)
             }
             output.toByteArray()
@@ -178,5 +188,6 @@ class LocalBookPickerPlugin : FlutterPlugin, ActivityAware,
     companion object {
         private const val REQUEST_CODE = 53271
         private const val MAX_FILE_BYTES = 32 * 1024 * 1024
+        private const val MAX_PDF_FILE_BYTES = 64 * 1024 * 1024
     }
 }

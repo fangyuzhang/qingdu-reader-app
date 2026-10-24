@@ -19,6 +19,7 @@ import 'services/audio_preferences.dart';
 import 'services/backend_service.dart';
 import 'services/detail_snapshot_cache.dart';
 import 'services/library_store.dart';
+import 'services/pdf_intent_import.dart';
 import 'services/reading_stats_store.dart';
 import 'services/share_service.dart';
 import 'services/poster_cache.dart';
@@ -277,13 +278,43 @@ class RootShell extends StatefulWidget {
   State<RootShell> createState() => _RootShellState();
 }
 
-class _RootShellState extends State<RootShell> {
+class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
   int _index = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startBackend();
+    // 文件管理器「打开方式」进来的 PDF：启动后消费一次；resume 再消费
+    // （覆盖应用在后台时 onNewIntent 的热启动路径）。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumePdfIntent());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _consumePdfIntent();
+  }
+
+  Future<void> _consumePdfIntent() async {
+    try {
+      final title = await PdfIntentImporter.consumePending();
+      if (title == null || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已导入《$title》，可在书架打开')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('PDF 导入失败：$e')));
+    }
   }
 
   Future<void> _startBackend() async {

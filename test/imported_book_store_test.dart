@@ -199,6 +199,70 @@ void main() {
       );
       expect((await store.books()).map((book) => book.id), [imported.id]);
     });
+
+    test('PDF：源文件整体落盘，恢复后走固定版式（零章节 + source.pdf）', () async {
+      final pdfBytes = Uint8List.fromList(
+        utf8.encode('%PDF-1.7\nfake-but-header-valid\n%%EOF'),
+      );
+      final imported = await store.importBytes(
+        fileName: '样卷.pdf',
+        bytes: pdfBytes,
+      );
+
+      expect(imported.format, 'pdf');
+      expect(imported.isPdf, isTrue);
+      expect(imported.chapters, isEmpty);
+      expect(imported.toMediaItem().ep, '');
+      expect(File(imported.sourcePath!).existsSync(), isTrue);
+
+      final loaded = await store.book(imported.id);
+      expect(loaded?.isPdf, isTrue);
+      expect(loaded?.sourcePath, imported.sourcePath);
+      expect(loaded?.chapters, isEmpty);
+      expect(
+        File(loaded!.sourcePath!).readAsBytesSync(),
+        pdfBytes,
+      );
+    });
+
+    test('PDF：清单被篡改（source 名不合法）时拒绝恢复', () async {
+      final imported = await store.importBytes(
+        fileName: '样卷.pdf',
+        bytes: Uint8List.fromList(
+          utf8.encode('%PDF-1.7\nfake-but-header-valid\n%%EOF'),
+        ),
+      );
+      final manifest = File(
+        '${imported.directory}${Platform.pathSeparator}book.json',
+      );
+      final raw = jsonDecode(await manifest.readAsString()) as Map;
+      raw['source'] = '../../escape.pdf';
+      await manifest.writeAsString(jsonEncode(raw));
+
+      expect(await store.book(imported.id), isNull);
+    });
+  });
+
+  group('PDF 解析', () {
+    test('魔数校验：合法头保留源字节，非法头抛 FormatException', () {
+      final parsed = parseImportedBookBytes(
+        fileName: '测试.PDF',
+        bytes: Uint8List.fromList(utf8.encode('%PDF-1.4\n内容')),
+      );
+      expect(parsed.format, 'pdf');
+      expect(parsed.title, '测试');
+      expect(parsed.author, '');
+      expect(parsed.chapters, isEmpty);
+      expect(parsed.sourceBytes, isNotNull);
+
+      expect(
+        () => parseImportedBookBytes(
+          fileName: '伪装.pdf',
+          bytes: Uint8List.fromList(utf8.encode('这不是 PDF')),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 
   group('EPUB 封面发现顺序', () {
