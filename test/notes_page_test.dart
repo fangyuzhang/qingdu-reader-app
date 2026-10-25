@@ -575,8 +575,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.notes.first.markerBadges, isEmpty);
-    // 拖动结束垃圾桶收起。
-    expect(find.byKey(const ValueKey('notes-tag-trash')), findsNothing);
+    // 垃圾桶常驻右上角：删除后仍在（不再有显隐切换）。
+    expect(find.byKey(const ValueKey('notes-tag-trash')), findsOneWidget);
   });
 
   testWidgets('调色板标签拖入垃圾桶 = 从所有笔记摘除并出目录', (tester) async {

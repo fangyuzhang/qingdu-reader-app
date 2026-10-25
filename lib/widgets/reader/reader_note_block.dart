@@ -779,7 +779,6 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
                 right: 18,
                 child: TagTrashTarget(
                   trashKey: const ValueKey('reader-tag-trash'),
-                  visible: true,
                   onDropTag: (tag) =>
                       setState(() => _tags.remove(tag.label)),
                   onDropCluster: (_) {},

@@ -183,13 +183,6 @@ class _NotesPageState extends State<NotesPage> {
   /// 吸收；多选组（整组拖起）不再吸收未选中的标签（原地不动）。
   bool _dragAbsorbEnabled = false;
 
-  /// 笔记角标拖动进行中（浮现垃圾桶用）。
-  bool _badgeDragActive = false;
-
-  /// 任何标签拖动进行中 = 顶部垃圾桶 overlay + 内容暗化可见。
-  bool get _trashVisible =>
-      _paletteDrag != null || _dragGroup.isNotEmpty || _badgeDragActive;
-
   /// 磁吸吸收的距离阈值（逻辑像素）。
   static const double _absorbThreshold = 88;
 
@@ -238,6 +231,15 @@ class _NotesPageState extends State<NotesPage> {
       _inkEntries = _buildInkEntries(ink, meta.titles);
       _loading = false;
       _pruneLeavingBadges(entries);
+      // 兜底：任何拖动状态不允许跨数据重载存活（垃圾桶删除是异步链，
+      // reload 与 onDragEnd 复位交错时 hidden 可能残留——表现为标签
+      // 消失、占位不补位）。
+      _dragGroup = const [];
+      _dragSource = null;
+      _dragAbsorbEnabled = false;
+      _paletteDrag = null;
+      _paletteInRow = false;
+      _paletteCenters = const [];
     });
   }
 
@@ -702,46 +704,17 @@ class _NotesPageState extends State<NotesPage> {
               ),
             ],
           ),
-          // 拖动期间的暗化层：以垃圾桶为中心的径向渐变——近桶最暗、
-          // 越往外越清，突出垃圾桶主题。IgnorePointer 让笔记的「拖入」
-          // 落点照常命中。
-          if (_trashVisible)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: 1,
-                  duration: const Duration(milliseconds: 160),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        center: const Alignment(0, -0.95),
-                        radius: 1.1,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.52),
-                          Colors.black.withValues(alpha: 0.30),
-                        ],
-                        stops: const [0.0, 1.0],
-                      ),
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-              ),
+          // 垃圾桶常驻右上角（产品要求）：拖动时可投递删除，未拖动时
+          // 静默置灰。overlay 不占流式布局。
+          Positioned(
+            top: 10,
+            right: 12,
+            child: TagTrashTarget(
+              onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
+              onDropCluster: (cluster) =>
+                  unawaited(_onTrashDropCluster(cluster)),
             ),
-          // 标签拖动期间浮现的垃圾桶：浮在页面最上方，不占布局；
-          // 拖动结束整颗从树上移除（不存在隐形的落点）。
-          if (_trashVisible)
-            Positioned(
-              top: 10,
-              left: 0,
-              right: 0,
-              child: TagTrashTarget(
-                visible: true,
-                onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
-                onDropCluster: (cluster) =>
-                    unawaited(_onTrashDropCluster(cluster)),
-              ),
-            ),
+          ),
         ],
       ),
     );
@@ -855,8 +828,6 @@ class _NotesPageState extends State<NotesPage> {
         onOpen: _openNote,
         onEdit: _editNote,
         onDragFinished: _clearHover,
-        onDragActiveChanged: (active) =>
-            setState(() => _badgeDragActive = active),
       ),
     );
   }
@@ -1078,6 +1049,10 @@ class _NotesPageState extends State<NotesPage> {
       setState(() {
         _dragGroup = List.unmodifiable(payload.tags);
         _dragSource = payload.dragged;
+        // 组拖动也统一记录 _paletteDrag：finished 的收尾判定与单枚同源，
+        // 避免两个状态机分叉后复位遗漏（松手标签消失、占位不补的根因
+        // 之一——组分支此前不设 _paletteDrag，收尾路径与单枚不一致）。
+        _paletteDrag = payload.dragged;
         _dragAbsorbEnabled = false;
         _paletteInRow = false;
         _hoverNoteKey = null;
@@ -1218,7 +1193,14 @@ class _NotesPageState extends State<NotesPage> {
   void _paletteDragFinished() {
     final dragged = _paletteDrag ?? _dragSource;
     if (dragged == null || _dragGroup.length > 1) {
+      // 磁吸组收尾：全部成员弹重生——从 hidden 空位恢复可见的确定性
+      // 信号（此前组分支不弹，若任何 setState 时序交错，成员可能停在
+      // 空位态：标签消失、占位不补）。
+      final group = _dragGroup;
       setState(() {
+        for (final member in group) {
+          _rebornTokens[member.id] = (_rebornTokens[member.id] ?? 0) + 1;
+        }
         _dragGroup = const [];
         _dragSource = null;
         _dragAbsorbEnabled = false;
@@ -2008,7 +1990,6 @@ class _TimelineNoteRow extends StatelessWidget {
     required this.firstOfDay,
     required this.lastOfDay,
     required this.badges,
-    required this.onDragActiveChanged,
     this.ghostId,
     this.hoverTag,
     this.hovered = false,
@@ -2032,8 +2013,6 @@ class _TimelineNoteRow extends StatelessWidget {
   final String? ghostId;
   final NoteTagDrag? hoverTag;
   final bool hovered;
-  /// 角标拖动开始/结束：页面浮现与收起顶部垃圾桶。
-  final ValueChanged<bool> onDragActiveChanged;
   final VoidCallback onDragFinished;
   final Future<void> Function(ReaderAnnotation note) onOpen;
   final Future<void> Function(ReaderAnnotation note) onEdit;
@@ -2254,12 +2233,10 @@ class _TimelineNoteRow extends StatelessWidget {
                                                       badge.kind &&
                                                   hoverTag!.label ==
                                                       badge.label,
-                                              onDragStarted: () =>
-                                                  onDragActiveChanged(true),
-                                              // 落空（accepted == false）= 弹回
-                                              // 原位，不删除；删除只走垃圾桶。
+                                              // 落空（accepted == false）=
+                                              // 弹回原位，不删除；删除只走
+                                              // 右上角常驻的垃圾桶。
                                               onDragEnd: (accepted) {
-                                                onDragActiveChanged(false);
                                                 onDragFinished();
                                               },
                                             ),

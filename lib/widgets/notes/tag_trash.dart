@@ -4,17 +4,17 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import '../home/home_design.dart';
 import 'note_tag_drag.dart';
 
-/// 拖动标签时在页面顶部浮现的垃圾桶落点。
+/// 右上角常驻的垃圾桶落点。
 ///
-/// 作为 overlay 挂在页面 Stack 顶层，不参与流式布局——出现/消失不会推动
-/// 任何其他图层。接受两类负载：
+/// 作为 overlay 挂在页面 Stack 顶层，不参与流式布局。接受两类负载：
 /// - 单枚 [NoteTagDrag]：笔记角标 → 从那条笔记上摘掉；调色板标签 →
 ///   从所有笔记摘除并从目录删除；
 /// - 磁吸组 [NoteTagClusterDrag]：组内全部删除。
+///
+/// 拖拽物靠近时进入 armed 态：容器弹性放大 + 红色光晕扩散 + 文案切换。
 class TagTrashTarget extends StatefulWidget {
   const TagTrashTarget({
     super.key,
-    required this.visible,
     required this.onDropTag,
     required this.onDropCluster,
     this.trashKey = const ValueKey('notes-tag-trash'),
@@ -22,9 +22,6 @@ class TagTrashTarget extends StatefulWidget {
 
   /// 落点本体的 key（笔记页与批注编辑器各有实例，测试分别定位）。
   final Key trashKey;
-
-  /// 拖动进行中 = 显示（带入场动效）；否则完全移除，不留占位。
-  final bool visible;
 
   final ValueChanged<NoteTagDrag> onDropTag;
   final ValueChanged<NoteTagClusterDrag> onDropCluster;
@@ -42,85 +39,80 @@ class _TagTrashTargetState extends State<TagTrashTarget> {
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return IgnorePointer(
-      ignoring: !widget.visible,
-      child: AnimatedScale(
-        scale: widget.visible ? 1 : 0.4,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutBack,
-        child: AnimatedOpacity(
-          opacity: widget.visible ? 1 : 0,
-          duration: const Duration(milliseconds: 160),
-          child: Center(
-            child: DragTarget<Object>(
-              onWillAcceptWithDetails: (details) => _isTagPayload(details.data),
-              onMove: (_) {
-                if (!_hover) setState(() => _hover = true);
-              },
-              onLeave: (_) {
-                if (_hover) setState(() => _hover = false);
-              },
-              onAcceptWithDetails: (details) {
-                if (_hover) setState(() => _hover = false);
-                final data = details.data;
-                if (data is NoteTagDrag) widget.onDropTag(data);
-                if (data is NoteTagClusterDrag) widget.onDropCluster(data);
-              },
-              builder: (context, candidate, _) {
-                final armed = candidate.isNotEmpty;
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedScale(
-                      key: widget.trashKey,
-                      scale: armed ? 1.18 : 1.0,
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOutBack,
-                      child: Container(
-                        width: 62,
-                        height: 62,
-                        decoration: BoxDecoration(
-                          color: armed
-                              ? Colors.red.withValues(alpha: 0.18)
-                              : palette.surface,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: armed ? Colors.red : palette.line,
-                            width: armed ? 2 : 1,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: armed
-                                  ? Colors.red.withValues(alpha: 0.35)
-                                  : Colors.black.withValues(alpha: 0.14),
-                              blurRadius: armed ? 20 : 14,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          LucideIcons.trash,
-                          size: 24,
-                          color: armed ? Colors.red : palette.muted,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      armed ? '松手删除' : '拖到此处删除',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: armed ? Colors.red : palette.muted,
-                      ),
+    return DragTarget<Object>(
+      onWillAcceptWithDetails: (details) => _isTagPayload(details.data),
+      onMove: (_) {
+        if (!_hover) setState(() => _hover = true);
+      },
+      onLeave: (_) {
+        if (_hover) setState(() => _hover = false);
+      },
+      onAcceptWithDetails: (details) {
+        if (_hover) setState(() => _hover = false);
+        final data = details.data;
+        if (data is NoteTagDrag) widget.onDropTag(data);
+        if (data is NoteTagClusterDrag) widget.onDropCluster(data);
+      },
+      builder: (context, candidate, _) {
+        final armed = candidate.isNotEmpty;
+        return Column(
+          key: widget.trashKey,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 靠近时弹性放大（elasticOut 过冲回弹）+ 光晕扩散。
+            TweenAnimationBuilder<double>(
+              tween: Tween(end: armed ? 1.28 : 1.0),
+              duration: Duration(milliseconds: armed ? 450 : 200),
+              curve: armed ? Curves.elasticOut : Curves.easeOutCubic,
+              builder: (context, scale, child) =>
+                  Transform.scale(scale: scale, child: child),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: armed
+                      ? Colors.red.withValues(alpha: 0.16)
+                      : palette.surface.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: armed ? Colors.red : palette.line,
+                    width: armed ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: armed
+                          ? Colors.red.withValues(alpha: 0.45)
+                          : Colors.black.withValues(alpha: 0.12),
+                      blurRadius: armed ? 26 : 10,
+                      spreadRadius: armed ? 3 : 0,
+                      offset: const Offset(0, 3),
                     ),
                   ],
-                );
-              },
+                ),
+                child: Icon(
+                  LucideIcons.trash,
+                  size: armed ? 26 : 22,
+                  color: armed ? Colors.red : palette.muted,
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
+            const SizedBox(height: 3),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 140),
+              child: Text(
+                armed ? '松手删除' : '拖到此处删除',
+                key: ValueKey(armed),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: armed ? Colors.red : palette.muted,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
