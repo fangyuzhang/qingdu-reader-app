@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'reader_annotation_store.dart';
@@ -28,8 +28,9 @@ class NoteCardExporter {
   static const _ink = Color(0xFF3D3427);
   static const _muted = Color(0xFF8A7B62);
 
-  /// 导出并返回 PNG 绝对路径。
-  static Future<String> export({
+  /// 导出结果：[path] = 文件落点；[public] = 是否在系统「下载」目录
+  /// （false = 平台通道不可用时的应用私有目录降级，调用方文案要说清）。
+  static Future<({String path, bool public})> export({
     required List<ReaderAnnotation> notes,
     String documentTitle = '我的书摘',
     String? bookTitle,
@@ -182,15 +183,38 @@ class NoteCardExporter {
       throw StateError('图片编码失败');
     }
 
+    final stamp = now.millisecondsSinceEpoch;
+    final png = Uint8List.view(bytes.buffer);
+    // 优先直接写进系统「下载」目录（Android 10+ 免权限，市场惯例：
+    // 导出物用户随手可在文件管理器找到）。通道不可用（桌面/测试宿主）
+    // 或写入失败时，诚实降级到应用文档目录并回报 public=false。
+    try {
+      final result = await const MethodChannel(
+        'fqapp/downloads',
+      ).invokeMapMethod<String, Object?>('saveImage', {
+        'fileName': 'qingqie_notes_$stamp.png',
+        'bytes': png,
+        // 某些 ROM（MIUI 实测）会清理缺宽高的图片条目：元数据带上。
+        'width': _width.toInt(),
+        'height': height.ceil(),
+      });
+      final path = result?['path'];
+      if (path is String && path.isNotEmpty) {
+        return (path: path, public: result?['public'] == true);
+      }
+    } on PlatformException {
+      // 落到下面的私有目录降级。
+    } on MissingPluginException {
+      // 桌面/测试宿主无插件：降级。
+    }
     final dir = await getApplicationDocumentsDirectory();
     final outDir = Directory('${dir.path}/qingqie/exports');
     if (!await outDir.exists()) {
       await outDir.create(recursive: true);
     }
-    final stamp = now.millisecondsSinceEpoch;
     final file = File('${outDir.path}/notes_$stamp.png');
-    await file.writeAsBytes(Uint8List.view(bytes.buffer), flush: true);
-    return file.path;
+    await file.writeAsBytes(png, flush: true);
+    return (path: file.path, public: false);
   }
 
   static ui.Paragraph _paragraph(

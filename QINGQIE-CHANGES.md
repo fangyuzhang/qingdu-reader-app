@@ -1424,3 +1424,14 @@ flutter test             # 1954 passed / 10 skipped
 - 配套：笔记页 initState/dispose 监听/移除 marker 类型存储 changes（此前只在进页时读一次，别处新建的类型不会即时出现在标签行）。
 - 修复（实现中踩到）：弹层关闭后立即 dispose TextEditingController 会把焦点依赖泄漏到后续帧（测试间连锁断言）——移除即时 dispose。
 - 验证：analyze 0；全量 **1593/10/0**（notes 页 26/26，新增「空名禁用保存→输入+选色→保存→新标签入行+提示条」用例）；真机端到端（chip 可见→弹层六色→输入保存→「标签已创建」提示+新 chip 入行→拖垃圾桶删除清理）。归档 fqapp-v76.apk。
+
+---
+
+# 七十七、可解决问题清零轮（用户指令：按推荐处理）
+
+- **长图导出直存系统下载**（70 批记录的 UX 短板）：DownloadsPlugin 泛化 bytes+mime 新增 saveImage；NoteCardExporter 优先走下载通道、宿主无插件/写入失败诚实降级私有目录并回报 public=false，SnackBar 文案区分「系统下载/应用目录」。**真机发现并修复 MIUI 深坑**：MediaStore 图片条目缺 WIDTH/HEIGHT 时被 ROM 在转正后静默清理（insert/write 全部返回成功但文件消失、MediaStore 无记录）——图片元数据必带宽高 + 转正后落盘实存校验（不存在即删行抛错走降级，绝不虚报成功）。真机复验：qingqie_notes_*.png 出现在 /storage/emulated/0/Download/ 且 MediaStore 可查。
+- **评论模型去重**（71 批审查唯一真实重复）：book_comment/playlet_comment 的上游信封解包前置（common→content→text/配图→user_info→base_info，约 20 行 ×2）提取为 book_comment.dart 的公开 `CommentEnvelope`/`parseCommentEnvelope`，stat/expand 等个性化块留在各自管线；playlet 移除冗余 import。
+- **交接文档补账**（71→76 五批未记）：AGENT-HANDOVER-NEXT 新增 0.35 节（Active Canvas 全量交付/高刷/屏幕适配/反屎山/新建标签五批速览）、速览表更新到 1593 基线与第 76 批。
+- **残留扫描**：lib/ 无 print/debugPrint 残留（仅 kept_alive_pages_test 一处既有诊断输出，保留）。
+- 新增 test/note_card_export_test.dart（无插件宿主降级私有目录 + public=false + 文件实存断言）。
+- 验证：analyze 0；全量 **1594/10/0**；真机导出→下载目录可见。归档 fqapp-v77.apk。

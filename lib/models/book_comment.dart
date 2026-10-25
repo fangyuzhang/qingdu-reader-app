@@ -222,6 +222,52 @@ BookCommentPage parseParagraphComments(Map<String, dynamic> payload) {
 /// The counters live **inside** `comment.stat`, not beside it; reading a sibling
 /// `stat` silently reported zero likes for every paragraph comment.
 BookComment? _paragraphComment(dynamic comment, dynamic stat) {
+  final envelope = parseCommentEnvelope(comment);
+  if (envelope == null) return null;
+  // Prefer the comment's own counters, and keep the sibling form working for
+  // any payload that puts them there.
+  final statMap = (comment['stat'] ?? stat) is Map
+      ? (comment['stat'] ?? stat) as Map
+      : const {};
+  return BookComment(
+    id: envelope.id,
+    text: envelope.text,
+    imageUrls: envelope.imageUrls,
+    diggCount: _int(statMap['digg_count']),
+    replyCount: _int(statMap['reply_count']),
+    readSeconds: _int(statMap['read_duration']),
+    createdAt: _timestamp(envelope.createTimestamp),
+    userName: envelope.userName,
+    userAvatar: envelope.userAvatar,
+    isAuthor: envelope.isAuthor,
+  );
+}
+
+/// 两条评论解析管线（书籍 [BookComment] / 短剧 PlayletComment）共用的上游
+/// 信封解包：`comment.common` 里的正文文字、配图与用户基本信息。字段缺失
+/// 一律给空值；stat/expand 等个性化块由调用方自行处理。正文与配图全空 →
+/// null（两条管线一致的「空评论」判定）。
+class CommentEnvelope {
+  const CommentEnvelope({
+    required this.id,
+    required this.text,
+    required this.imageUrls,
+    required this.createTimestamp,
+    required this.userName,
+    required this.userAvatar,
+    required this.isAuthor,
+  });
+
+  final String id;
+  final String text;
+  final List<String> imageUrls;
+  final dynamic createTimestamp;
+  final String userName;
+  final String userAvatar;
+  final bool isAuthor;
+}
+
+CommentEnvelope? parseCommentEnvelope(dynamic comment) {
   if (comment is! Map) return null;
   final common = comment['common'];
   final commonMap = common is Map ? common : const {};
@@ -236,21 +282,13 @@ BookComment? _paragraphComment(dynamic comment, dynamic stat) {
   final userMap = user is Map ? user : const {};
   final base = userMap['base_info'];
   final baseMap = base is Map ? base : const {};
-  // Prefer the comment's own counters, and keep the sibling form working for
-  // any payload that puts them there.
-  final statMap = (comment['stat'] ?? stat) is Map
-      ? (comment['stat'] ?? stat) as Map
-      : const {};
   final tag = userMap['user_tag'];
   final tagMap = tag is Map ? tag : const {};
-  return BookComment(
+  return CommentEnvelope(
     id: _string(comment['comment_id']),
     text: text,
     imageUrls: imageUrls,
-    diggCount: _int(statMap['digg_count']),
-    replyCount: _int(statMap['reply_count']),
-    readSeconds: _int(statMap['read_duration']),
-    createdAt: _timestamp(commonMap['create_timestamp']),
+    createTimestamp: commonMap['create_timestamp'],
     userName: _string(baseMap['user_name']),
     userAvatar: _string(baseMap['user_avatar']),
     isAuthor: tagMap['is_author'] == true,

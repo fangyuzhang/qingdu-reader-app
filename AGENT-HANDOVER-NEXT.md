@@ -5,7 +5,7 @@
 > 远端：https://github.com/fangyuzhang/qingdu-reader-app（旧地址 qingqie-reader-app 自动重定向）
 > 分支：master，HEAD **<提交后为准>**，已与远端校验一致
 > 版本：1.0.132+137　包名：com.fqapp.fqapp
-> 逐批变更细节看 QINGQIE-CHANGES.md（已记到第 69 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
+> 逐批变更细节看 QINGQIE-CHANGES.md（已记到第 76 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
 
 ---
 
@@ -13,13 +13,21 @@
 
 | 项 | 值 |
 | --- | --- |
-| 测试基线 | flutter analyze 0 问题；flutter test 1547 通过 / 10 跳过 / 0 失败 |
+| 测试基线 | flutter analyze 0 问题；flutter test 1593 通过 / 10 跳过 / 0 失败 |
 | 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe）；**MatePad 11 + M-Pencil 3 未到位**（压感/帧率实测遗留；另需复验 RefreshRatePolicy 在其 120Hz 面板上生效——logcat 应出 `policy=high-frame-rate fps=120.0`） |
 | 已装 APK | 验证构建（--dart-define=fqapp.debugTools=true）；正式归档 D:\APP\agent\apk\fqapp-v67.apk（1.0.132+137 无调试页） |
 | 远端同步 | master 已推送并校验 SHA 一致（67bb55f） |
-| 当前代码形态 | v41–v55 全部优化 + **新增 PDF 固定版式阅读、手写墨迹批注（PDF + 阅读器双端）、标签磁吸拖拽垃圾桶删除、笔记「手写」类型筛选**（第 2~7 组 + 63~69 批） |
+| 当前代码形态 | v41–v55 全部优化 + **新增 PDF 固定版式阅读、手写墨迹批注（PDF + 阅读器双端）、标签磁吸拖拽垃圾桶删除、笔记「手写」类型筛选**（第 2~7 组 + 63~76 批） |
 
 ---
+
+## 0.35 近五批交付速览（72~76 批，2026-10-26，全部已装真机验证）
+
+1. **Kindle Scribe Active Canvas 全量复刻（74/75 批，交互规格见 SCRIBE-NOTES-SPEC.md v1.1）**：正文内嵌手写画布（嵌入文本流占位、后续文字下移重排；草稿自动下扩+确认/取消；选中态改高/垃圾桶二次确认；文本锚点改字号不漂移）、粘性便签（折叠图标+书写面板+自动保存）、打字备注图标行、墨迹套索编辑（圈选/移动/缩放/复制/剪切/删除/粘贴，replace 型撤销）、笔记页集中管理接入。新文件：models/reader_ink_block.dart、services/reader_ink_block_store.dart、widgets/reader/annotation/{embedded_ink_block_view,ink_block_editor_sheet}.dart；选区菜单两级化（主行 4 项+更多溢出行）。**widget 测试一律注入内存 store（test/support/fakes.dart 的 MemoryInkBlockStore），不做 Hive 真实 IO**——假时钟 zone 里真实 IO future 永不推进，runAsync 救不了别的 zone 的 future。还修复了 blockPainter 占位维度断言崩溃（段落切片块首次被分页模式覆盖）。
+2. **高刷适配（72 批）**：RefreshRatePolicy 投票面板最高刷新率模式（国产 ROM 锁未声明应用 60Hz）；60Hz 面板零干预；120Hz 实测待 MatePad。
+3. **屏幕适配（73 批）**：阅读器正文栏宽 >560dp 钳制居中（墨迹画布同基准）；test/screen_adaptation_test 锁定平板/窄屏/1.8× 字号。
+4. **反屎山护栏（71 批）**：lint 加严 3 条 + 全库审查（死代码 0）；reader_page/notes_page 巨型文件策略=触及即抽取。
+5. **笔记页新建标签（76 批）**：标签行末尾「＋新建标签」→ 名称+六色弹层 → 即时入行；笔记页监听 marker 类型存储 changes。
 
 ## 0.4 最新修复（2026-10-25 晚，第 67~69 批，全部已装真机验证）
 

@@ -10,7 +10,6 @@
 library;
 
 import 'book_comment.dart';
-import 'comment_image.dart';
 
 /// 官方 `UgcRelativeType`（`J:UgcRelativeType.java:9-55`）。
 class UgcRelativeType {
@@ -122,20 +121,8 @@ class PlayletComment {
   static PlayletComment? fromRaw(dynamic entry) {
     if (entry is! Map) return null;
     final comment = entry['comment'];
-    if (comment is! Map) return null;
-    final common = comment['common'];
-    final commonMap = common is Map ? common : const {};
-    final content = commonMap['content'];
-    final contentMap = content is Map ? content : const {};
-    final text = _string(contentMap['text']);
-    final imageList = contentMap['image_data_list'];
-    final images = imageList is Map ? imageList['image_data'] : null;
-    final imageUrls = parseCommentImageUrls(images);
-    if (text.isEmpty && imageUrls.isEmpty) return null;
-    final user = commonMap['user_info'];
-    final userMap = user is Map ? user : const {};
-    final base = userMap['base_info'];
-    final baseMap = base is Map ? base : const {};
+    final envelope = parseCommentEnvelope(comment);
+    if (envelope == null) return null;
     final stat = comment['stat'];
     final statMap = stat is Map ? stat : const {};
     final expand = comment['expand'];
@@ -148,14 +135,14 @@ class PlayletComment {
     final parentCommentMap = parentComment is Map ? parentComment : const {};
 
     return PlayletComment(
-      id: _string(comment['comment_id']),
-      text: text,
-      imageUrls: imageUrls,
+      id: envelope.id,
+      text: envelope.text,
+      imageUrls: envelope.imageUrls,
       diggCount: _int(statMap['digg_count']),
       replyCount: _int(statMap['reply_count']),
-      createdAt: _timestamp(commonMap['create_timestamp']),
-      userName: _string(baseMap['user_name']),
-      userAvatar: _string(baseMap['user_avatar']),
+      createdAt: _timestamp(envelope.createTimestamp),
+      userName: envelope.userName,
+      userAvatar: envelope.userAvatar,
       // dataType 可能来自 mix_data，也可能直接挂在条目上；两者都容忍。
       dataType: _int(mixMap['data_type'] ?? entry['data_type']).ifZero(
         UgcRelativeType.comment,

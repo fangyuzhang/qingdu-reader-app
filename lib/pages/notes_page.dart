@@ -2158,11 +2158,13 @@ class _NotesPageState extends State<NotesPage> {
     if (notes.isEmpty) return;
     setState(() => _exporting = true);
     try {
-      final path = await NoteCardExporter.export(notes: notes);
+      final saved = await NoteCardExporter.export(notes: notes);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('长图已保存：$path'),
+          content: Text(
+            saved.public ? '长图已保存到系统下载：${saved.path}' : '已导出到应用目录：${saved.path}',
+          ),
           duration: const Duration(seconds: 5),
         ),
       );
