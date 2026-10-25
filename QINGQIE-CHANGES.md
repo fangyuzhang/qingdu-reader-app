@@ -1290,3 +1290,13 @@ flutter test             # 1954 passed / 10 skipped
   后文件已入选择器列表，但 MIUI DocumentsUI 拦截注入式文件项点击（搜索/
   菜单/抽屉可自动化）——导入代码与已验证的 ACTION_VIEW 通道同路，留
   人工手测。遗留仅剩：MatePad 11 + M-Pencil 3 的压感/倾斜/帧率实测。
+
+---
+
+# 六十四、批注入口改名「手写」+ 笔记页手写类型筛选
+
+- 阅读器底部工具栏「批注」→「手写」；PDF 阅读页底栏同功能按钮 tooltip 同步改名。
+- 笔记页「全部类型」→「全部标签」；划线类型下该行是线型筛选，all chip 文案随模式显示「全部线型」。
+- 笔记类型行在批注/书摘/划线同级新增「手写」：NoteTypeFilter.ink；时间线沿用日期轴+卡片（手写徽标、书名/时间、墨迹缩略按存储页宽高比、章节名或「第 N 页」）；点行跳转（PDF 直达对应页、流式书按锚点偏移）；按书查看切走时同划线一并退出；空态/导出禁用对齐划线。
+- 修复：InkAnnotationStore 读路径（loadByChapter/loadByChapterVerified/loadAll/countAll）绕开 _serialize 写队列——写队列 _writes 链横跨 fake-async 测试 zone 后，新用例 await 链尾永不完成，notes 页测试批量 pumpAndSettle 超时（读不需与写串行；写仍串行+flush）。
+- 验证：analyze 0；全量 1542/10/0；真机——五枚类型 chip（全部/批注/书摘/划线/手写）与「全部标签」上屏，「手写 1」时间线渲染墨迹卡（缩略+第 3 页），点行直达 PDF 第 3 页，阅读器工具栏入口显示「手写」。（816dc1d）
