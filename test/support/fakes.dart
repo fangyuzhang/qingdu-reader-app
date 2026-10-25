@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:ui' show Size;
 
 import 'package:fqapp/models/media_item.dart';
+import 'package:fqapp/models/ink_annotation.dart';
+import 'package:fqapp/models/reader_ink_block.dart';
 import 'package:fqapp/services/chapter_cache_store.dart';
+import 'package:fqapp/services/reader_ink_block_store.dart';
 import 'package:fqapp/services/library_store.dart';
 import 'package:fqapp/services/native_player.dart';
 
@@ -253,4 +256,71 @@ class FakeNativePlayer extends NativePlayer {
     ]);
     await super.dispose();
   }
+}
+
+
+/// 【青茄·Active Canvas】内嵌手写块的内存版：widget 测试注入用，
+/// 全程不碰 Hive/真实 IO（假时钟 zone 里真实文件 IO 永不推进）。
+class MemoryInkBlockStore extends ReaderInkBlockStore {
+  final Map<String, ReaderInkBlock> blocks = {};
+
+  @override
+  Future<List<ReaderInkBlock>> load(String bookId, String chapterId) async {
+    final out = blocks.values
+        .where((b) => b.bookId == bookId && b.chapterId == chapterId)
+        .toList()
+      ..sort((a, b) {
+        final byAnchor = a.anchor.compareTo(b.anchor);
+        if (byAnchor != 0) return byAnchor;
+        return a.createdAt.compareTo(b.createdAt);
+      });
+    return List.of(out);
+  }
+
+  @override
+  Future<List<ReaderInkBlock>> loadAll() async =>
+      blocks.values.toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  @override
+  Future<ReaderInkBlock?> add(ReaderInkBlock block) async {
+    blocks[ReaderInkBlockStore.keyFor(
+      bookId: block.bookId,
+      chapterId: block.chapterId,
+      anchor: block.anchor,
+      kind: block.kind,
+      createdAt: block.createdAt,
+    )] = block;
+    changes.value++;
+    return block;
+  }
+
+  @override
+  Future<void> updateHeight(ReaderInkBlock block, double height) async {
+    blocks[keyOf(block)] = block.withFields(height: height);
+    changes.value++;
+  }
+
+  @override
+  Future<void> updateStrokes(
+    ReaderInkBlock block,
+    List<InkStroke> strokes,
+  ) async {
+    blocks[keyOf(block)] = block.withFields(strokes: strokes);
+    changes.value++;
+  }
+
+  @override
+  Future<void> remove(ReaderInkBlock block) async {
+    blocks.remove(keyOf(block));
+    changes.value++;
+  }
+
+  String keyOf(ReaderInkBlock block) => ReaderInkBlockStore.keyFor(
+    bookId: block.bookId,
+    chapterId: block.chapterId,
+    anchor: block.anchor,
+    kind: block.kind,
+    createdAt: block.createdAt,
+  );
 }

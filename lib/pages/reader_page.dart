@@ -7,6 +7,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/book_comment.dart';
 import '../models/ink_annotation.dart';
+import '../models/reader_ink_block.dart';
 import '../models/chapter_ideas.dart';
 import '../models/media_item.dart';
 import '../services/api_client.dart';
@@ -28,6 +29,7 @@ import '../services/reader_tap_zones.dart';
 import '../services/app_log.dart';
 import '../services/ink_annotation_store.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/reader_ink_block_store.dart';
 import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
 import '../services/shelf_store.dart';
@@ -39,6 +41,7 @@ import '../widgets/reader/reader_bubble.dart';
 import '../widgets/reader/reader_chapter_layout.dart';
 import '../widgets/reader/annotation/ink_canvas.dart';
 import '../widgets/reader/annotation/ink_strokes_painter.dart';
+import '../widgets/reader/annotation/ink_block_editor_sheet.dart';
 import '../widgets/reader/annotation/ink_controller.dart';
 import '../widgets/reader/annotation/ink_toolbar.dart';
 import '../widgets/reader/reader_controls.dart';
@@ -82,6 +85,9 @@ class ReaderPage extends StatefulWidget {
   final int startIndex;
   final bool localOnly;
   final ChapterTextLoader? chapterLoader;
+
+  /// 【青茄·Active Canvas】内嵌手写块存储（测试注入内存版；null = 真实加密盒）。
+  final ReaderInkBlockStore? inkBlockStore;
   final ReaderStore? readerStore;
   final ChapterCache? chapterCache;
   final ReaderDevice? readerDevice;
@@ -119,6 +125,7 @@ class ReaderPage extends StatefulWidget {
     required this.startIndex,
     this.localOnly = false,
     this.chapterLoader,
+    this.inkBlockStore,
     this.readerStore,
     this.chapterCache,
     this.readerDevice,
@@ -525,6 +532,33 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 【青茄重构·新增】本章批注/书摘（行内批注块 + 红线）。
   List<ReaderAnnotation> _annotations = const [];
+
+  // ==================== 【青茄·Active Canvas】内嵌手写块 ====================
+
+  late final ReaderInkBlockStore _inkBlockStore =
+      widget.inkBlockStore ?? ReaderInkBlockStore.instance;
+
+  /// 本章已确认的内嵌块（画布/便签），按锚点排序。
+  List<ReaderInkBlock> _inkBlocks = const [];
+
+  /// 草稿画布（未确认不落库；排版层以 [_kDraftInkId] 占位参与重排）。
+  _DraftInkBlock? _draftInkBlock;
+
+  /// 选中态的内嵌块 key（画布边框加亮 + 手柄/垃圾桶）。
+  String? _selectedInkKey;
+
+  /// 拖动底边手柄期间的实时高度预览（key → 高度；松手落盘后清除）。
+  final Map<String, double> _inkPreviewHeights = {};
+
+  /// 便签放置模式：下一次正文点按改为放便签（不翻页）。
+  bool _stickyArmed = false;
+
+  /// 内嵌块版本号：任何块变化都递增，驱动 [_prepareLayout] 重排。
+  int _inkBlockRevision = 0;
+  int _layoutInkBlockRevision = -1;
+
+  /// 内嵌块存储变化监听（与批注存储同一套刷新纪律）。
+  late final VoidCallback _inkBlockListener;
   int _annotationRevision = 0;
   int _layoutAnnotationRevision = -1;
   late final VoidCallback _annotationListener;
@@ -646,6 +680,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       if (mounted) unawaited(_loadAnnotations());
     };
     _annotationStore.changes.addListener(_annotationListener);
+    // 【青茄·Active Canvas】内嵌手写块存储变化 → 重载重排。
+    _inkBlockListener = _onInkBlockStoreChanged;
+    _inkBlockStore.changes.addListener(_inkBlockListener);
     _preferencesFuture = _loadPreferences();
     unawaited(_loadMarkChoice());
     _startEyeCareTimer();
@@ -1356,6 +1393,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         await _createAnnotation(excerpt: false);
       case ReaderParagraphAction.excerpt:
         await _createAnnotation(excerpt: true);
+      // 【青茄·Active Canvas】画布/便签/备注（规格 C1/C4/C6）。
+      case ReaderParagraphAction.canvas:
+        _beginInkDraft(selection.start);
+      case ReaderParagraphAction.sticky:
+        _closeSelectionBar(clearSelection: true);
+        await _placeStickyAt(selection.start);
+      case ReaderParagraphAction.note:
+        await _createNoteFromSelection();
     }
   }
 
@@ -1653,10 +1698,50 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     ..._inkUnderlines,
   ];
 
-  /// 交给排版层的行内批注块数据。
+  /// 交给排版层的行内批注块数据（批注/书摘 + 内嵌手写块 + 草稿画布）。
   List<ReaderInlineNote> get _inlineNotes => [
     for (final note in _annotations) _inlineNoteOf(note),
+    for (final block in _inkBlocks)
+      ReaderInlineNote(
+        id: _inkBlockKeyOf(block),
+        start: block.anchor,
+        end: block.anchor,
+        quote: '',
+        thought: '',
+        inkKind: block.kind,
+        inkHeight: _inkPreviewHeights[_inkBlockKeyOf(block)] ?? block.height,
+        inkFilled: block.hasContent,
+      ),
+    if (_draftInkBlock != null)
+      ReaderInlineNote(
+        id: _kDraftInkId,
+        start: _draftInkBlock!.anchor,
+        end: _draftInkBlock!.anchor,
+        quote: '',
+        thought: '',
+        inkKind: ReaderInlineNote.inkKindCanvas,
+        inkHeight: _draftInkBlock!.height,
+        inkFilled: true,
+      ),
   ];
+
+  static String _inkBlockKeyOf(ReaderInkBlock block) => ReaderInkBlockStore.keyFor(
+    bookId: block.bookId,
+    chapterId: block.chapterId,
+    anchor: block.anchor,
+    kind: block.kind,
+    createdAt: block.createdAt,
+  );
+
+  /// 画布盒宽（与 EmbeddedInkCanvas 的内边距口径一致：栏宽 - 12）。
+  double get _inkBlockBoxWidth => math.max(1.0, (_chapterLayout?.spec.width ?? 0) - 12);
+
+  /// 锚点上下文指纹（与整页墨迹同口径：锚点起 32 字符）。
+  String _anchorContext(int anchor) {
+    final text = _chapterContent.legacyText;
+    if (anchor < 0 || anchor >= text.length) return '';
+    return text.substring(anchor, math.min(text.length, anchor + 32));
+  }
 
   /// 加载本章批注/书摘（切章、切书、存储变化时都会重新走一遍）。
   Future<void> _loadAnnotations() async {
@@ -1676,6 +1761,378 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _annotations = loaded;
       ++_annotationRevision;
     });
+  }
+
+  // ---- 【青茄·Active Canvas】内嵌手写块：加载 / 草稿 / 确认 / 删除 ----
+
+  void _onInkBlockStoreChanged() {
+    if (mounted) unawaited(_loadInkBlocks());
+  }
+
+  Future<void> _loadInkBlocks() async {
+    final generation = _loadGeneration;
+    final chapterId = _chapter.itemId;
+    List<ReaderInkBlock> loaded;
+    try {
+      loaded = await _inkBlockStore.load(widget.bookId, chapterId);
+    } catch (_) {
+      loaded = const [];
+    }
+    if (!mounted || generation != _loadGeneration) return;
+    if (chapterId != _chapter.itemId) return;
+    setState(() {
+      _inkBlocks = loaded;
+      _inkPreviewHeights.clear();
+      if (_selectedInkKey != null &&
+          !loaded.any((b) => _inkBlockKeyOf(b) == _selectedInkKey)) {
+        _selectedInkKey = null;
+      }
+      ++_inkBlockRevision;
+    });
+  }
+
+  /// 选区菜单「画布」：在选区起点行后生成草稿画布。
+  void _beginInkDraft(int anchor) {
+    _closeSelectionBar(clearSelection: true);
+    setState(() {
+      _draftInkBlock = _DraftInkBlock(
+        anchor: anchor,
+        kind: ReaderInkBlock.kindCanvas,
+        height: ReaderInkBlock.defaultCanvasHeight,
+      );
+      ++_inkBlockRevision;
+    });
+  }
+
+  /// 草稿书写越界扩高（视图请求）。
+  void _growInkDraft(double height) {
+    final draft = _draftInkBlock;
+    if (draft == null) return;
+    final next = height.clamp(
+      ReaderInkBlock.minCanvasHeight,
+      ReaderInkBlock.maxCanvasHeight,
+    );
+    if (next <= draft.height + 0.5) return;
+    setState(() {
+      draft.height = next;
+      ++_inkBlockRevision;
+    });
+  }
+
+  void _cancelInkDraft() {
+    if (_draftInkBlock == null) return;
+    setState(() {
+      _draftInkBlock = null;
+      ++_inkBlockRevision;
+    });
+    _showMessage('已取消，草稿未保存');
+  }
+
+  Future<void> _confirmInkDraft() async {
+    final draft = _draftInkBlock;
+    if (draft == null) return;
+    final boxWidth = _inkBlockBoxWidth;
+    final normalized = ReaderInkBlock.normalized(
+      draft.strokes,
+      boxWidth: boxWidth,
+      boxHeight: draft.height,
+    );
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final block = ReaderInkBlock(
+      bookId: widget.bookId,
+      chapterId: _chapter.itemId,
+      anchor: draft.anchor,
+      anchorContext: _anchorContext(draft.anchor),
+      kind: draft.kind,
+      height: draft.height,
+      strokes: normalized,
+      createdAt: now,
+      updatedAt: now,
+      bookTitle: widget.title,
+      chapterTitle: _chapter.title,
+    );
+    // 【青茄·Active Canvas】确认即响应：先摘草稿重排（用户立刻看到
+    // 「画布定型」），落盘异步进行——失败只记日志，下一次进章重读。
+    unawaited(_inkBlockStore.add(block));
+    setState(() {
+      _draftInkBlock = null;
+      ++_inkBlockRevision;
+    });
+    _showMessage('画布已插入正文');
+  }
+
+  /// 画布选中态书写后的自动保存（防抖）。
+  final Map<String, Timer> _inkSaveTimers = {};
+
+  void _scheduleBlockSave(String key, List<InkStroke> raw) {
+    final block = _blockByKey(key);
+    if (block == null) return;
+    _inkSaveTimers[key]?.cancel();
+    _inkSaveTimers[key] = Timer(const Duration(milliseconds: 600), () {
+      final current = _blockByKey(key);
+      if (current == null) return;
+      unawaited(
+        _inkBlockStore.updateStrokes(
+          current,
+          ReaderInkBlock.normalized(
+            raw,
+            boxWidth: _inkBlockBoxWidth,
+            boxHeight: _inkPreviewHeights[key] ?? current.height,
+          ),
+        ),
+      );
+    });
+  }
+
+  ReaderInkBlock? _blockByKey(String key) {
+    for (final block in _inkBlocks) {
+      if (_inkBlockKeyOf(block) == key) return block;
+    }
+    return null;
+  }
+
+  /// 拖动底边手柄：实时预览高度（重排跟随），松手落盘。
+  void _onInkBlockResize(ReaderInlineNote note, double height) {
+    if (note.id == _kDraftInkId) {
+      _growInkDraft(height);
+      return;
+    }
+    final clamped = height.clamp(
+      ReaderInkBlock.minCanvasHeight,
+      ReaderInkBlock.maxCanvasHeight,
+    );
+    setState(() {
+      _inkPreviewHeights[note.id] = clamped;
+      ++_inkBlockRevision;
+    });
+  }
+
+  Future<void> _onInkBlockResizeEnd(ReaderInlineNote note) async {
+    final preview = _inkPreviewHeights[note.id];
+    if (preview == null) return;
+    final block = _blockByKey(note.id);
+    if (block != null) {
+      await _inkBlockStore.updateHeight(block, preview);
+      return; // store.changes → _loadInkBlocks 清预览表
+    }
+    if (!mounted) return;
+    setState(() {
+      _inkPreviewHeights.remove(note.id);
+      ++_inkBlockRevision;
+    });
+  }
+
+  /// 垃圾桶二次确认删除（画布与便签同语义，规格 C2）。
+  Future<void> _confirmDeleteInkBlock(ReaderInlineNote note) async {
+    final isDraft = note.id == _kDraftInkId;
+    final confirmed = await showAppDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除这块手写内容？'),
+        content: const Text(
+          '删除后这一块占位消失，下方文字会回流，笔迹不可恢复。',
+          style: TextStyle(fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('保留'),
+          ),
+          TextButton(
+            key: const ValueKey('reader-ink-block-delete-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (isDraft) {
+      _cancelInkDraft();
+      return;
+    }
+    final block = _blockByKey(note.id);
+    if (block == null) return;
+    await _inkBlockStore.remove(block);
+  }
+
+  /// 便签放置模式：下一次正文点按放置（不翻页），见 _handleTapZone。
+  void _armSticky() {
+    _closeSelectionBar(clearSelection: true);
+    _stickyArmed = true;
+    if (_controlsVisible) _toggleControls();
+    _showMessage('在正文上轻点，把便签放到那一行');
+  }
+
+  int? _inkAnchorAtLocalPoint(Offset position) {
+    final layout = _chapterLayout;
+    if (layout == null) return null;
+    for (final block in layout.blocks) {
+      if (block.isTitle || block.isImage || block.lines.isEmpty) continue;
+      if (position.dy < block.top - 8) continue;
+      if (position.dy > block.top + block.height + 8) continue;
+      final local = position.dy - block.top;
+      for (final line in block.lines) {
+        if (local >= line.top - 4 && local <= line.bottom + 4) {
+          return block.start + line.start;
+        }
+      }
+      return block.start;
+    }
+    return null;
+  }
+
+  Future<void> _placeStickyAt(int anchor) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _inkBlockStore.add(
+      ReaderInkBlock(
+        bookId: widget.bookId,
+        chapterId: _chapter.itemId,
+        anchor: anchor,
+        anchorContext: _anchorContext(anchor),
+        kind: ReaderInkBlock.kindSticky,
+        height: ReaderInkBlock.defaultCanvasHeight,
+        strokes: const [],
+        createdAt: now,
+        updatedAt: now,
+        bookTitle: widget.title,
+        chapterTitle: _chapter.title,
+      ),
+    );
+    if (!mounted) return;
+    _showMessage('便签已放置，点图标开始书写');
+  }
+
+  /// 折叠图标行点开：便签 → 书写面板；备注 → 文字编辑。
+  Future<void> _openInkBlock(ReaderInlineNote note) async {
+    if (note.inkKind == ReaderInlineNote.inkKindNote) {
+      final annotation = _annotationByKey(note.id);
+      if (annotation == null) return;
+      await _editNoteAnnotation(annotation);
+      return;
+    }
+    final block = _blockByKey(note.id);
+    if (block == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) =>
+                          InkBlockEditorSheet(block: block, store: _inkBlockStore),
+    );
+    unawaited(_loadInkBlocks());
+  }
+
+  ReaderAnnotation? _annotationByKey(String key) {
+    for (final note in _annotations) {
+      if (note.key == key) return note;
+    }
+    return null;
+  }
+
+  /// 备注文字编辑（复用批注编辑器弹层）：清空文字保存 = 删除备注。
+  Future<void> _editNoteAnnotation(ReaderAnnotation annotation) async {
+    final draft = await showAnnotationEditor(
+      context,
+      quote: annotation.text,
+      initial: annotation.thought,
+      title: '写备注',
+      initialTags: annotation.tags,
+      initialCategory: annotation.category,
+    );
+    if (draft == null || !mounted) return;
+    if (draft.thought.trim().isEmpty) {
+      try {
+        await _annotationStore.remove(annotation.key);
+      } catch (_) {
+        _showMessage('删除失败，请重试');
+      }
+      return;
+    }
+    await _annotationStore.updateNote(annotation.key, draft);
+  }
+
+  /// 手写内嵌块回调集（渲染层只上报事件，状态与存储都在本页）。
+  ReaderInkBlockActions get _inkBlockActions => ReaderInkBlockActions(
+    isDraft: (note) => note.id == _kDraftInkId,
+    isSelected: (note) => _selectedInkKey == note.id,
+    strokesFor: (note) {
+      if (note.id == _kDraftInkId) {
+        return _draftInkBlock?.strokes ?? const [];
+      }
+      final block = _blockByKey(note.id);
+      if (block == null) return const [];
+      return block.strokesForBox(
+        _inkBlockBoxWidth,
+        _inkPreviewHeights[note.id] ?? block.height,
+      );
+    },
+    onStrokes: (note, raw) {
+      if (note.id == _kDraftInkId) {
+        _draftInkBlock?.strokes = raw;
+        return;
+      }
+      _scheduleBlockSave(note.id, raw);
+    },
+    onDraftGrow: (note, height) => _growInkDraft(height),
+    onConfirmDraft: (_) => unawaited(_confirmInkDraft()),
+    onCancelDraft: (_) => _cancelInkDraft(),
+    onSelect: (note) {
+      setState(() {
+        _selectedInkKey = _selectedInkKey == note.id ? null : note.id;
+        ++_inkBlockRevision;
+      });
+    },
+    onResize: _onInkBlockResize,
+    onResizeEnd: _onInkBlockResizeEndTearoff,
+    onRequestDelete: _confirmDeleteInkBlockTearoff,
+    onOpenBlock: _openInkBlockTearoff,
+  );
+
+  void _onInkBlockResizeEndTearoff(ReaderInlineNote note) =>
+      unawaited(_onInkBlockResizeEnd(note));
+  void _confirmDeleteInkBlockTearoff(ReaderInlineNote note) =>
+      unawaited(_confirmDeleteInkBlock(note));
+  void _openInkBlockTearoff(ReaderInlineNote note) =>
+      unawaited(_openInkBlock(note));
+
+  /// 创建打字备注（选区菜单「备注」）：同位置已有备注则直接进编辑。
+  Future<void> _createNoteFromSelection() async {
+    final selection = _selection;
+    final layout = _chapterLayout;
+    if (selection == null || layout == null || !selection.isValid) return;
+    final existing = _annotations.where((note) {
+      if (note.type != ReaderAnnotation.kTypeNote) return false;
+      return selection.start >= note.start - 2 &&
+          selection.start <= note.end + 2;
+    });
+    if (existing.isNotEmpty) {
+      _closeSelectionBar(clearSelection: true);
+      await _editNoteAnnotation(existing.first);
+      return;
+    }
+    _closeSelectionBar(clearSelection: true);
+    try {
+      await _annotationStore.add(
+        ReaderAnnotation(
+          bookId: widget.bookId,
+          chapterId: _chapter.itemId,
+          start: selection.start,
+          end: selection.end,
+          text: layout.textInRange(selection.start, selection.end),
+          thought: '',
+          type: ReaderAnnotation.kTypeNote,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+          bookTitle: widget.title,
+          chapterTitle: _chapter.title,
+        ),
+      );
+      if (!mounted) return;
+      _showMessage('备注已添加，点图标书写');
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('保存失败，请重试');
+    }
   }
 
   // ==================== 【第 6 组】手写墨迹批注 ====================
@@ -2102,6 +2559,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     unawaited(ReadingStatsStore.instance.flush());
     _ink?.dispose();
     _annotationStore.changes.removeListener(_annotationListener);
+    _inkBlockStore.changes.removeListener(_inkBlockListener);
     // 离开阅读页必须把系统栏还给其他页面，避免沉浸模式泄漏出去。
     _appliedSystemUiMode = SystemUiMode.edgeToEdge;
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
@@ -2256,6 +2714,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_loadUnderlines());
       unawaited(_loadAnnotations());
       unawaited(_loadChapterInk());
+      unawaited(_loadInkBlocks());
       // 本章的字数预算按正文长度重置，之后由停留时长逐步折算。
       _resetChapterChars(content, selectedChapter.title);
       if (!selectedLoaded.fetched && content.needsRefresh()) {
@@ -3129,6 +3588,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _layoutIdeasRevision == _ideasRevision &&
         _layoutUnderlineRevision == _underlineRevision &&
         _layoutAnnotationRevision == _annotationRevision &&
+        _layoutInkBlockRevision == _inkBlockRevision &&
         _layoutBubblesVisible == _preferences.showParagraphBubbles) {
       return _chapterLayout!;
     }
@@ -3144,6 +3604,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _layoutIdeasRevision == _ideasRevision &&
         _layoutUnderlineRevision == _underlineRevision &&
         _layoutAnnotationRevision == _annotationRevision &&
+        _layoutInkBlockRevision == _inkBlockRevision &&
         _layoutBubblesVisible == bubblesVisible;
     final layout = reusable
         ? _chapterLayout!
@@ -3163,6 +3624,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _layoutIdeasRevision = _ideasRevision;
     _layoutUnderlineRevision = _underlineRevision;
     _layoutAnnotationRevision = _annotationRevision;
+    _layoutInkBlockRevision = _inkBlockRevision;
     _layoutBubblesVisible = bubblesVisible;
     final initialRestore = _needsRestore;
     final restored = initialRestore
@@ -3645,6 +4107,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 点击区域九宫格分发：按点按位置取九宫格动作执行。
   void _handleTapZone(Offset position, BoxConstraints constraints) {
+    // 【青茄·Active Canvas】便签放置模式：下一次点按 = 放置（不翻页）。
+    if (_stickyArmed) {
+      setState(() => _stickyArmed = false);
+      final anchor = _inkAnchorAtLocalPoint(position);
+      if (anchor != null) unawaited(_placeStickyAt(anchor));
+      return;
+    }
     final action = readerTapZoneActionAt(
       zones: _preferences.tapZones,
       dx: position.dx,
@@ -4359,6 +4828,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           page: chapterTurn.page,
           spec: chapterTurn.spec,
           imageProviderFactory: widget.imageProviderFactory,
+          inkActions: _inkBlockActions,
         ),
       );
     }
@@ -4464,6 +4934,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             rangeUnderlines: _rangeUnderlines,
                             annotationRanges: _annotationRanges,
                             narrationRange: _narrationRange,
+                            inkActions: _inkBlockActions,
                           )
                         : _buildScrollContent(layout, scope),
                       ),
@@ -4799,6 +5270,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     rangeUnderlines: _rangeUnderlines,
                     annotationRanges: _annotationRanges,
                     narrationRange: _narrationRange,
+                    inkActions: _inkBlockActions,
                     onParagraphLongPress: (block, position) =>
                         unawaited(_onParagraphLongPress(block, position)),
                     onParagraphLongPressMoveUpdate:
@@ -4826,6 +5298,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         note: note,
         height: block.height,
         maxLines: block.noteLines,
+        inkActions: _inkBlockActions,
       );
     }
     final image = block.illustration;
@@ -4887,6 +5360,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       onAutoTurn: _toggleAutoTurn,
       onInk: _paged && _chapterLayout != null ? _enterInkMode : null,
       onInkList: _chapterInk.isNotEmpty ? _showInkList : null,
+      onSticky: _armSticky,
     );
   }
 
@@ -4982,18 +5456,41 @@ class _ScrollSegment {
 }
 
 /// 一条批注/书摘 → 排版层行内块；当前章与相邻章的加载路径共用。
-ReaderInlineNote _inlineNoteOf(ReaderAnnotation note) => ReaderInlineNote(
-  id: note.key,
-  start: note.start,
-  end: note.end,
-  quote: note.text,
-  thought: note.thought,
-  isExcerpt: !note.isAnnot,
-  category: note.category,
-  tags: note.tags,
-  markerType: note.markerType,
-  markerLabel: note.displayMarkerLabel,
-  markerColorValue: note.effectiveMarkerColorValue,
-  markStyle: note.markStyle,
-  markColorValue: note.effectiveMarkColorValue,
-);
+/// 【青茄·Active Canvas】草稿画布在排版层的占位 id（未确认不落库）。
+const String _kDraftInkId = '__draft_ink__';
+
+/// 草稿画布状态：锚点 + 当前高度 + 暂存笔迹（块本地像素坐标）。
+class _DraftInkBlock {
+  _DraftInkBlock({
+    required this.anchor,
+    required this.kind,
+    required this.height,
+  });
+
+  final int anchor;
+  final String kind;
+  double height;
+  List<InkStroke> strokes = const [];
+}
+
+ReaderInlineNote _inlineNoteOf(ReaderAnnotation note) {
+  final isNote = note.type == ReaderAnnotation.kTypeNote;
+  return ReaderInlineNote(
+    id: note.key,
+    start: note.start,
+    end: note.end,
+    quote: note.text,
+    thought: note.thought,
+    isExcerpt: !note.isAnnot,
+    category: note.category,
+    tags: note.tags,
+    markerType: note.markerType,
+    markerLabel: note.displayMarkerLabel,
+    markerColorValue: note.effectiveMarkerColorValue,
+    markStyle: note.markStyle,
+    markColorValue: note.effectiveMarkColorValue,
+    // 【青茄·Active Canvas】打字备注 = 折叠图标行，不占正文空间（D8）。
+    inkKind: isNote ? ReaderInlineNote.inkKindNote : '',
+    inkFilled: isNote && note.thought.trim().isNotEmpty,
+  );
+}

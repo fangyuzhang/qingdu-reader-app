@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
@@ -14,6 +16,10 @@ enum ReaderParagraphAction {
   removeUnderline,
   annot,
   excerpt,
+  // 【青茄·Active Canvas】画布（内嵌手写）/ 便签（折叠态画布）/ 备注（打字笔记图标）。
+  canvas,
+  sticky,
+  note,
 }
 
 /// Floating action bar for a long-pressed paragraph or a dragged selection,
@@ -163,7 +169,12 @@ class ReaderParagraphMenu extends StatelessWidget {
     double belowContentHeight = 0,
   }) {
     const flipClearance = 10.0;
-    final barWidth = _barWidth(showListening: showListening);
+    // 【青茄·Active Canvas】动作增至 8 项后，窄屏放不下整条：定位宽度
+    // 钳到可用屏宽（内容条可横向滚动，见 build）。
+    final barWidth = math.min(
+      _barWidth(showListening: showListening),
+      math.max(120.0, view.width - _margin * 2),
+    );
     // Only the tip facing the paragraph is laid out, exactly like `m.java`:
     // it calls `UIKt.gone` on the other arrow, which takes no space. Total
     // height is 8 (tip) + 56 (body) = 64dp, the same 64dp `m.java` uses when
@@ -238,6 +249,28 @@ class ReaderParagraphMenu extends StatelessWidget {
           label: '书摘',
           onTap: () => onAction(ReaderParagraphAction.excerpt),
         ),
+        // 【青茄·Active Canvas】画布：在此行后插入内嵌手写画布（占位、
+        // 后续文字下移重排）。
+        _Item(
+          key: const ValueKey('reader-action-canvas'),
+          icon: LucideIcons.frame,
+          label: '画布',
+          onTap: () => onAction(ReaderParagraphAction.canvas),
+        ),
+        // 【青茄·Active Canvas】便签：此处放一枚折叠便签图标。
+        _Item(
+          key: const ValueKey('reader-action-sticky'),
+          icon: LucideIcons.file_pen,
+          label: '便签',
+          onTap: () => onAction(ReaderParagraphAction.sticky),
+        ),
+        // 【青茄·Active Canvas】备注：打字笔记图标行，不占正文空间。
+        _Item(
+          key: const ValueKey('reader-action-note'),
+          icon: LucideIcons.message_square,
+          label: '备注',
+          onTap: () => onAction(ReaderParagraphAction.note),
+        ),
       ],
     );
     return Material(
@@ -253,6 +286,9 @@ class ReaderParagraphMenu extends StatelessWidget {
           else
             const SizedBox.shrink(),
           Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width - _margin * 2,
+            ),
             height: _itemHeight + _verticalPadding * 2,
             padding: const EdgeInsets.symmetric(
               horizontal: _multiPadding,
@@ -262,7 +298,10 @@ class ReaderParagraphMenu extends StatelessWidget {
               color: _background,
               borderRadius: BorderRadius.circular(_radius),
             ),
-            child: items,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: items,
+            ),
           ),
           if (!belowAnchor)
             _Arrow(pointingUp: false, color: _background)

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/curated_book.dart';
 import '../models/ink_annotation.dart';
 import '../models/media_item.dart';
+import '../models/reader_ink_block.dart';
 import '../services/api_client.dart';
 import '../services/curated_resolver.dart';
 import '../services/detail_snapshot_cache.dart';
@@ -16,6 +17,7 @@ import '../services/library_store.dart';
 import '../services/note_card_exporter.dart';
 import '../services/note_timeline.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/reader_ink_block_store.dart';
 import '../services/reader_mark_style.dart';
 import '../services/reader_marker_type_store.dart';
 import '../services/reader_underline_store.dart';
@@ -67,9 +69,19 @@ class _MarkEntry {
       '$bookId|$chapterId|${startOffset ?? 'b$blockIndex'}|${style.storageValue}';
 }
 
+/// 「手写」时间线一行的统一形态：老墨迹批注与正文内嵌手写块共用同一套
+/// 排序与日期轴，行渲染与跳转按运行时类型分派。
+abstract class _InkTimelineItem {
+  /// 排序与日期轴用的时间戳（毫秒）。
+  int get createdAt;
+
+  /// 行 key。
+  String get key;
+}
+
 /// 一条手写墨迹在笔记页里的展示形态：墨迹本体 + 书名/章节（或页码）。
 @immutable
-class _InkEntry {
+class _InkEntry implements _InkTimelineItem {
   const _InkEntry({
     required this.annotation,
     required this.bookTitle,
@@ -84,8 +96,34 @@ class _InkEntry {
   /// PDF 固定版式书的页码（chapterId = pdf:page:N）；流式书为 null。
   final int? pdfPage;
 
+  @override
   int get createdAt => annotation.createdAt;
+  @override
   String get key => annotation.key;
+}
+
+/// 正文内嵌手写块（画布/便签）在笔记页里的展示形态：块本体 + 书名/章节。
+@immutable
+class _InkBlockEntry implements _InkTimelineItem {
+  const _InkBlockEntry({
+    required this.block,
+    required this.bookTitle,
+    required this.chapterTitle,
+  });
+
+  final ReaderInkBlock block;
+  final String bookTitle;
+  final String chapterTitle;
+
+  /// 存档异常时 createdAt 可能为 0，退回 updatedAt 保证还能进时间轴。
+  @override
+  int get createdAt => block.createdAt > 0 ? block.createdAt : block.updatedAt;
+
+  /// 块没有自带 key（默认决策）：用「ib: + 坐标空间字段」拼一个稳定串。
+  @override
+  String get key =>
+      'ib:${block.bookId}|${block.chapterId}|${block.anchor}|${block.kind}'
+      '|${block.createdAt}';
 }
 
 @immutable
@@ -111,12 +149,20 @@ class _BookNotesGroup {
 /// 笔记页：按时间轴回顾批注与书摘，也可以按书分组查看，并支持
 /// 书籍/时间/分类/标签组合筛选。
 class NotesPage extends StatefulWidget {
-  const NotesPage({super.key, this.store, this.underlineStore});
+  const NotesPage({
+    super.key,
+    this.store,
+    this.underlineStore,
+    this.inkBlockStore,
+  });
 
   final ReaderAnnotationStore? store;
 
   /// 测试注入用；默认走全局划线存储。
   final ReaderUnderlineStore? underlineStore;
+
+  /// 测试注入用；默认走全局内嵌手写块存储（画布/便签）。
+  final ReaderInkBlockStore? inkBlockStore;
 
   @override
   State<NotesPage> createState() => _NotesPageState();
@@ -125,6 +171,9 @@ class NotesPage extends StatefulWidget {
 class _NotesPageState extends State<NotesPage> {
   ReaderAnnotationStore get _store =>
       widget.store ?? ReaderAnnotationStore.instance;
+
+  ReaderInkBlockStore get _inkBlockStore =>
+      widget.inkBlockStore ?? ReaderInkBlockStore.instance;
 
   List<ReaderAnnotation> _all = const [];
   NoteTimelineFilters _filters = const NoteTimelineFilters();
@@ -172,6 +221,10 @@ class _NotesPageState extends State<NotesPage> {
   List<InkAnnotation> _ink = const [];
   List<_InkEntry> _inkEntries = const [];
 
+  /// 正文内嵌手写块（画布/便签，ReaderInkBlockStore 全量，按 createdAt 排序）。
+  List<ReaderInkBlock> _inkBlocks = const [];
+  List<_InkBlockEntry> _inkBlockEntries = const [];
+
   /// 当前拖动组的成员（含最初拖起的那枚；磁吸吸收会追加）。
   /// 空列表 = 没有调色板拖动进行中。
   List<NoteTagDrag> _dragGroup = const [];
@@ -206,6 +259,8 @@ class _NotesPageState extends State<NotesPage> {
   void initState() {
     super.initState();
     _store.changes.addListener(_reload);
+    // 内嵌手写块（画布/便签）写库时同样整页重载。
+    _inkBlockStore.changes.addListener(_reload);
     _loadDeletedPresets();
     _reload();
   }
@@ -236,18 +291,26 @@ class _NotesPageState extends State<NotesPage> {
   @override
   void dispose() {
     _store.changes.removeListener(_reload);
+    _inkBlockStore.changes.removeListener(_reload);
     super.dispose();
   }
 
   void _reload() => unawaited(_load());
 
   Future<void> _load() async {
-    final entries = await _store.loadAll();
     final underlineStore =
         widget.underlineStore ?? ReaderUnderlineStore.instance;
-    final ranges = await underlineStore.loadAllRanges();
-    final paragraphs = await underlineStore.loadAllParagraphs();
-    final ink = await InkAnnotationStore.instance.loadAll();
+    // 各存储互不依赖，同一批并行起读（内嵌手写块与批注/划线/墨迹一起装）。
+    final entriesFuture = _store.loadAll();
+    final rangesFuture = underlineStore.loadAllRanges();
+    final paragraphsFuture = underlineStore.loadAllParagraphs();
+    final inkFuture = InkAnnotationStore.instance.loadAll();
+    final inkBlocksFuture = _inkBlockStore.loadAll();
+    final entries = await entriesFuture;
+    final ranges = await rangesFuture;
+    final paragraphs = await paragraphsFuture;
+    final ink = await inkFuture;
+    final inkBlocks = await inkBlocksFuture;
     await ReaderMarkerTypeStore.instance.load();
     final meta = _loadBookMeta();
     if (!mounted) return;
@@ -260,6 +323,8 @@ class _NotesPageState extends State<NotesPage> {
       _marks = _buildMarks(ranges, paragraphs, entries, meta.titles);
       _ink = ink;
       _inkEntries = _buildInkEntries(ink, meta.titles);
+      _inkBlocks = inkBlocks;
+      _inkBlockEntries = _buildInkBlockEntries(inkBlocks, meta.titles);
       _loading = false;
       _pruneLeavingBadges(entries);
       // 兜底：任何拖动状态不允许跨数据重载存活（垃圾桶删除是异步链，
@@ -577,7 +642,9 @@ class _NotesPageState extends State<NotesPage> {
 
   int get _annotCount => _all.where((e) => e.isAnnot).length;
   int get _excerptCount => _all.length - _annotCount;
-  int get _inkCount => _ink.length;
+
+  /// 「手写」chip 计数：墨迹批注 + 正文内嵌手写块。
+  int get _inkCount => _ink.length + _inkBlocks.length;
 
   /// 书名优先用笔记里记下的，其次是阅读历史/书单缓存里的。
   String _titleOf(String bookId, String fallback) {
@@ -612,9 +679,9 @@ class _NotesPageState extends State<NotesPage> {
       if (_markStyleFilter == null || mark.style == _markStyleFilter) mark,
   ];
 
-  /// 「手写」类型的数据：书与时间维度与时间线同一套筛选；线型/标签
-  /// 维度对墨迹不存在。
-  List<_InkEntry> get _visibleInk {
+  /// 「手写」类型的数据：墨迹批注与内嵌手写块合并成一条按时间倒序的
+  /// 时间轴；书与时间维度和时间线同一套筛选，线型/标签维度不存在。
+  List<_InkTimelineItem> get _visibleInk {
     final range = _filters.resolveRange(DateTime.now());
     final start = range == null
         ? null
@@ -631,12 +698,16 @@ class _NotesPageState extends State<NotesPage> {
       return !created.isBefore(start) && created.isBefore(endExclusive);
     }
 
-    return [
+    final entries = <_InkTimelineItem>[
       for (final entry in _inkEntries)
         if (_filters.bookId == null ||
             entry.annotation.bookId == _filters.bookId)
           if (inRange(entry.createdAt)) entry,
-    ];
+      for (final entry in _inkBlockEntries)
+        if (_filters.bookId == null || entry.block.bookId == _filters.bookId)
+          if (inRange(entry.createdAt)) entry,
+    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return entries;
   }
 
   /// 墨迹记录补书名/章节名：PDF 固定版式书的 chapterId 是 pdf:page:N，
@@ -674,6 +745,47 @@ class _NotesPageState extends State<NotesPage> {
             chapterTitle: chapterTitleOf(item.bookId, item.chapterId),
           ),
     ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List.unmodifiable(entries);
+  }
+
+  /// 内嵌手写块补书名/章节名：块自带存档时盖的书名/章节名，缺了再走
+  /// 与划线同一套阅读历史/章节快照解析，仍没有兜底「未知章节」。
+  List<_InkBlockEntry> _buildInkBlockEntries(
+    List<ReaderInkBlock> blocks,
+    Map<String, String> knownTitles,
+  ) {
+    final chapterTitles = <String, Map<String, String>>{};
+    String chapterTitleOf(String bookId, String chapterId) {
+      final cached = chapterTitles[bookId] ??= {
+        for (final chapter
+            in DetailSnapshotCache.instance.read(bookId)?.chapters ??
+                const <Chapter>[])
+          chapter.itemId: chapter.title,
+      };
+      return cached[chapterId] ?? '';
+    }
+
+    String bookTitleOf(ReaderInkBlock block) {
+      final own = block.bookTitle.trim();
+      if (own.isNotEmpty) return own;
+      return knownTitles[block.bookId] ?? '未知书籍';
+    }
+
+    String chapterLabelOf(ReaderInkBlock block) {
+      final own = block.chapterTitle.trim();
+      if (own.isNotEmpty) return own;
+      final cached = chapterTitleOf(block.bookId, block.chapterId).trim();
+      return cached.isEmpty ? '未知章节' : cached;
+    }
+
+    final entries = <_InkBlockEntry>[
+      for (final block in blocks)
+        _InkBlockEntry(
+          block: block,
+          bookTitle: bookTitleOf(block),
+          chapterTitle: chapterLabelOf(block),
+        ),
+    ];
     return List.unmodifiable(entries);
   }
 
@@ -1661,21 +1773,21 @@ class _NotesPageState extends State<NotesPage> {
         },
       );
 
-  /// 「手写」类型下的时间线：与划线同款日期轴 + 卡片，卡片主体是
-  /// 墨迹缩略（按存储页面宽高比铺宽）。
-  Widget _buildInkTimeline(HomePalette palette, List<_InkEntry> entries) =>
+  /// 「手写」类型下的时间线：与划线同款日期轴 + 卡片。墨迹批注卡片主体
+  /// 是墨迹缩略（按存储页面宽高比铺宽）；内嵌手写块（画布/便签）是轻量行。
+  Widget _buildInkTimeline(HomePalette palette, List<_InkTimelineItem> entries) =>
       ListView.builder(
         key: const ValueKey('notes-ink-timeline'),
         padding: const EdgeInsets.fromLTRB(12, 4, 16, 32),
         itemCount: entries.length,
         itemBuilder: (context, index) {
-          final entry = entries[index];
+          final item = entries[index];
           final previous = index == 0 ? null : entries[index - 1];
           final next = index + 1 >= entries.length ? null : entries[index + 1];
           final firstOfDay = previous == null ||
-              !_sameDay(previous.createdAt, entry.createdAt);
+              !_sameDay(previous.createdAt, item.createdAt);
           final lastOfDay =
-              next == null || !_sameDay(next.createdAt, entry.createdAt);
+              next == null || !_sameDay(next.createdAt, item.createdAt);
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: IntrinsicHeight(
@@ -1718,7 +1830,7 @@ class _NotesPageState extends State<NotesPage> {
                               fit: BoxFit.scaleDown,
                               alignment: Alignment.centerRight,
                               child: Text(
-                                _dayLabel(entry.createdAt),
+                                _dayLabel(item.createdAt),
                                 maxLines: 1,
                                 softWrap: false,
                                 textAlign: TextAlign.right,
@@ -1735,11 +1847,17 @@ class _NotesPageState extends State<NotesPage> {
                     ),
                   ),
                   Expanded(
-                    child: _InkRow(
-                      key: ValueKey('ink-row-${entry.key}'),
-                      entry: entry,
-                      onTap: () => _openInk(entry),
-                    ),
+                    child: item is _InkBlockEntry
+                        ? _InkBlockRow(
+                            key: ValueKey('ink-block-row-${item.key}'),
+                            entry: item,
+                            onTap: () => _openInkBlock(item),
+                          )
+                        : _InkRow(
+                            key: ValueKey('ink-row-${item.key}'),
+                            entry: item as _InkEntry,
+                            onTap: () => _openInk(item),
+                          ),
                   ),
                 ],
               ),
@@ -1789,6 +1907,17 @@ class _NotesPageState extends State<NotesPage> {
       bookTitle: entry.bookTitle,
       chapterId: item.chapterId,
       textOffset: item.startOffset,
+    );
+  }
+
+  /// 打开内嵌手写块（画布/便签）所在处：与批注/划线/墨迹行同一套章节
+  /// 跳转（[_openChapter]），textOffset 用块锚点（章节文本偏移）。
+  Future<void> _openInkBlock(_InkBlockEntry entry) async {
+    await _openChapter(
+      bookId: entry.block.bookId,
+      bookTitle: entry.bookTitle,
+      chapterId: entry.block.chapterId,
+      textOffset: entry.block.anchor,
     );
   }
 
@@ -2733,6 +2862,111 @@ class _InkRow extends StatelessWidget {
                   style: TextStyle(fontSize: 10, color: palette.muted),
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 内嵌手写块卡片：画布/便签徽标 + 书名/时间 + 笔迹摘要 + 位置行。
+///
+/// 块笔迹是归一化坐标，InkStrokesPainter 理论上能直绘；但块上没有存档
+/// 盒子宽高比（只有画布高度），铺宽缩略会拉变形，这里走「徽标 + 笔迹
+/// 笔数」的轻量行，不画缩略（默认决策）。
+class _InkBlockRow extends StatelessWidget {
+  const _InkBlockRow({super.key, required this.entry, required this.onTap});
+
+  final _InkBlockEntry entry;
+  final VoidCallback onTap;
+
+  /// 便签徽标色（画布沿用墨迹默认墨色，与手写行同源）。
+  static const _stickyColorValue = 0xFF4F7CD1;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    final block = entry.block;
+    final accent = block.isSticky
+        ? const Color(_stickyColorValue)
+        : const Color(InkAnnotation.defaultColorValue);
+    return Material(
+      color: palette.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: palette.line, width: 0.6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.45),
+                        width: 0.6,
+                      ),
+                    ),
+                    child: Text(
+                      block.isSticky ? '便签' : '画布',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: accent,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      entry.bookTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: palette.muted,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _timestampLabel(entry.createdAt),
+                    style: TextStyle(fontSize: 10, color: palette.muted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                block.hasContent ? '${block.strokes.length} 笔手写' : '暂无笔迹',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.5,
+                  color: palette.ink.withValues(alpha: 0.86),
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                entry.chapterTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: palette.muted),
+              ),
             ],
           ),
         ),

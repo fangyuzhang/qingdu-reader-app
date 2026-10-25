@@ -6,10 +6,13 @@ import '../../../services/debug_tools.dart';
 import '../../home/home_design.dart';
 import 'ink_controller.dart';
 
-/// 批注模式工具栏：笔/橡皮/撤销/重做/颜色/笔宽（+调试手指开关、完成）。
+/// 批注模式工具栏：笔/橡皮/套索/撤销/重做/颜色/笔宽（+调试手指开关、完成）。
 ///
 /// 风格对齐设置卡片：palette.surface 圆角卡 + 0.6 描边；浮在内容之上，
 /// 不挤压正文（README 约定 #6）。
+///
+/// 套索态：lasso 工具且有选中笔迹时，追加一行编辑动作
+/// （复制/剪切/删除/粘贴/完成圈选），Kindle Scribe 式对可编辑笔迹对象操作。
 class InkToolbar extends StatelessWidget {
   const InkToolbar({
     super.key,
@@ -47,7 +50,7 @@ class InkToolbar extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: palette.line, width: 0.6),
           ),
-          // 单行排不下（工具 4 + 颜色 3 + 笔宽 3 + 手指 + 完成 ≈ 600 逻辑
+          // 单行排不下（工具 5 + 颜色 3 + 笔宽 3 + 手指 + 完成 ≈ 640 逻辑
           // 像素，手机视口只有 ~390）：窄屏折两行，宽屏仍单行。此前 Row
           // 直接溢出，「完成/手指绘制」被渲染到屏幕外——批注模式既无法
           // 正常退出也无法开手指绘制（真机 1080px 实测定位）。
@@ -67,6 +70,13 @@ class InkToolbar extends StatelessWidget {
                   active: controller.tool == InkTool.eraser,
                   onTap: () => controller.selectTool(InkTool.eraser),
                   tooltip: '橡皮',
+                ),
+                _toolButton(
+                  context,
+                  icon: LucideIcons.lasso,
+                  active: controller.tool == InkTool.lasso,
+                  onTap: () => controller.selectTool(InkTool.lasso),
+                  tooltip: '套索',
                 ),
                 const SizedBox(width: 2),
                 _iconButton(
@@ -112,6 +122,9 @@ class InkToolbar extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
               );
+              // 套索编辑行：lasso 工具 + 有选中笔迹时才出现。
+              final selectionActions =
+                  controller.tool == InkTool.lasso && controller.hasSelection;
               final twoRows = constraints.maxWidth < 620;
               if (twoRows) {
                 return Column(
@@ -120,11 +133,22 @@ class InkToolbar extends StatelessWidget {
                     Row(children: [...tools, const Spacer(), done]),
                     const SizedBox(height: 2),
                     Row(children: palette_),
+                    if (selectionActions) ...[
+                      const SizedBox(height: 2),
+                      _selectionActions(context),
+                    ],
                   ],
                 );
               }
-              return Row(
-                children: [...tools, ...palette_, const Spacer(), done],
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [...tools, ...palette_, const Spacer(), done]),
+                  if (selectionActions) ...[
+                    const SizedBox(height: 2),
+                    _selectionActions(context),
+                  ],
+                ],
               );
             },
           ),
@@ -132,6 +156,52 @@ class InkToolbar extends StatelessWidget {
       ),
     );
   }
+
+  /// 套索选中后的编辑动作行：复制/剪切/删除/粘贴（剪贴板空时隐藏）/
+  /// 完成圈选（退出套索回到笔）。
+  Widget _selectionActions(BuildContext context) => Row(
+    children: [
+      const SizedBox(width: 2),
+      _iconButton(
+        context,
+        icon: LucideIcons.copy,
+        tooltip: '复制',
+        onTap: controller.copySelected,
+        key: const Key('ink-copy'),
+      ),
+      _iconButton(
+        context,
+        icon: LucideIcons.scissors,
+        tooltip: '剪切',
+        onTap: controller.cutSelected,
+        key: const Key('ink-cut'),
+      ),
+      _iconButton(
+        context,
+        icon: LucideIcons.trash,
+        tooltip: '删除',
+        onTap: controller.deleteSelected,
+        key: const Key('ink-delete'),
+      ),
+      if (controller.hasClipboard)
+        _iconButton(
+          context,
+          icon: LucideIcons.clipboard_paste,
+          tooltip: '粘贴到页面中心',
+          onTap: () => controller.pasteAt(const Offset(0.5, 0.5)),
+          key: const Key('ink-paste'),
+        ),
+      const Spacer(),
+      _iconButton(
+        context,
+        icon: LucideIcons.check,
+        tooltip: '完成圈选',
+        onTap: () => controller.selectTool(InkTool.pen),
+        key: const Key('ink-lasso-done'),
+      ),
+      const SizedBox(width: 2),
+    ],
+  );
 
   Widget _toolButton(
     BuildContext context, {

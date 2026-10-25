@@ -4,12 +4,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
+import '../../models/ink_annotation.dart';
 import '../../services/reader_annotation_store.dart';
 import '../../services/reader_mark_style.dart';
 import '../notes/note_tag_drag.dart';
 import '../notes/tag_trash.dart';
 import '../../services/reader_marker_type_store.dart';
 import '../app_dialog.dart';
+import 'annotation/embedded_ink_block_view.dart';
 import 'reader_chapter_layout.dart';
 
 /// 行内批注块：紧跟被标注段落下方，独占一行或多行。
@@ -20,12 +22,17 @@ class ReaderNoteBlock extends StatefulWidget {
     required this.height,
     required this.maxLines,
     this.store,
+    this.inkActions,
   });
 
   final ReaderInlineNote note;
   final double height;
   final int maxLines;
   final ReaderAnnotationStore? store;
+
+  /// 【青茄·Active Canvas】手写内嵌块（画布/便签/备注）的回调集；普通
+  /// 文字批注块为 null。回调与状态都归阅读页所有（草稿状态机/存储/重排）。
+  final ReaderInkBlockActions? inkActions;
 
   @override
   State<ReaderNoteBlock> createState() => _ReaderNoteBlockState();
@@ -40,6 +47,11 @@ class _ReaderNoteBlockState extends State<ReaderNoteBlock> {
   @override
   Widget build(BuildContext context) {
     final note = widget.note;
+    // 【青茄·Active Canvas】手写内嵌块分派：画布 / 折叠图标行（便签/备注）。
+    final actions = widget.inkActions;
+    if (actions != null && note.inkKind.isNotEmpty) {
+      return _buildInkBlock(context, note, actions);
+    }
     final badgeColor = Color(note.badgeColorValue);
     final textStyle = TextStyle(
       inherit: false,
@@ -210,6 +222,85 @@ class _ReaderNoteBlockState extends State<ReaderNoteBlock> {
       ).showSnackBar(const SnackBar(content: Text('删除失败，请重试')));
     }
   }
+
+  /// 手写内嵌块渲染：画布占位（草稿/已确认）或折叠图标行。
+  Widget _buildInkBlock(
+    BuildContext context,
+    ReaderInlineNote note,
+    ReaderInkBlockActions actions,
+  ) {
+    if (note.inkKind == ReaderInlineNote.inkKindCanvas) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final width = math.max(1.0, constraints.maxWidth - 12);
+          final height = math.max(1.0, widget.height - 8);
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: EmbeddedInkCanvas(
+              key: ValueKey('reader-ink-canvas-${note.id}'),
+              width: width,
+              height: height,
+              strokes: actions.strokesFor(note),
+              isDraft: actions.isDraft(note),
+              selected: actions.isSelected(note),
+              onSelect: () => actions.onSelect(note),
+              onStrokesChanged: (raw) => actions.onStrokes(note, raw),
+              onDraftGrow: (h) => actions.onDraftGrow(note, h),
+              onConfirmDraft: () => actions.onConfirmDraft(note),
+              onCancelDraft: () => actions.onCancelDraft(note),
+              onResize: (h) => actions.onResize(note, h),
+              onResizeEnd: () => actions.onResizeEnd(note),
+              onRequestDelete: () => actions.onRequestDelete(note),
+            ),
+          );
+        },
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) => InkBlockIconRow(
+        key: ValueKey('reader-ink-icon-${note.id}'),
+        note: note,
+        width: math.max(1.0, constraints.maxWidth - 8),
+        onTap: () => actions.onOpenBlock(note),
+        onLongPress: () => actions.onRequestDelete(note),
+      ),
+    );
+  }
+}
+
+/// 【青茄·Active Canvas】手写内嵌块的回调集：状态与存储都在阅读页，
+/// 块渲染层只上报事件。
+class ReaderInkBlockActions {
+  ReaderInkBlockActions({
+    required this.isDraft,
+    required this.isSelected,
+    required this.strokesFor,
+    required this.onStrokes,
+    required this.onDraftGrow,
+    required this.onConfirmDraft,
+    required this.onCancelDraft,
+    required this.onSelect,
+    required this.onResize,
+    required this.onResizeEnd,
+    required this.onRequestDelete,
+    required this.onOpenBlock,
+  });
+
+  final bool Function(ReaderInlineNote note) isDraft;
+  final bool Function(ReaderInlineNote note) isSelected;
+
+  /// 该块当前应显示的笔迹（块本地像素坐标；草稿=阅读页暂存，已确认=
+  /// store 笔迹经 strokesForBox 展开）。
+  final List<InkStroke> Function(ReaderInlineNote note) strokesFor;
+  final void Function(ReaderInlineNote note, List<InkStroke> raw) onStrokes;
+  final void Function(ReaderInlineNote note, double newHeight) onDraftGrow;
+  final void Function(ReaderInlineNote note) onConfirmDraft;
+  final void Function(ReaderInlineNote note) onCancelDraft;
+  final void Function(ReaderInlineNote note) onSelect;
+  final void Function(ReaderInlineNote note, double newHeight) onResize;
+  final void Function(ReaderInlineNote note) onResizeEnd;
+  final void Function(ReaderInlineNote note) onRequestDelete;
+  final void Function(ReaderInlineNote note) onOpenBlock;
 }
 
 /// 批注块内的 16px 图标位（固定宽度参与排版层的宽度折算）。

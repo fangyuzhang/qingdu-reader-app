@@ -89,6 +89,9 @@ class ReaderPagedView extends StatefulWidget {
   final ReaderChapterTurn? chapterTurn;
   final VoidCallback? onChapterTurnCompleted;
 
+  /// 【青茄·Active Canvas】手写内嵌块回调（透传 ReaderPageContent）。
+  final ReaderInkBlockActions? inkActions;
+
   const ReaderPagedView({
     super.key,
     required this.layout,
@@ -114,6 +117,7 @@ class ReaderPagedView extends StatefulWidget {
     this.rangeUnderlines = const [],
     this.annotationRanges = const [],
     this.narrationRange,
+    this.inkActions,
   });
 
   @override
@@ -757,6 +761,7 @@ class ReaderPagedViewState extends State<ReaderPagedView>
             selection: widget.selection,
             rangeUnderlines: widget.rangeUnderlines,
             narrationRange: widget.narrationRange,
+            inkActions: widget.inkActions,
           );
           if (widget.turnStyle == ReaderPageTurnStyle.cover) {
             // 覆盖: the outgoing page stays pinned while the incoming one
@@ -871,6 +876,9 @@ class ReaderPageContent extends StatelessWidget {
   final List<ReaderRangeUnderline> annotationRanges;
   final (int, int)? narrationRange;
 
+  /// 【青茄·Active Canvas】手写内嵌块回调（见 ReaderNoteBlock）。
+  final ReaderInkBlockActions? inkActions;
+
   const ReaderPageContent({
     super.key,
     required this.page,
@@ -884,6 +892,7 @@ class ReaderPageContent extends StatelessWidget {
     this.rangeUnderlines = const [],
     this.annotationRanges = const [],
     this.narrationRange,
+    this.inkActions,
   });
 
   @override
@@ -908,6 +917,7 @@ class ReaderPageContent extends StatelessWidget {
                       note: note,
                       height: fragment.height,
                       maxLines: fragment.block.noteLines,
+                      inkActions: inkActions,
                     );
                   }
                   // Marks ride inside the block's own coordinate space (the

@@ -94,6 +94,10 @@ class ReaderAnnotation {
   static const String kTypeAnnot = 'annot';
   static const String kTypeExcerpt = 'excerpt';
 
+  /// 【青茄·Active Canvas】打字备注：正文里只显示图标行（不占正文空间），
+  /// thought = 备注文字。
+  static const String kTypeNote = 'note';
+
   final String bookId;
   final String chapterId;
 
@@ -282,7 +286,11 @@ class ReaderAnnotation {
       end: end.toInt(),
       text: text,
       thought: thought is String ? thought : '',
-      type: type == kTypeExcerpt ? kTypeExcerpt : kTypeAnnot,
+      type: type == kTypeExcerpt
+          ? kTypeExcerpt
+          : type == kTypeNote
+          ? kTypeNote
+          : kTypeAnnot,
       createdAt: createdAt is num && createdAt.isFinite ? createdAt.toInt() : 0,
       bookTitle: bookTitle is String ? bookTitle : '',
       chapterTitle: chapterTitle is String ? chapterTitle : '',

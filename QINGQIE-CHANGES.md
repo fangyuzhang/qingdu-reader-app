@@ -1391,3 +1391,16 @@ flutter test             # 1954 passed / 10 skipped
 - 新增 test/screen_adaptation_test.dart（5 用例）：平板 1280×800 正文栏 =560 且居中于屏幕中线；手机 390 全宽不钳制；宽屏+1.8×字号同时生效无异常；主页 360×800（最窄主流）+1.8× 字号烟雾；主页 1280×800 烟雾。锁定「换屏幕尺寸/字号不再悄悄破版」。
 - 横向说明：App 按市场惯例锁定竖屏（manifest portrait），平板竖屏/折叠屏主屏均覆盖；横屏阅读属平板双栏排版的更大工程，未在本批引入。
 - 验证：analyze 0；全量 1552/10/0（+5）；真机安装冒烟正常。归档 fqapp-v73.apk。
+
+---
+
+# 七十四、Kindle Scribe Active Canvas 复刻（内嵌手写画布 + 便签 + 套索 + 备注）
+
+- **交互规格**：SCRIBE-NOTES-SPEC.md（A-E 全量：感知复述/默认决策 12 条/逐条验收/格式差异/不做清单）。核心原则落地：手写画布是**嵌入正文文本流、占据布局空间、后续文字下移重排**的块，不是浮层。
+- **新增**：lib/models/reader_ink_block.dart（归一化笔迹 + 文本偏移锚点 + 上下文指纹）；lib/services/reader_ink_block_store.dart（加密盒 reader_ink_blocks_v1，写串行+flush+changes）；lib/widgets/reader/annotation/embedded_ink_block_view.dart（草稿虚线边框+取消/确认+书写越界自动下扩 48dp；已确认选中态=撤销/重做/底边高度手柄/右下角垃圾桶）；ink_block_editor_sheet.dart（便签书写面板，每笔防抖落盘）。
+- **排版**（reader_chapter_layout）：ReaderInlineNote 增加 inkKind/inkHeight/inkFilled；内嵌块按锚点行切片插入、后续文字从块下重排（复用批注块管线）；折叠图标行定高 34dp；**修复既有深层 bug**：blockPainter 无条件发缩进占位维度，段落被切片后中段块占位计数不匹配 → TextPainter 断言崩溃（分页模式 + 同段多块必崩，此前从未被测试覆盖）。
+- **阅读器**（reader_page）：草稿状态机（生成/扩高/确认=先摘草稿立即重排+异步落盘/取消丢弃）；画布选中态（点边框选中→拖手柄实时改高重排→松手落盘→缩小时内容等比缩放不丢失）；垃圾桶二次确认删除；便签放置模式（工具→下一次点按不翻页改为放置）；打字备注（kTypeNote，正文只显示图标行不占空间，删空即删）；选区菜单新增画布/便签/备注（8 项超窄屏 → 菜单条横向滚动 + 定位宽度钳制）；ReaderControls 新增便签工具；ReaderPage 新增 inkBlockStore 测试缝。
+- **套索**（并行 Agent L 交付）：InkController 圈选/移动/缩放（笔宽同步）/复制/剪切/删除/粘贴，replace 型撤销事务；画布手指+笔圈选、选中虚线外框、动作条；26 用例。
+- **笔记页**（并行 Agent N 交付）：内嵌画布/便签并入「手写」时间线（徽标区分、点行经 _openChapter 跳回锚点）、chip 计数、changes 重载；3 用例。
+- **测试**：reader_ink_block_test（store 往返/归一化伸缩/排版断流重排/锚定不漂移 6 用例）+ reader_embedded_ink_test（菜单入口/草稿确认/垃圾桶二次确认/便签放置书写自动保存 3 用例，注入 MemoryInkBlockStore 零真实 IO）。**假时钟×真实 IO 的教训入库**：fake zone 里创建的 openBox future 永不推进，runAsync 救不了别的 zone 的 future——widget 测试一律走内存 fake 注入，不做 Hive 真实 IO。
+- 验证：analyze 0；全量 **1590/10/0**（+43）；真机安装冷启动冒烟正常。EPUB 与 TXT 共用引擎按 D1 同呈现；PDF 维持页内书写 + 本轮获得套索（D 节）。归档 fqapp-v74.apk。

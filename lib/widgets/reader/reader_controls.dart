@@ -39,6 +39,9 @@ class ReaderControls extends StatefulWidget {
 
   /// 查看本章墨迹列表。
   final VoidCallback? onInkList;
+
+  /// 【青茄·Active Canvas】便签放置工具（null = 不显示）。
+  final VoidCallback? onSticky;
   final VoidCallback onAutoTurn;
 
   const ReaderControls({
@@ -68,6 +71,7 @@ class ReaderControls extends StatefulWidget {
     required this.onAutoTurn,
     this.onInk,
     this.onInkList,
+        this.onSticky,
   });
 
   @override
@@ -150,6 +154,14 @@ class _ReaderControlsState extends State<ReaderControls> {
                             icon: LucideIcons.signature,
                             label: '墨迹',
                             onTap: () => widget.onInkList!(),
+                          ),
+                        // 【青茄·Active Canvas】便签工具：轻点正文放置折叠便签。
+                        if (widget.onSticky != null)
+                          _Action(
+                            key: const ValueKey('reader-sticky-tool'),
+                            icon: LucideIcons.file_pen,
+                            label: '便签',
+                            onTap: () => widget.onSticky!(),
                           ),
                         _Action(
                           key: const ValueKey('reader-settings'),

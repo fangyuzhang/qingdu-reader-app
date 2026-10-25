@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../models/reader_ink_block.dart';
 import '../../services/chapter_text_formatter.dart';
 import '../../services/reader_mark_style.dart';
 import '../../services/reader_preferences.dart';
@@ -122,6 +123,9 @@ class ReaderInlineNote {
     this.markerColorValue = 0,
     this.markStyle = ReaderMarkStyle.solid,
     this.markColorValue = 0,
+    this.inkKind = '',
+    this.inkHeight = 0,
+    this.inkFilled = false,
   });
 
   /// 存储键（`ReaderAnnotationStore.keyFor`）——批注块内的编辑/删除回写用。
@@ -147,6 +151,21 @@ class ReaderInlineNote {
   final int markerColorValue;
   final ReaderMarkStyle markStyle;
   final int markColorValue;
+
+  /// 【青茄·Active Canvas】非空 = 手写内嵌块：'canvas'（画布，正文直接
+  /// 可见、占位可调）/ 'sticky'（便签，图标行折叠态）/ 'note'（打字备注，
+  /// 图标行）。空串 = 普通文字批注块。
+  final String inkKind;
+
+  /// 画布框高度（仅 inkKind='canvas' 生效；排版与渲染共用同一值）。
+  final double inkHeight;
+
+  /// 折叠态图标行是否有内容（便签带墨点角标 / 备注非空）。
+  final bool inkFilled;
+
+  static const inkKindCanvas = 'canvas';
+  static const inkKindSticky = 'sticky';
+  static const inkKindNote = 'note';
 
   String get badgeLabel {
     final value = markerLabel.trim();
@@ -757,17 +776,29 @@ class ReaderChapterLayout {
       textScaler: spec.textScaler,
       locale: const Locale('zh', 'CN'),
     );
-    if (!title) {
-      painter.setPlaceholderDimensions([
-        _indentPlaceholder(style, spec),
-        if (placeholders >= 2)
-          ?_bubblePlaceholder(
-            style: style,
-            spec: spec,
-            variant: block.bubbleVariant,
-            count: block.bubbleCount,
-          ),
-      ]);
+    if (!title && placeholders > 0) {
+      // 【青茄·Active Canvas 修复】占位维度必须与 span 实际含有的占位符
+      // 一一对应：行内批注/手写块把段落按行切片后，中段切片可能不含
+      // 首行缩进（from>0）或段尾气泡（to<len），无条件发 1~2 个维度会
+      // 触发 TextPainter 的 placeholderCount 断言（分页模式 + 同段多块
+      // 时必崩）。按 children 首/尾是否为占位 span 精确发放。
+      final children = block.span.children ?? const <InlineSpan>[];
+      final hasIndent = children.isNotEmpty && children.first is PlaceholderSpan;
+      final hasBubble =
+          children.length >= 2 && children.last is PlaceholderSpan;
+      final dims = <PlaceholderDimensions>[
+        if (hasIndent) _indentPlaceholder(style, spec),
+      ];
+      final bubble = hasBubble
+          ? _bubblePlaceholder(
+              style: style,
+              spec: spec,
+              variant: block.bubbleVariant,
+              count: block.bubbleCount,
+            )
+          : null;
+      if (bubble != null) dims.add(bubble);
+      if (dims.isNotEmpty) painter.setPlaceholderDimensions(dims);
     }
     painter.layout(minWidth: spec.width, maxWidth: spec.width);
     return painter;
@@ -1102,6 +1133,11 @@ const int _kNoteMaxLines = 8;
 /// 13px 的中文一行只放得下 3 个字，行数被极端放大。
 const double _kNoteMinBodyWidth = 120;
 
+/// 【青茄·Active Canvas】画布块的框外装饰高度（上下边框+底距，与
+/// ReaderNoteBlock 的 padding/底距口径一致）与折叠图标行定高。
+const double _kInkBlockChrome = 8;
+const double _kInlineIconRowHeight = 34;
+
 /// 批注块用的合成块 index 起点，远离正文段落序号，避免 key 冲突。
 const int _kInlineNoteIndexBase = 1000000;
 
@@ -1315,6 +1351,28 @@ ReaderContentBlock _measureInlineNote(
     letterSpacing: 0,
     textBaseline: TextBaseline.alphabetic,
   );
+  // 【青茄·Active Canvas】手写内嵌块不测文字：画布按用户框高定型，图标
+  // 行定高。同样记录为单行整块高度，分页时整块落页绝不拦腰切断。
+  if (note.inkKind.isNotEmpty) {
+    final height = note.inkKind == ReaderInlineNote.inkKindCanvas
+        ? note.inkHeight.clamp(ReaderInkBlock.minCanvasHeight,
+                ReaderInkBlock.maxCanvasHeight) +
+            _kInkBlockChrome
+        : _kInlineIconRowHeight;
+    return ReaderContentBlock(
+      index: index,
+      text: '',
+      start: anchorStart,
+      legacyStart: anchorLegacy,
+      top: top,
+      height: height,
+      span: const TextSpan(text: ''),
+      align: TextAlign.start,
+      lines: [ReaderTextLine(0, 0, 0, height)],
+      inlineNote: note,
+      noteLines: 0,
+    );
+  }
   final body = note.body;
   // 宽度下限不能用 40：`spec.width - 80` 在窄屏 / 分屏 / 大字号下会退到
   // 几十像素，13px 中文一行只放得下 3 个字，行数被极端放大。
@@ -1457,7 +1515,12 @@ class ReaderBlockContent extends StatelessWidget {
     this.rangeUnderlines = const [],
     this.annotationRanges = const [],
     this.narrationRange,
+    this.inkActions,
   });
+
+  /// 【青茄·Active Canvas】手写内嵌块回调（画布/便签/备注），透传给
+  /// [ReaderNoteBlock]；null = 纯展示。
+  final ReaderInkBlockActions? inkActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1468,6 +1531,7 @@ class ReaderBlockContent extends StatelessWidget {
         note: inlineNote,
         height: block.height,
         maxLines: block.noteLines,
+        inkActions: inkActions,
       );
     }
     final image = block.illustration;

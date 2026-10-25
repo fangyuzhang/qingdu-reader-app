@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_log.dart';
 import 'encrypted_hive.dart';
 import 'ink_annotation_store.dart';
+import 'reader_ink_block_store.dart';
 import 'reader_annotation_store.dart';
 import 'reader_marker_type_store.dart';
 import 'reader_underline_store.dart';
@@ -149,6 +150,8 @@ class LibraryStore implements ReaderStore {
     // 【第 3 组】墨迹盒同一时机就绪（同上一行的先例：漏接则读写全部空转，
     // 批注「看似成功」实则没有落盘）。
     InkAnnotationStore.hiveReady = true;
+    // 【青茄·Active Canvas】内嵌手写块盒同一时机就绪（同一先例）。
+    ReaderInkBlockStore.hiveReady = true;
     await _migrateFromSp();
     // Copy typed legacy media before a novel can reuse its original key.
     // The originals remain available if a write fails or migration is retried.
