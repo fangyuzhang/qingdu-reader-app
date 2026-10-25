@@ -171,15 +171,24 @@ class _NotesPageState extends State<NotesPage> {
   List<InkAnnotation> _ink = const [];
   List<_InkEntry> _inkEntries = const [];
 
-  /// 多选磁吸组的拖动负载（非空 = 正在拖整组）。
-  NoteTagClusterDrag? _activeCluster;
+  /// 当前拖动组的成员（含最初拖起的那枚；磁吸吸收会追加）。
+  /// 空列表 = 没有调色板拖动进行中。
+  List<NoteTagDrag> _dragGroup = const [];
+
+  /// 拖动组是否允许磁吸吸收邻近标签：只有「以单枚身份拖起」的拖动可以
+  /// 吸收；多选组（整组拖起）不再吸收未选中的标签（原地不动）。
+  bool _dragAbsorbEnabled = false;
 
   /// 笔记角标拖动进行中（浮现垃圾桶用）。
   bool _badgeDragActive = false;
 
-  /// 任何标签拖动进行中 = 顶部垃圾桶 overlay 可见。
+  /// 任何标签拖动进行中 = 顶部垃圾桶 overlay + 内容暗化可见。
   bool get _trashVisible =>
-      _paletteDrag != null || _activeCluster != null || _badgeDragActive;
+      _paletteDrag != null || _dragGroup.isNotEmpty || _badgeDragActive;
+
+  /// 磁吸吸收的距离阈值（逻辑像素）。
+  static const double _absorbThreshold = 88;
+
   /// 划线线型筛选（null = 全部线型）；仅当类型筛选选中「划线」时生效。
   ReaderMarkStyle? _markStyleFilter;
 
@@ -689,6 +698,21 @@ class _NotesPageState extends State<NotesPage> {
               ),
             ],
           ),
+          // 拖动期间的暗化层：突出垃圾桶与拖拽主体，不完全遮挡原界面。
+          // IgnorePointer 让笔记的「拖入」落点照常命中。
+          if (_trashVisible)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: 1,
+                  duration: const Duration(milliseconds: 160),
+                  child: ColoredBox(
+                    color: Colors.black.withValues(alpha: 0.32),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              ),
+            ),
           // 标签拖动期间浮现的垃圾桶：浮在页面最上方，不占布局；
           // 拖动结束整颗从树上移除（不存在隐形的落点）。
           if (_trashVisible)
@@ -902,9 +926,14 @@ class _NotesPageState extends State<NotesPage> {
     }
   }
 
-  /// 垃圾桶落点：单枚负载按来源分流——笔记角标 → 从那条笔记摘掉；
-  /// 调色板标签 → 从所有笔记摘除 + 自定义类型出目录。
+  /// 垃圾桶落点：拖动组 ≥2 时整组删除（负载 av 只在拖动开始时定型，
+  /// 磁吸吸收的成员以页面状态为准）；单枚按来源分流——笔记角标 → 从
+  /// 那条笔记摘掉；调色板标签 → 从所有笔记摘除 + 自定义类型出目录。
   Future<void> _onTrashDropTag(NoteTagDrag tag) async {
+    if (_dragGroup.length > 1) {
+      await _onTrashDropCluster(NoteTagClusterDrag(_dragGroup));
+      return;
+    }
     final fromKey = tag.sourceNoteKey;
     final note = fromKey == null
         ? null
@@ -1023,18 +1052,23 @@ class _NotesPageState extends State<NotesPage> {
     return List.unmodifiable(group);
   }
 
-  /// 拿起「全部标签」里的标签：单枚走挤开排序；磁吸簇（多选组）只
-  /// 记录负载供垃圾桶删除，行内排序不参与。
+  /// 拿起「全部标签」里的标签：
+  /// - 多选组（长按的是选中标签）→ 整组作为拖动负载一起移动，未选中的
+  ///   原地不动，也不吸收新成员；
+  /// - 单枚拖起 → 允许磁吸吸收邻近标签（靠近阈值内逐个并入组）。
   void _paletteDragStarted(Object payload, Size size) {
     if (payload is NoteTagClusterDrag) {
       setState(() {
-        _activeCluster = payload;
+        _dragGroup = List.unmodifiable(payload.tags);
+        _dragAbsorbEnabled = false;
         _hoverNoteKey = null;
         _hoverTag = null;
       });
       return;
     }
     final dragged = payload as NoteTagDrag;
+    _dragGroup = [dragged];
+    _dragAbsorbEnabled = true;
     final entries = _paletteEntries(
       dark: Theme.of(context).brightness == Brightness.dark,
     );
@@ -1069,7 +1103,8 @@ class _NotesPageState extends State<NotesPage> {
     });
   }
 
-  /// 拖动中：只在指针回到这一行时计算插入位置；离开就回到原位空位。
+  /// 拖动中：单枚组才计算行内插入位置（换序）；拖出标签行后允许磁吸
+  /// 吸收邻近标签（行内是换序语义，不得吸收）。
   void _paletteDragUpdated(Offset globalPosition) {
     if (_paletteDrag == null) return;
     final box = _paletteRowKey.currentContext?.findRenderObject();
@@ -1080,6 +1115,17 @@ class _NotesPageState extends State<NotesPage> {
         rect != null &&
         globalPosition.dy >= rect.top - 32 &&
         globalPosition.dy <= rect.bottom + 32;
+    if (_dragAbsorbEnabled && !inRow && _dragGroup.isNotEmpty) {
+      _absorbNearby(globalPosition);
+    }
+    if (_dragGroup.length > 1) {
+      if (_paletteInRow) {
+        setState(() {
+          _paletteInRow = false;
+        });
+      }
+      return;
+    }
     var to = _paletteFrom;
     if (inRow) {
       to = 0;
@@ -1092,6 +1138,31 @@ class _NotesPageState extends State<NotesPage> {
       _paletteInRow = inRow;
       _paletteTo = to;
     });
+  }
+
+  /// 磁吸吸收：指针距某枚尚未入组的标签中心低于阈值时，该标签以缩放
+  /// 动画并入拖动组（APP 图标聚拢）；原位留等大空位，行不重排。
+  void _absorbNearby(Offset globalPosition) {
+    NoteTagDrag? absorb;
+    for (final entry in _paletteEntries(
+      dark: Theme.of(context).brightness == Brightness.dark,
+    )) {
+      if (_dragGroup.any(
+        (member) => member.label == entry.label && member.kind == entry.kind,
+      )) {
+        continue;
+      }
+      final box = _paletteChipKeys[entry.id]?.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) continue;
+      final center = box.localToGlobal(box.size.center(Offset.zero));
+      if ((center - globalPosition).distance <= _absorbThreshold) {
+        absorb = entry;
+        break;
+      }
+    }
+    if (absorb == null) return;
+    final absorbed = absorb;
+    setState(() => _dragGroup = [..._dragGroup, absorbed]);
   }
 
   /// 每一枚标签该横向让开多少：空位本身也一起挪到插入点，
@@ -1122,22 +1193,26 @@ class _NotesPageState extends State<NotesPage> {
     return lefts;
   }
 
-  /// 松手：在行内就按插入点落位，并让这枚标签弹性重生；磁吸簇松手
-  /// （无论落点）一律收尾——删除只由垃圾桶落点触发。
+  /// 松手：单枚组在行内按插入点落位并弹性重生；磁吸组（≥2）无论落点
+  /// 一律整组收尾——删除只由垃圾桶落点触发，其余弹回原位。
   void _paletteDragFinished() {
-    if (_activeCluster != null) {
-      setState(() => _activeCluster = null);
-      _clearHover();
-      return;
-    }
     final dragged = _paletteDrag;
-    if (dragged == null) {
+    if (dragged == null || _dragGroup.length > 1) {
+      setState(() {
+        _dragGroup = const [];
+        _dragAbsorbEnabled = false;
+        _paletteDrag = null;
+        _paletteInRow = false;
+          _paletteCenters = const [];
+      });
       _clearHover();
       return;
     }
     if (_paletteInRow) _commitPaletteReorder(dragged, _paletteTo);
     setState(() {
       _rebornTokens[dragged.id] = (_rebornTokens[dragged.id] ?? 0) + 1;
+      _dragGroup = const [];
+      _dragAbsorbEnabled = false;
       _paletteDrag = null;
       _paletteInRow = false;
       _paletteCenters = const [];
@@ -1407,7 +1482,20 @@ class _NotesPageState extends State<NotesPage> {
                           onDragUpdate: _paletteDragUpdated,
                           onDragFinished: _paletteDragFinished,
                           rebornToken: _rebornTokens[entries[index].id] ?? 0,
-                          cluster: _clusterFor(entries, entries[index]),
+                          // 被磁吸吸收的成员原位只留空位；最初拖起的那枚
+                          // 必须保持 Draggable 活着（拖动中不能销毁）。
+                          hidden: _dragGroup.any(
+                                (member) =>
+                                    member.label == entries[index].label &&
+                                    member.kind == entries[index].kind,
+                              ) &&
+                              (_paletteDrag == null ||
+                                  _paletteDrag!.label !=
+                                      entries[index].label ||
+                                  _paletteDrag!.kind != entries[index].kind),
+                          cluster: _dragGroup.length >= 2
+                              ? _dragGroup
+                              : _clusterFor(entries, entries[index]),
                         ),
                       ),
                     ),
@@ -2025,7 +2113,8 @@ class _TimelineNoteRow extends StatelessWidget {
                           children: [
                             Expanded(
                               child: SizedBox(
-                                height: 22,
+                                // 书名与章节的行距收到原来的一半。
+                                height: 11,
                                 child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
@@ -2044,8 +2133,18 @@ class _TimelineNoteRow extends StatelessWidget {
                             PopupMenuButton<String>(
                               key: ValueKey('note-menu-${note.key}'),
                               tooltip: '更多',
-                              iconSize: 18,
                               padding: EdgeInsets.zero,
+                              child: SizedBox(
+                                height: 11,
+                                width: 26,
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Icon(
+                                    LucideIcons.ellipsis_vertical,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
                               onSelected: (value) {
                                 if (value == 'edit') onEdit(note);
                                 if (value == 'open') onOpen(note);
@@ -2076,51 +2175,75 @@ class _TimelineNoteRow extends StatelessWidget {
                           ),
                         // 磁力虚影已插在角标列表里（见 [ghostId]），和其他
                         // 角标同一行渲染：拖动中就能预览松手后的落点，
-                        // 不再另起一行、松手才归位。
-                        if (badges.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              for (final badge in badges)
-                                if (badge.id == ghostId)
-                                  NoteTagGhost(
-                                    key: ValueKey(
-                                      'note-ghost-${note.key}-${badge.label}',
-                                    ),
-                                    label: badge.label,
-                                    colorValue: badge.colorValue,
-                                    kind: badge.kind,
-                                  )
-                                else
-                                  NoteBadgeChip(
-                                    key: ValueKey(
-                                      'note-badge-${note.key}-${badge.label}',
-                                    ),
-                                    label: badge.label,
-                                    colorValue: badge.colorValue,
-                                    noteKey: note.key,
-                                    sourceKind: badge.kind,
-                                    // 拖回本条笔记自己时，对应的角标亮一圈：
-                                    // 这就是「已命中这里」的吸附提示。
-                                    highlighted:
-                                        hoverTag != null &&
-                                        hoverTag!.kind == badge.kind &&
-                                        hoverTag!.label == badge.label,
-                                    onDragStarted: () =>
-                                        onDragActiveChanged(true),
-                                    // 落空（accepted == false）= 弹回原位，
-                                    // 不删除；删除只走垃圾桶落点。
-                                    onDragEnd: (accepted) {
-                                      onDragActiveChanged(false);
-                                      onDragFinished();
-                                    },
-                                  ),
-                            ],
+                        // 不再另起一行、松手才归位。无标签的笔记第一次
+                        // 加标签时，角标行以尺寸过渡动画展开（章节与文本
+                        // 间距随之生长）——只在空→非空翻转时播放。
+                        TweenAnimationBuilder<double>(
+                          key: ValueKey(
+                            'note-badge-row-${note.key}-${badges.isNotEmpty}',
                           ),
-                        ],
+                          tween: Tween(end: badges.isEmpty ? 0.0 : 1.0),
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, factor, child) => SizeTransition(
+                            sizeFactor: AlwaysStoppedAnimation(factor),
+                            alignment: AlignmentDirectional.topStart,
+                            child: child,
+                          ),
+                          child: badges.isEmpty
+                              ? const SizedBox(width: double.infinity)
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        for (final badge in badges)
+                                          if (badge.id == ghostId)
+                                            NoteTagGhost(
+                                              key: ValueKey(
+                                                'note-ghost-${note.key}-${badge.label}',
+                                              ),
+                                              label: badge.label,
+                                              colorValue: badge.colorValue,
+                                              kind: badge.kind,
+                                            )
+                                          else
+                                            NoteBadgeChip(
+                                              key: ValueKey(
+                                                'note-badge-${note.key}-${badge.label}',
+                                              ),
+                                              label: badge.label,
+                                              colorValue: badge.colorValue,
+                                              noteKey: note.key,
+                                              sourceKind: badge.kind,
+                                              // 拖回本条笔记自己时，对应的角标
+                                              // 亮一圈：这就是「已命中这里」的
+                                              // 吸附提示。
+                                              highlighted:
+                                                  hoverTag != null &&
+                                                  hoverTag!.kind ==
+                                                      badge.kind &&
+                                                  hoverTag!.label ==
+                                                      badge.label,
+                                              onDragStarted: () =>
+                                                  onDragActiveChanged(true),
+                                              // 落空（accepted == false）= 弹回
+                                              // 原位，不删除；删除只走垃圾桶。
+                                              onDragEnd: (accepted) {
+                                                onDragActiveChanged(false);
+                                                onDragFinished();
+                                              },
+                                            ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                        ),
                         const SizedBox(height: 8),
                         Container(
                           width: double.infinity,

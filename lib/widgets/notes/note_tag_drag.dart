@@ -84,11 +84,15 @@ class PaletteTagChip extends StatefulWidget {
     this.onDragFinished,
     this.rebornToken = 0,
     this.cluster,
+    this.hidden = false,
   });
 
   /// 非空且长度 > 1 时：长按这枚选中的标签，拖的是整组磁吸簇
   /// （[NoteTagClusterDrag]）；null / 单枚时保持单标签拖动。
   final List<NoteTagDrag>? cluster;
+
+  /// 已被磁吸进拖动组：原位只留等大空位（行不重排）。
+  final bool hidden;
 
   final String label;
   final int colorValue;
@@ -121,7 +125,7 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
     kind: widget.kind,
   );
 
-  /// 拖动负载：磁吸簇或单枚标签。
+  /// 拖动负载：磁吸组（≥2，含磁吸吸收的成员）或单枚标签。
   Object get _payload {
     final cluster = widget.cluster;
     if (cluster != null && cluster.length > 1) {
@@ -133,10 +137,11 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
+    if (widget.hidden) return _hole(palette);
     return LongPressDraggable<Object>(
       data: _payload,
       feedback: _payload is NoteTagClusterDrag
-          ? _clusterFeedback(_payload as NoteTagClusterDrag)
+          ? _groupFeedback(_payload as NoteTagClusterDrag)
           : _feedback(),
       childWhenDragging: _hole(palette),
       onDragStarted: () {
@@ -262,25 +267,36 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
     );
   }
 
-  /// 磁吸簇的悬浮副本：选中的标签按 2° 内的错位叠在一起，右上角
-  /// 标注枚数，直观表达「这一组一起拖」。
-  Widget _clusterFeedback(NoteTagClusterDrag cluster) {
+  /// 磁吸组的悬浮副本：手机 APP 图标式聚拢——每枚保持自己的颜色，
+  /// 轻微错位叠放 + 阴影抬升；新吸收的成员以缩放入场动画吸附进组。
+  /// 不显示任何数量徽标（产品要求）。
+  Widget _groupFeedback(NoteTagClusterDrag group) {
     final palette = HomePalette.of(context);
-    final visible = cluster.tags.take(4).toList();
+    final visible = group.tags.take(5).toList();
     return Material(
       color: Colors.transparent,
       child: SizedBox(
-        width: 150,
-        height: 46,
+        width: 190,
+        height: 52,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             for (var i = visible.length - 1; i >= 0; i--)
               Positioned(
-                left: i * 26.0,
-                top: 4,
-                child: Transform.rotate(
-                  angle: (i - (visible.length - 1) / 2) * 0.06,
+                left: i * 24.0,
+                top: 6,
+                child: TweenAnimationBuilder<double>(
+                  key: ValueKey('group-fb-${visible[i].label}-$i'),
+                  tween: Tween(begin: 0.4, end: 1),
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOutBack,
+                  builder: (context, scale, child) => Transform.scale(
+                    scale: scale,
+                    child: Transform.rotate(
+                      angle: (i - (visible.length - 1) / 2) * 0.05,
+                      child: child,
+                    ),
+                  ),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 11,
@@ -295,9 +311,9 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.16),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 12,
+                          offset: const Offset(0, 5),
                         ),
                       ],
                     ),
@@ -312,28 +328,6 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
                   ),
                 ),
               ),
-            Positioned(
-              right: 0,
-              top: -6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 1,
-                ),
-                decoration: BoxDecoration(
-                  color: HomePalette.accent,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  '×${cluster.length}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),
