@@ -624,11 +624,8 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
                           ),
                         ),
                         childWhenDragging: const SizedBox(width: 64),
-                        onDragStarted: () {
-                          // ignore: avoid_print
-                          print('editor-tag drag started: $tag');
-                          setState(() => _tagDragActive = true);
-                        },
+                        onDragStarted: () =>
+                            setState(() => _tagDragActive = true),
                         onDragEnd: (_) =>
                             setState(() => _tagDragActive = false),
                         child: InputChip(

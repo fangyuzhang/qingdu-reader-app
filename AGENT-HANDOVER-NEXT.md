@@ -29,6 +29,13 @@
 4. **MIUI 截屏陈旧帧陷阱**：连续快速 screencap 会返回字节级相同帧，验证必须 md5 查重 + 加间隔（过渡帧还会出现 alpha=0 伪影，原始 RGB 全黑但实际透明，勿误判黑屏）。
 5. **git 推送通道修复（2026-10-25 晚）**：ghproxy.net 镜像开始拒绝认证转发（"Invalid username or token"）。已在 WSL 全局配置加 `url."https://github.com/".pushInsteadOf = "https://github.com/"`——推送直连 github.com（凭证走 gh CLI，已登录 fangyuzhang），拉取继续走镜像。若再遇推送失败，排查顺序：gh auth status → 该 pushInsteadOf 是否还在 → 换 gh-proxy.com 镜像。
 
+## 0.3 反屎山护栏（71 批，所有后续 agent 必读）
+
+- analysis_options.yaml 已加严 3 条 lint（声明返回类型/单引号/tearoff），analyze 必须 0 问题；frb 生成目录（lib/src/rust/**）已排除，勿手改生成文件。
+- 全库死代码/注释代码/裸 print 均为 0，保持这个状态：调试探针一律走 InkAnnotationStore.logTrace / AppLog 双通道，不留 print。
+- reader_page（4963 行）与 notes_page（2774 行）是仅存的巨型文件：下次功能触及对应区域时顺势抽取 controller（切割线：系统栏/批注/墨迹/自动翻页/朗读），不做大爆炸重构。
+- 测试种子时间一律相对 DateTime.now()，禁止硬编码绝对日期（页面按真实日历算窗口，会变时间炸弹——reading_report_page_test 已中过招）。
+
 ## 0.5 本轮交付速览（2026-10-25，第 2~7 组 + 63~66 批）
 
 ### 新增能力

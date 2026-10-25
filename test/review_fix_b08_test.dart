@@ -57,9 +57,7 @@ void main() {
     ListeningSession.instance.clear();
   });
 
-  tearDown(() {
-    ListeningSession.instance.clear();
-  });
+  tearDown(ListeningSession.instance.clear);
 
   testWidgets('chapter-end entry opens the ideas end bucket', (tester) async {
     SharedPreferences.setMockInitialValues({'reader_page_mode': 'scroll'});

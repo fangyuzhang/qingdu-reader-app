@@ -332,7 +332,7 @@ class _CachedBooksPageState extends State<CachedBooksPage> {
           IconButton(
             tooltip: '清空全部缓存',
             color: palette.muted,
-            onPressed: _books.isEmpty ? null : () => _clear(),
+            onPressed: _books.isEmpty ? null : _clear,
             icon: const Icon(LucideIcons.trash, size: 20),
           ),
         ],

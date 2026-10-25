@@ -602,7 +602,7 @@ void main() {
       tester,
     ) async {
       await AudioPreferences.instance.setBackgroundPlayback(false);
-      addTearDown(() => AudioPreferences.instance.resetForTest());
+      addTearDown(AudioPreferences.instance.resetForTest);
       final session = _Session();
       await _mount(tester, session);
       session.players.single.emitPosition(const Duration(seconds: 37));

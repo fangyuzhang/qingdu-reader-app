@@ -112,7 +112,7 @@ class _ReaderIllustrationState extends State<ReaderIllustration> {
             title: const Text('插图', style: TextStyle(color: Colors.white)),
             leading: IconButton(
               tooltip: '关闭插图',
-              onPressed: () => navigator.pop(),
+              onPressed: navigator.pop,
               icon: const Icon(LucideIcons.x, color: Colors.white),
             ),
           ),

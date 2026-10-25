@@ -29,26 +29,31 @@ void main() {
 
   /// Hive 走真实文件 IO，在 testWidgets 的假时钟里必须用 runAsync 包起来，
   /// 否则写入永远等不到完成（统计页的老测试也是这么处理的）。
+  ///
+  /// 种子时间必须相对 DateTime.now() 取：页面按真实当前日历算「本周/
+  /// 本月」窗口，硬编码日期（如 2026-10-19）会在日历翻页后全部落出
+  /// 当前周——曾让该用例在 2026-10-26 00:00 后静默失败（时间炸弹）。
   Future<void> seed(WidgetTester tester, {double seconds = 600}) async {
+    final now = DateTime.now();
     await tester.runAsync(() async {
       await LibraryStore.instance.addHistory({
         'id': 'book-a',
         'kind': 'book',
         'title': '稻草人',
         'author': '叶圣陶',
-        'time': DateTime(2026, 10, 19, 10).millisecondsSinceEpoch,
+        'time': now.millisecondsSinceEpoch,
       });
       await LibraryStore.instance.accumulateReadTime(
         'book-a',
         'book',
         seconds,
-        at: DateTime(2026, 10, 19, 10),
+        at: now,
       );
       await LibraryStore.instance.accumulateReadTime(
         'book-a',
         'book',
         seconds / 2,
-        at: DateTime(2026, 10, 20, 20),
+        at: now,
       );
     });
   }

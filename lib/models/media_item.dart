@@ -1237,7 +1237,7 @@ List<Map<String, dynamic>>? _chapterListFromVolume(dynamic volume) {
     // Some older responses use a map keyed by chapter id.
     return map.values
         .whereType<Map>()
-        .map((m) => Map<String, dynamic>.from(m))
+        .map(Map<String, dynamic>.from)
         .toList();
   }
   return null;
@@ -1247,7 +1247,7 @@ List<Map<String, dynamic>>? _asMapList(dynamic value) {
   if (value is! List) return null;
   return value
       .whereType<Map>()
-      .map((m) => Map<String, dynamic>.from(m))
+      .map(Map<String, dynamic>.from)
       .toList();
 }
 

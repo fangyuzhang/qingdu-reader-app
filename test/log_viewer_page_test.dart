@@ -15,8 +15,8 @@ import 'package:fqapp/widgets/logs/log_entry_card.dart';
 /// 触发 flutter_test 的 `debugAssertAllFoundationVarsUnset` 不变量断言。
 /// 记录日志本身不需要 install（默认级别就是 debug）。
 void main() {
-  setUp(() => AppLog.instance.resetForTest());
-  tearDown(() => AppLog.instance.resetForTest());
+  setUp(AppLog.instance.resetForTest);
+  tearDown(AppLog.instance.resetForTest);
 
   testWidgets('渲染日志条目并按级别筛选', (tester) async {
     AppLog.i('boot', '服务已启动');

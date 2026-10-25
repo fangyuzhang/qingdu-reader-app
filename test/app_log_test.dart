@@ -12,8 +12,8 @@ import 'package:fqapp/services/app_log.dart';
 /// 应用内日志核心的服务用例：环形缓冲、级别过滤、三路捕获、落盘轮换与
 /// 导出，以及 API 插桩的隐私纪律（只记路由模板，不记 query/参数/主机）。
 void main() {
-  setUp(() => AppLog.instance.resetForTest());
-  tearDown(() => AppLog.instance.resetForTest());
+  setUp(AppLog.instance.resetForTest);
+  tearDown(AppLog.instance.resetForTest);
 
   /// 关掉落盘句柄后再删临时目录，否则 Windows 上文件仍被占用。
   void cleanupDir(Directory dir) {

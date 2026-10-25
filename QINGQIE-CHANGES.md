@@ -1359,3 +1359,14 @@ flutter test             # 1954 passed / 10 skipped
 - 全量清单核对（均合规）：听书前台服务 = manifest foregroundServiceType="mediaPlayback" + FOREGROUND_SERVICE_MEDIA_PLAYBACK 权限 + ServiceCompat.startForeground 带类型启动（Android 14+ 硬要求，OPPO/VIVO 新系统严格执行）；存储 = 无 WRITE_EXTERNAL_STORAGE，MediaStore.Downloads（29+ 免权限）+ <29 诚实降级，备份走 SAF CREATE/OPEN_DOCUMENT；明文流量 networkSecurityConfig 仅放行 127.0.0.1/localhost；组件全部显式 exported（Android 12+ 要求）；queries 包可见性（TTS/PROCESS_TEXT，Android 11+ 要求）；POST_NOTIFICATIONS（13+）；PopScope 而非弃用的 WillPopScope（预测性返回兼容）；分享纯文本 ACTION_SEND 无 file:// URI（Android 7+ 严格模式崩溃坑不存在）；compileSdk/targetSdk 36 + minSdk 24。
 - 如实记录三项「无法一劳永逸」：①长图导出落在应用私有目录（全厂商一致的 UX 限制，建议后续加「保存到下载」按钮）；②新芯片若出现同类 Impeller 纹理 bug 需扩 RendererCompatibility 名单（扩展点已留）；③国产 ROM 激进省电杀后台只能靠用户加白名单，业界无解。
 - 验证：构建通过 + 真机冷启动复验状态栏干净（v1 过渡帧为 MIUI 截屏 alpha 伪影，v2 奶油底 92% / 灰 0%）。（本次提交）
+
+---
+
+# 七十一、反屎山全库审查 + 护栏加固
+
+- 审查方式：多 Agent 并发审查因配额限制未成行，改为脚本化机械审查（全库指标 + 死代码探测 + 重复块指纹 + 测试脆弱信号）。
+- 指标结论（lib 共 68195 行）：**死代码 0**（私有成员全库引用=0 的探测）、**注释掉的代码块 0**、**TODO/FIXME 0**、裸 print 1 处（reader_note_block 编辑器标签拖拽探针，已删）、Kotlin 死类 0（15 个插件类全部被注册引用）、仓库根目录无临时文件。跨文件重复块实际仅 ~3 处（评论模型嵌套解包前置 ~20 行 ×2、两设置页 initState 样板），pdf/reader 的 _saveInk 只是同名不同实现（页锚定 vs 文本流锚定），非重复。
+- 护栏加固：analysis_options 新增 3 条低噪音 lint（always_declare_return_types / prefer_single_quotes / unnecessary_lambdas），`dart fix` 自动修复 33 处（8 文件）；frb 生成目录排除出 lint（生成器固定双引号，交由生成器管理）。此后风格漂移会直接挂 analyze。
+- 修掉一颗**时间炸弹测试**：reading_report_page_test 的 seed 硬编码 2026-10-19/20，页面按真实日历算「本周」——2026-10-26 00:00（周一）后种子全落上周、周视图归零，「15 分钟」断言静默失败（本次全量复跑时暴露，与 lint 改动无关）。seed 改为相对 DateTime.now()，7 处调用点全部受益。
+- 结构性债务如实记录（**有意不动**，避免交付前大改引入回归）：reader_page.dart 4963 行 / State 约 26 字段（最长方法 _autoTurnStep 234 行但职责单一）、notes_page.dart 2774 行（拖拽状态机重测覆盖）。二者是仅存的两个巨型文件，自然切割线存在（系统栏/批注/墨迹/自动翻页/朗读各自成 controller），建议规则：**下次因功能再动到对应区域时顺势抽取，不做大爆炸重构**。
+- 验证：analyze（含新 lint）0 问题；全量 1547/10/0。（本次提交）
