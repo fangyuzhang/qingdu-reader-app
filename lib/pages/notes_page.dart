@@ -24,6 +24,7 @@ import '../services/reader_underline_store.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
 import '../widgets/notes/note_tag_drag.dart';
+import '../widgets/app_dialog.dart';
 import '../widgets/notes/tag_trash.dart';
 import '../widgets/reader/annotation/ink_strokes_painter.dart';
 import '../widgets/reader/reader_note_block.dart';
@@ -261,6 +262,8 @@ class _NotesPageState extends State<NotesPage> {
     _store.changes.addListener(_reload);
     // 内嵌手写块（画布/便签）写库时同样整页重载。
     _inkBlockStore.changes.addListener(_reload);
+    // 自定义标签目录变化（新建/改色）也要刷新「全部标签」行。
+    ReaderMarkerTypeStore.instance.changes.addListener(_reload);
     _loadDeletedPresets();
     _reload();
   }
@@ -291,6 +294,7 @@ class _NotesPageState extends State<NotesPage> {
   @override
   void dispose() {
     _store.changes.removeListener(_reload);
+    ReaderMarkerTypeStore.instance.changes.removeListener(_reload);
     _inkBlockStore.changes.removeListener(_reload);
     super.dispose();
   }
@@ -1616,7 +1620,7 @@ class _NotesPageState extends State<NotesPage> {
                         ),
                       ),
                     )
-                else
+                else ...[
                   for (var index = 0; index < entries.length; index++)
                   KeyedSubtree(
                     key: _paletteChipKeys.putIfAbsent(
@@ -1670,11 +1674,125 @@ class _NotesPageState extends State<NotesPage> {
                       ),
                     ),
                   ),
+                  // 【用户新增】标签行末尾的「新建标签」入口：弹层输入名称
+                  // 与颜色，落库后经 store.changes 整页重载、新标签入行。
+                  // 划线模式下这行是线型筛选，不出现。
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ActionChip(
+                      key: const ValueKey('notes-tag-create'),
+                      onPressed: () => unawaited(_showCreateTagDialog()),
+                      avatar: Icon(
+                        LucideIcons.plus,
+                        size: 14,
+                        color: HomePalette.accent,
+                      ),
+                      label: Text(
+                        '新建标签',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: HomePalette.accent,
+                        ),
+                      ),
+                      backgroundColor: palette.chipFill,
+                      side: palette.chipBorder(false),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// 「新建标签」弹层：名称 + 颜色，确定即写入自定义类型目录。
+  Future<void> _showCreateTagDialog() async {
+    const colors = <int>[
+      0xFFD64545, // 朱红（默认，与批注默认色一致）
+      0xFF3DA88A, // 松绿
+      0xFF4F7CD1, // 湖蓝
+      0xFFD89A2E, // 蜜黄
+      0xFF8A6FD1, // 紫藤
+      0xFF6B7A8F, // 石板灰
+    ];
+    final controller = TextEditingController();
+    var color = colors.first;
+    final created = await showAppDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialog) => AlertDialog(
+          title: const Text('新建标签'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                key: const ValueKey('notes-tag-create-input'),
+                controller: controller,
+                autofocus: true,
+                maxLength: 6,
+                decoration: const InputDecoration(
+                  hintText: '标签名（1~6 个字）',
+                  counterText: '',
+                  isDense: true,
+                ),
+                onChanged: (_) => setDialog(() {}),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (var i = 0; i < colors.length; i++)
+                    GestureDetector(
+                      key: ValueKey('notes-tag-create-color-$i'),
+                      onTap: () => setDialog(() => color = colors[i]),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: Color(colors[i]),
+                          shape: BoxShape.circle,
+                          border: color == colors[i]
+                              ? Border.all(
+                                  color: const Color(0xFF2FA98C),
+                                  width: 2.5,
+                                )
+                              : null,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              key: const ValueKey('notes-tag-create-save'),
+              onPressed: controller.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(true),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final label = controller.text.trim();
+    // 不在此 dispose：弹层关闭后 TextField 的焦点依赖要到下一帧才拆完，
+    // 立即 dispose 会把焦点状态泄漏给后续帧（测试间也会连锁断言）。
+    if (created != true || label.isEmpty) return;
+    await ReaderMarkerTypeStore.instance.add(label, color);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('标签「$label」已创建')),
     );
   }
 

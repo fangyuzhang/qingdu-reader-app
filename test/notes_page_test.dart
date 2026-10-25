@@ -92,6 +92,52 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  testWidgets('标签行末尾「新建标签」：弹层输入名称颜色后新标签入行', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '已有批注', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 入口 chip 恒在行末尾（非划线模式）。
+    final create = find.byKey(const ValueKey('notes-tag-create'));
+    expect(create, findsOneWidget);
+
+    // 点开弹层：空名称时保存不可用。
+    await tester.tap(create);
+    await tester.pumpAndSettle();
+    expect(find.text('新建标签'), findsNWidgets(2), reason: '入口 chip + 弹层标题');
+    final save = find.byKey(const ValueKey('notes-tag-create-save'));
+    expect(
+      tester.widget<TextButton>(save).onPressed,
+      isNull,
+      reason: '空名称时保存应禁用',
+    );
+
+    // 输入名称 + 选色 → 保存 → 弹层关闭、新标签 chip 出现。
+    await tester.enterText(
+      find.byKey(const ValueKey('notes-tag-create-input')),
+      '灵感',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('notes-tag-create-color-2')));
+    await tester.pump();
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+
+    expect(find.text('新建标签'), findsOneWidget, reason: '弹层已关，仅剩入口 chip');
+    final newTag = find.byKey(const ValueKey('notes-marker-灵感'));
+    expect(newTag, findsOneWidget);
+    // 提示条出现。
+    expect(find.textContaining('「灵感」已创建'), findsOneWidget);
+  });
+
   testWidgets('批注类型 chip 按角标文字筛选时间线', (tester) async {
     final store = _NotesMemoryStore([
       _note(bookId: 'a', text: '疑问句', markerLabel: '疑问', createdAt: 3),
