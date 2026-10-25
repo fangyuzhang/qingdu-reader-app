@@ -11,7 +11,10 @@ import 'package:fqapp/widgets/reader/reader_note_block.dart';
 ///   A FocusNode was used after being disposed.
 /// 以及延迟 280ms 的 requestFocus 在面板关闭后才触发。
 void main() {
-  Future<void> pumpEditor(WidgetTester tester) async {
+  Future<void> pumpEditor(
+    WidgetTester tester, {
+    List<String> initialTags = const [],
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -21,6 +24,7 @@ void main() {
                 onPressed: () => showAnnotationEditor(
                   context,
                   quote: '这是一段被标注的原文，用来验证弹层里的引用区域。',
+                  initialTags: initialTags,
                 ),
                 child: const Text('写想法'),
               ),
@@ -32,6 +36,39 @@ void main() {
     await tester.tap(find.text('写想法'));
     await tester.pump();
   }
+
+  testWidgets('编辑器标签拖入顶部垃圾桶即从待存标签移除', (tester) async {
+    // 标签区在 sheet 偏下方：默认 800×600 视口装不下，chip 会滚出屏幕。
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpEditor(tester, initialTags: const ['好句', '荐']);
+    // 走完入场动画与 280ms 的延迟抢焦点。
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('reader-note-tag-好句')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reader-note-tag-荐')), findsOneWidget);
+
+    // 拿起一枚标签：垃圾桶浮现。
+    final chip = find.byKey(const ValueKey('reader-note-tag-好句')).last;
+    final gesture = await tester.startGesture(tester.getCenter(chip));
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('reader-tag-trash')), findsOneWidget);
+
+    // 拖入垃圾桶：待存标签移除，另一枚不受影响。
+    await gesture.moveTo(tester.getCenter(find.byKey(
+      const ValueKey('reader-tag-trash'),
+    )));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('reader-note-tag-好句')), findsNothing);
+    expect(find.byKey(const ValueKey('reader-note-tag-荐')), findsOneWidget);
+  });
 
   testWidgets('首帧就抢焦点：面板与键盘同时升起，不是两段式', (tester) async {
     await pumpEditor(tester);

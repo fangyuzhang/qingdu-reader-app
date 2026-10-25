@@ -55,6 +55,17 @@ class NoteTagDrag {
   String get id => '${kind.name}|$label|${sourceNoteKey ?? 'palette'}';
 }
 
+/// 多选标签磁吸成组的拖动负载（整组进垃圾桶 = 全部删除；
+/// 整组落到别处 = 弹回原位，无任何改动）。
+@immutable
+class NoteTagClusterDrag {
+  const NoteTagClusterDrag(this.tags);
+
+  final List<NoteTagDrag> tags;
+
+  int get length => tags.length;
+}
+
 /// 顶部「全部类型」里的一枚可拖动标签。
 ///
 /// 轻点 = 筛选 / 再点一次取消（由 [onTap] 处理）；长按 = 拿起，反馈层
@@ -72,7 +83,12 @@ class PaletteTagChip extends StatefulWidget {
     this.onDragUpdate,
     this.onDragFinished,
     this.rebornToken = 0,
+    this.cluster,
   });
+
+  /// 非空且长度 > 1 时：长按这枚选中的标签，拖的是整组磁吸簇
+  /// （[NoteTagClusterDrag]）；null / 单枚时保持单标签拖动。
+  final List<NoteTagDrag>? cluster;
 
   final String label;
   final int colorValue;
@@ -81,7 +97,7 @@ class PaletteTagChip extends StatefulWidget {
   final VoidCallback onTap;
 
   /// 拿起时把标签尺寸交给页面，页面据此在排序时让出等宽的空位。
-  final void Function(NoteTagDrag data, Size size)? onDragStarted;
+  final void Function(Object payload, Size size)? onDragStarted;
 
   /// 拖动中的全局坐标，页面用它判断插入位置。
   final void Function(Offset globalPosition)? onDragUpdate;
@@ -105,16 +121,27 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
     kind: widget.kind,
   );
 
+  /// 拖动负载：磁吸簇或单枚标签。
+  Object get _payload {
+    final cluster = widget.cluster;
+    if (cluster != null && cluster.length > 1) {
+      return NoteTagClusterDrag(cluster);
+    }
+    return _data;
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
-    return LongPressDraggable<NoteTagDrag>(
-      data: _data,
-      feedback: _feedback(),
+    return LongPressDraggable<Object>(
+      data: _payload,
+      feedback: _payload is NoteTagClusterDrag
+          ? _clusterFeedback(_payload as NoteTagClusterDrag)
+          : _feedback(),
       childWhenDragging: _hole(palette),
       onDragStarted: () {
         setState(() => _dragging = true);
-        widget.onDragStarted?.call(_data, context.size ?? Size.zero);
+        widget.onDragStarted?.call(_payload, context.size ?? Size.zero);
       },
       onDragUpdate: (details) =>
           widget.onDragUpdate?.call(details.globalPosition),
@@ -235,6 +262,84 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
     );
   }
 
+  /// 磁吸簇的悬浮副本：选中的标签按 2° 内的错位叠在一起，右上角
+  /// 标注枚数，直观表达「这一组一起拖」。
+  Widget _clusterFeedback(NoteTagClusterDrag cluster) {
+    final palette = HomePalette.of(context);
+    final visible = cluster.tags.take(4).toList();
+    return Material(
+      color: Colors.transparent,
+      child: SizedBox(
+        width: 150,
+        height: 46,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            for (var i = visible.length - 1; i >= 0; i--)
+              Positioned(
+                left: i * 26.0,
+                top: 4,
+                child: Transform.rotate(
+                  angle: (i - (visible.length - 1) / 2) * 0.06,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Color(visible[i].colorValue),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.16),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      visible[i].label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(visible[i].colorValue),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              right: 0,
+              top: -6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 1,
+                ),
+                decoration: BoxDecoration(
+                  color: HomePalette.accent,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  '×${cluster.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 原位置的空位：保留同样尺寸，避免周围的标签跳动。
   Widget _hole(HomePalette palette) => SizedBox(
     height: 48,
@@ -264,6 +369,7 @@ class NoteBadgeChip extends StatelessWidget {
     required this.noteKey,
     this.sourceKind = NoteTagKind.marker,
     this.onDragEnd,
+    this.onDragStarted,
     this.highlighted = false,
   });
 
@@ -276,8 +382,12 @@ class NoteBadgeChip extends StatelessWidget {
   /// 用一圈描边 + 轻微放大给出吸附反馈，且不改变布局尺寸。
   final bool highlighted;
 
-  /// 松手回调：`accepted == false` 表示没落在任何笔记上，调用方据此删标签。
+  /// 松手回调。`accepted == false`（没落在任何笔记/垃圾桶上）= 弹回
+  /// 原位，**不再删除**——删除只走垃圾桶落点。
   final void Function(bool accepted)? onDragEnd;
+
+  /// 拿起时通知页面（浮现垃圾桶等拖动期图层）。
+  final VoidCallback? onDragStarted;
 
   @override
   Widget build(BuildContext context) {
@@ -370,6 +480,7 @@ class NoteBadgeChip extends StatelessWidget {
       // 空位必须和原角标一样大：换成别的占位符会让 Wrap 重新折行，
       // 周围的标签就会上下跳。
       childWhenDragging: placeholder,
+      onDragStarted: () => onDragStarted?.call(),
       onDragEnd: (details) => onDragEnd?.call(details.wasAccepted),
       child: body,
     );

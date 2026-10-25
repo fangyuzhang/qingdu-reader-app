@@ -522,7 +522,7 @@ void main() {
     );
   });
 
-  testWidgets('把笔记上的角标拖到空白处即取消该角标', (tester) async {
+  testWidgets('角标拖到空白处松手 = 弹回原位，不删除', (tester) async {
     final store = _NotesMemoryStore([
       _note(bookId: 'a', text: '一句话', markerLabel: '疑问', createdAt: 1),
     ]);
@@ -545,7 +545,124 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
+    // 落空不再删除：角标还在笔记上。
+    expect(store.notes.first.markerBadges, isNotEmpty);
+    expect(badge, findsOneWidget);
+  });
+
+  testWidgets('角标拖入顶部垃圾桶即删除', (tester) async {
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '一句话', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final noteKey = store.notes.first.key;
+    final badge = find.byKey(ValueKey('note-badge-$noteKey-疑问'));
+    final gesture = await tester.startGesture(tester.getCenter(badge));
+    await tester.pump(const Duration(milliseconds: 700));
+    // 拖动期间垃圾桶 overlay 浮现。
+    expect(find.byKey(const ValueKey('notes-tag-trash')), findsOneWidget);
+    await gesture.moveTo(tester.getCenter(find.byKey(
+      const ValueKey('notes-tag-trash'),
+    )));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
     expect(store.notes.first.markerBadges, isEmpty);
+    // 拖动结束垃圾桶收起。
+    expect(find.byKey(const ValueKey('notes-tag-trash')), findsNothing);
+  });
+
+  testWidgets('调色板标签拖入垃圾桶 = 从所有笔记摘除并出目录', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '甲', markerLabel: '待查证', createdAt: 2),
+      _note(bookId: 'b', text: '乙', markerLabel: '待查证', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 「待查证」是自定义类型，会出现在「全部标签」行。
+    final paletteChip = find.byKey(const ValueKey('notes-marker-待查证'));
+    expect(paletteChip, findsOneWidget);
+
+    final gesture = await tester.startGesture(tester.getCenter(paletteChip));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(find.byKey(
+      const ValueKey('notes-tag-trash'),
+    )));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // 两条笔记上的该角标都被摘除。
+    for (final note in store.notes) {
+      expect(
+        note.markerBadges.any((badge) => badge.label == '待查证'),
+        isFalse,
+      );
+    }
+    // 自定义类型移出目录。
+    expect(
+      ReaderMarkerTypeStore.instance.types.any(
+        (type) => type.label == '待查证',
+      ),
+      isFalse,
+    );
+  });
+
+  testWidgets('多选标签磁吸成组拖入垃圾桶 = 组内全部删除', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      // 三本书：同书笔记的 key 会撞（_note 的 start/end 固定）。
+      _note(bookId: 'a', text: '甲', markerLabel: '疑问', createdAt: 3),
+      _note(bookId: 'b', text: '乙', markerLabel: '反驳', createdAt: 2),
+      _note(bookId: 'c', text: '丙', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 选中两枚调色板标签（磁吸组）。
+    await tester.tap(find.byKey(const ValueKey('notes-marker-疑问')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('notes-marker-反驳')));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(tester.getCenter(
+      find.byKey(const ValueKey('notes-marker-疑问')),
+    ));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(find.byKey(
+      const ValueKey('notes-tag-trash'),
+    )));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    // 组内全部类型从所有笔记上摘除。
+    for (final note in store.notes) {
+      expect(
+        note.markerBadges.any(
+          (badge) => badge.label == '疑问' || badge.label == '反驳',
+        ),
+        isFalse,
+      );
+    }
   });
 
   testWidgets('划线类型在时间线列出范围与整段划线，线型可筛选', (tester) async {
@@ -819,7 +936,7 @@ void main() {
     expect(store.notes[1].tags, contains('重要'));
   });
 
-  testWidgets('角标拖到空白处松手的瞬间立即消失', (tester) async {
+  testWidgets('角标拖到空白处松手瞬间就回原位（不消失）', (tester) async {
     final store = _NotesMemoryStore([
       _note(bookId: 'a', text: '一句话', markerLabel: '疑问', createdAt: 1),
     ]);
@@ -838,9 +955,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     await gesture.up();
     await tester.pump();
-    expect(find.byKey(ValueKey('note-badge-$noteKey-疑问')), findsNothing);
+    // 落空即弹回：角标没有消失。
+    expect(find.byKey(ValueKey('note-badge-$noteKey-疑问')), findsOneWidget);
 
     await tester.pumpAndSettle();
-    expect(store.notes.first.markerBadges, isEmpty);
+    expect(store.notes.first.markerBadges, isNotEmpty);
   });
 }

@@ -6,6 +6,8 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../../services/reader_annotation_store.dart';
 import '../../services/reader_mark_style.dart';
+import '../notes/note_tag_drag.dart';
+import '../notes/tag_trash.dart';
 import '../../services/reader_marker_type_store.dart';
 import '../app_dialog.dart';
 import 'reader_chapter_layout.dart';
@@ -366,6 +368,9 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
   late List<ReaderMarkerType> _customTypes;
   Timer? _focusTimer;
 
+  /// 编辑器内拖动标签中（顶部浮现垃圾桶，拖入即从待存标签里移除）。
+  bool _tagDragActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -480,10 +485,12 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
         top: false,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: math.min(760, available)),
-          child: SingleChildScrollView(
-            key: const ValueKey('reader-annotation-scroll'),
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
-            child: Column(
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                key: const ValueKey('reader-annotation-scroll'),
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
+                child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -593,10 +600,41 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
                   runSpacing: 4,
                   children: [
                     for (final tag in _tags)
-                      InputChip(
+                      // 与笔记页同一套交互：长按拿起标签，拖入顶部垃圾桶
+                      // 即从待存标签里移除（X 仍保留作为快捷方式）。
+                      LongPressDraggable<NoteTagDrag>(
                         key: ValueKey('reader-note-tag-$tag'),
-                        label: Text(tag),
-                        onDeleted: () => setState(() => _tags.remove(tag)),
+                        data: NoteTagDrag(
+                          label: tag,
+                          colorValue: noteTagColorValue(
+                            tag,
+                            dark: false,
+                          ),
+                          kind: NoteTagKind.tag,
+                        ),
+                        feedback: Transform.scale(
+                          scale: 1.12,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InputChip(
+                              label: Text(tag),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: const SizedBox(width: 64),
+                        onDragStarted: () {
+                          // ignore: avoid_print
+                          print('editor-tag drag started: $tag');
+                          setState(() => _tagDragActive = true);
+                        },
+                        onDragEnd: (_) =>
+                            setState(() => _tagDragActive = false),
+                        child: InputChip(
+                          label: Text(tag),
+                          onDeleted: () => setState(() => _tags.remove(tag)),
+                        ),
                       ),
                   ],
                 ),
@@ -728,9 +766,26 @@ class _AnnotationEditorSheetState extends State<_AnnotationEditorSheet> {
                     selected: _markColorValue,
                     onTap: (value) => setState(() => _markColorValue = value),
                   ),
+                  ],
                 ],
-              ],
+              ),
             ),
+            // 与笔记页同步的删除交互：拖动标签期间顶部浮现垃圾桶，
+            // 拖入即从待存标签里移除。overlay 不占布局。
+            if (_tagDragActive)
+              Positioned(
+                top: 6,
+                left: 18,
+                right: 18,
+                child: TagTrashTarget(
+                  trashKey: const ValueKey('reader-tag-trash'),
+                  visible: true,
+                  onDropTag: (tag) =>
+                      setState(() => _tags.remove(tag.label)),
+                  onDropCluster: (_) {},
+                ),
+              ),
+            ],
           ),
         ),
       ),

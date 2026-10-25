@@ -21,6 +21,7 @@ import '../services/reader_underline_store.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
 import '../widgets/notes/note_tag_drag.dart';
+import '../widgets/notes/tag_trash.dart';
 import '../widgets/reader/annotation/ink_strokes_painter.dart';
 import '../widgets/reader/reader_note_block.dart';
 import 'pdf_reader_page.dart';
@@ -169,6 +170,16 @@ class _NotesPageState extends State<NotesPage> {
   /// 手写墨迹批注（InkAnnotationStore 全量，按 createdAt 倒序）。
   List<InkAnnotation> _ink = const [];
   List<_InkEntry> _inkEntries = const [];
+
+  /// 多选磁吸组的拖动负载（非空 = 正在拖整组）。
+  NoteTagClusterDrag? _activeCluster;
+
+  /// 笔记角标拖动进行中（浮现垃圾桶用）。
+  bool _badgeDragActive = false;
+
+  /// 任何标签拖动进行中 = 顶部垃圾桶 overlay 可见。
+  bool get _trashVisible =>
+      _paletteDrag != null || _activeCluster != null || _badgeDragActive;
   /// 划线线型筛选（null = 全部线型）；仅当类型筛选选中「划线」时生效。
   ReaderMarkStyle? _markStyleFilter;
 
@@ -651,14 +662,18 @@ class _NotesPageState extends State<NotesPage> {
           ),
         ],
       ),
-      body: Column(
+      // 垃圾桶是顶层 overlay：只在标签拖动期间浮现，不占流式布局，
+      // 出现/消失不会推动视图切换、筛选行或时间线的任何项目。
+      body: Stack(
         children: [
-          _buildViewSwitch(palette),
-          _buildQuickFilters(palette),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : !hasContent
+          Column(
+            children: [
+              _buildViewSwitch(palette),
+              _buildQuickFilters(palette),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : !hasContent
                 ? _buildEmpty(palette)
                 : switch (_viewMode) {
                     _NotesViewMode.books =>
@@ -671,7 +686,23 @@ class _NotesPageState extends State<NotesPage> {
                         ? _buildInkTimeline(palette, _visibleInk)
                         : _buildNoteList(palette, visible),
                   },
+              ),
+            ],
           ),
+          // 标签拖动期间浮现的垃圾桶：浮在页面最上方，不占布局；
+          // 拖动结束整颗从树上移除（不存在隐形的落点）。
+          if (_trashVisible)
+            Positioned(
+              top: 10,
+              left: 0,
+              right: 0,
+              child: TagTrashTarget(
+                visible: true,
+                onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
+                onDropCluster: (cluster) =>
+                    unawaited(_onTrashDropCluster(cluster)),
+              ),
+            ),
         ],
       ),
     );
@@ -723,6 +754,7 @@ class _NotesPageState extends State<NotesPage> {
   );
 
   /// 一条时间线笔记，统一挂上「拖标签进来」的落点与磁力虚影。
+  /// 角标拖出落空（不在任何笔记/垃圾桶上）= 弹回原位，不删除。
   Widget _noteRow(
     ReaderAnnotation note, {
     required HomePalette palette,
@@ -784,7 +816,8 @@ class _NotesPageState extends State<NotesPage> {
         onOpen: _openNote,
         onEdit: _editNote,
         onDragFinished: _clearHover,
-        onRemoveTag: (tag) => unawaited(_removeBadge(note, tag)),
+        onDragActiveChanged: (active) =>
+            setState(() => _badgeDragActive = active),
       ),
     );
   }
@@ -869,7 +902,84 @@ class _NotesPageState extends State<NotesPage> {
     }
   }
 
-  /// 拖到空白处 = 从这条笔记上摘掉角标。同样先隐藏再异步写库，
+  /// 垃圾桶落点：单枚负载按来源分流——笔记角标 → 从那条笔记摘掉；
+  /// 调色板标签 → 从所有笔记摘除 + 自定义类型出目录。
+  Future<void> _onTrashDropTag(NoteTagDrag tag) async {
+    final fromKey = tag.sourceNoteKey;
+    final note = fromKey == null
+        ? null
+        : _all.where((entry) => entry.key == fromKey).firstOrNull;
+    if (note != null) {
+      await _removeBadge(note, tag);
+      return;
+    }
+    await _deletePaletteTag(tag);
+  }
+
+  /// 垃圾桶落点：磁吸组逐枚删除，完成后清掉对应筛选（类型已不存在）。
+  Future<void> _onTrashDropCluster(NoteTagClusterDrag cluster) async {
+    for (final tag in cluster.tags) {
+      await _deletePaletteTag(tag);
+    }
+  }
+
+  /// 从调色板删除一枚标签：所有笔记上摘除；自定义批注类型移出目录
+  /// （内置预设保留在目录里，但笔记上已摘净）；筛选随之一并清理。
+  Future<void> _deletePaletteTag(NoteTagDrag tag) async {
+    final carriers = _all
+        .where(
+          (note) => switch (tag.kind) {
+            NoteTagKind.marker => note.markerBadges.any(
+              (badge) => badge.key == tag.label,
+            ),
+            NoteTagKind.tag => note.tags.contains(tag.label),
+          },
+        )
+        .toList(growable: false);
+    for (final note in carriers) {
+      try {
+        if (tag.kind == NoteTagKind.marker) {
+          await _store.updateMarkerTags(
+            note.key,
+            note.markerBadges.where((badge) => badge.key != tag.label),
+          );
+        } else {
+          await _store.updateTags(
+            note.key,
+            note.tags.where((entry) => entry != tag.label),
+          );
+        }
+      } catch (_) {
+        // 单条失败不中断整批；重载后仍以存储为准。
+      }
+    }
+    if (tag.kind == NoteTagKind.marker) {
+      try {
+        await ReaderMarkerTypeStore.instance.remove(tag.label);
+      } catch (_) {
+        // 目录移除失败不影响「从笔记摘净」的结果。
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      if (tag.kind == NoteTagKind.marker &&
+          _filters.markerKeys.contains(tag.label)) {
+        final next = {..._filters.markerKeys}..remove(tag.label);
+        _filters = next.isEmpty
+            ? _filters.without(marker: true)
+            : _filters.copyWith(markerKeys: next);
+      }
+      if (tag.kind == NoteTagKind.tag && _filters.tags.contains(tag.label)) {
+        final next = {..._filters.tags}..remove(tag.label);
+        _filters = next.isEmpty
+            ? _filters.without(tags: true)
+            : _filters.copyWith(tags: next);
+      }
+    });
+    _reload();
+  }
+
+  /// 从这条笔记上摘掉角标。同样先隐藏再异步写库，
   /// 避免松手后角标闪回原位、等重载才消失。
   Future<void> _removeBadge(ReaderAnnotation note, NoteTagDrag tag) async {
     _markLeavingBadge(note.key, tag.kind, tag.label);
@@ -890,8 +1000,41 @@ class _NotesPageState extends State<NotesPage> {
     }
   }
 
-  /// 拿起「全部类型」里的标签：记下原位与所有其他标签的中心。
-  void _paletteDragStarted(NoteTagDrag dragged, Size size) {
+  /// 该标签处于选中态且选中数 ≥ 2 时，长按它拖的是整组磁吸簇；
+  /// 否则返回 null（单标签拖动，保留挤开排序语义）。
+  List<NoteTagDrag>? _clusterFor(List<NoteTagDrag> entries, NoteTagDrag entry) {
+    final selected = entry.kind == NoteTagKind.marker
+        ? _filters.markerKeys.contains(entry.label)
+        : _filters.tags.contains(entry.label);
+    if (!selected) return null;
+    final group = entries
+        .where(
+          (candidate) => switch (candidate.kind) {
+            NoteTagKind.marker =>
+              candidate.label == entry.label ||
+                  _filters.markerKeys.contains(candidate.label),
+            NoteTagKind.tag =>
+              candidate.label == entry.label ||
+                  _filters.tags.contains(candidate.label),
+          },
+        )
+        .toList(growable: false);
+    if (group.length < 2) return null;
+    return List.unmodifiable(group);
+  }
+
+  /// 拿起「全部标签」里的标签：单枚走挤开排序；磁吸簇（多选组）只
+  /// 记录负载供垃圾桶删除，行内排序不参与。
+  void _paletteDragStarted(Object payload, Size size) {
+    if (payload is NoteTagClusterDrag) {
+      setState(() {
+        _activeCluster = payload;
+        _hoverNoteKey = null;
+        _hoverTag = null;
+      });
+      return;
+    }
+    final dragged = payload as NoteTagDrag;
     final entries = _paletteEntries(
       dark: Theme.of(context).brightness == Brightness.dark,
     );
@@ -979,8 +1122,14 @@ class _NotesPageState extends State<NotesPage> {
     return lefts;
   }
 
-  /// 松手：在行内就按插入点落位，并让这枚标签弹性重生。
+  /// 松手：在行内就按插入点落位，并让这枚标签弹性重生；磁吸簇松手
+  /// （无论落点）一律收尾——删除只由垃圾桶落点触发。
   void _paletteDragFinished() {
+    if (_activeCluster != null) {
+      setState(() => _activeCluster = null);
+      _clearHover();
+      return;
+    }
     final dragged = _paletteDrag;
     if (dragged == null) {
       _clearHover();
@@ -1258,6 +1407,7 @@ class _NotesPageState extends State<NotesPage> {
                           onDragUpdate: _paletteDragUpdated,
                           onDragFinished: _paletteDragFinished,
                           rebornToken: _rebornTokens[entries[index].id] ?? 0,
+                          cluster: _clusterFor(entries, entries[index]),
                         ),
                       ),
                     ),
@@ -1748,7 +1898,7 @@ class _TimelineNoteRow extends StatelessWidget {
     required this.firstOfDay,
     required this.lastOfDay,
     required this.badges,
-    required this.onRemoveTag,
+    required this.onDragActiveChanged,
     this.ghostId,
     this.hoverTag,
     this.hovered = false,
@@ -1772,7 +1922,8 @@ class _TimelineNoteRow extends StatelessWidget {
   final String? ghostId;
   final NoteTagDrag? hoverTag;
   final bool hovered;
-  final void Function(NoteTagDrag badge) onRemoveTag;
+  /// 角标拖动开始/结束：页面浮现与收起顶部垃圾桶。
+  final ValueChanged<bool> onDragActiveChanged;
   final VoidCallback onDragFinished;
   final Future<void> Function(ReaderAnnotation note) onOpen;
   final Future<void> Function(ReaderAnnotation note) onEdit;
@@ -1958,10 +2109,13 @@ class _TimelineNoteRow extends StatelessWidget {
                                         hoverTag != null &&
                                         hoverTag!.kind == badge.kind &&
                                         hoverTag!.label == badge.label,
+                                    onDragStarted: () =>
+                                        onDragActiveChanged(true),
+                                    // 落空（accepted == false）= 弹回原位，
+                                    // 不删除；删除只走垃圾桶落点。
                                     onDragEnd: (accepted) {
+                                      onDragActiveChanged(false);
                                       onDragFinished();
-                                      if (accepted) return;
-                                      onRemoveTag(badge);
                                     },
                                   ),
                             ],
