@@ -479,6 +479,7 @@ class _DetailPageState extends State<DetailPage> {
               .copyWith(
                 statusBarColor: Colors.transparent,
                 systemNavigationBarColor: palette.canvas,
+                systemStatusBarContrastEnforced: false,
               ),
       child: Scaffold(
         backgroundColor: palette.canvas,

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.core.view.WindowCompat
@@ -53,6 +54,15 @@ class MainActivity : FlutterActivity() {
         window.setBackgroundDrawable(ColorDrawable(windowColor))
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
+        // 【青茄修复·冷启动灰条】Android 10+ 对「透明状态栏」默认开启对比度
+        // 保护——系统会在状态栏后面垫一层半透明灰色渐变 scrim，这就是用户
+        // 看到的小灰条（进过阅读器后消失，是因为阅读页状态栏用不透明正文
+        // 底色，不触发 scrim）。必须显式声明不强制对比度，从窗口创建起就
+        // 关掉，早于 Flutter 首帧。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark

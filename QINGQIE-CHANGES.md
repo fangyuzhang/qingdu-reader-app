@@ -1319,3 +1319,33 @@ flutter test             # 1954 passed / 10 skipped
 - 垃圾桶暗化：拖动期间内容暗化 32%（IgnorePointer 不挡落点），垃圾桶与拖拽反馈在其上保持清晰。
 - 笔记卡片：书名行高 22→11 + 菜单按钮改 child 模式收紧（书名↔章节行距减半）；角标行空→非空翻转以 SizeTransition 220ms 展开（AnimatedSize 放 IntrinsicHeight 内会以动画中间值当行高导致内容溢出断言，故弃用）。
 - 验证：analyze 0；全量 1546/10/0；真机——选中两枚长按：整组磁吸叠放跟手（疑问+待查证叠放、槽位空出、反驳原地不动）、垃圾桶浮现于暗化层上、松手弹回；卡片行距减半上屏。（4a23011）
+
+---
+
+# 六十七、垃圾桶交互迭代四连（67bb55f + 095b28d + 8374370 + c1207ad，用户真机反馈）
+
+- 拖拽卡死根因修复：按住的那枚 chip 必须在拖动全程保持其 Draggable 存活——此前隐藏原槽位导致 Draggable 被销毁、onDragEnd 丢失、`_dragSource` 悬空，表现为「组拖删后其它标签拖不动/松手消失」。引入 `NoteTagClusterDrag(tags, dragged:)` 记录被拖成员，`_load()` 末尾防御性重置全部拖拽状态。
+- 垃圾桶改为右上角常驻（AppBar 导出按钮左侧，`compact` 形态），不再用拖动期浮现的大圆钮；armed（DragTarget 有候选）时 320ms easeOutBack 弹性放大 1.3× 并变红——用户要求「拖动标签时垃圾桶弹性放大一下示意可放入」。armed 状态唯一来源 = DragTarget candidate，删除 onMove/onLeave 自存的 _hover（两源在边缘交错重启动画 = 抖动根因）。
+- 磁吸吸收几何收紧：水平 ≤88 且垂直 ≤48（原纯欧氏 88，拖动经过垃圾桶/邻近标签会被误吸收，「滑动使其他标签消失」即此）。
+- 内置预设标签拖入垃圾桶 = 出调色板目录：`_deletedPresets`（SharedPreferences stringList）持久化排除集，`_baseMarkerCatalog` 过滤；自定义类型照旧连存储一起删。
+- 多选组拖拽：拖动中组内换序跳过（`_dragGroup.length > 1` 直接 return），落点语义 = 整组删除/弹回，不再中途重排。
+- 验证：analyze 0；全量 1547/10/0（notes 页 24 用例全绿，含组拖删/预设排除/垃圾桶常驻断言）。（67bb55f、095b28d、8374370、c1207ad）
+
+---
+
+# 六十八、冷启动灰条第一轮修复（cdf10cb）
+
+- 现象：冷启动后首页/书架顶部有一条暗色条纹，进过笔记/阅读器后消失。
+- 修复（当时判断为 MIUI 对未启用 edge-to-edge 应用的 scrim）：main.dart 在 runApp 后启用 `SystemUiMode.edgeToEdge` + 壳层 AnnotatedRegion 显式 `statusBarColor: Colors.transparent`；阅读器/PDF 页的 SystemUiMode 切换调用移除（v49 同类「模式切换重建子树导致渲染表面卡死」回归规避）。
+- 效果：条纹出现窗口收窄到启动加载段，未根除——引出六十九。
+
+---
+
+# 六十九、冷启动灰条根因终修：API 29+ 透明状态栏对比度 scrim（本次）
+
+- 根因（引擎源码 PlatformPlugin.java 512-514 行证实）：Android 10+ 对「透明状态栏」默认开启**对比度保护**——系统在状态栏后面垫一层半透明灰色渐变 scrim，必须显式 `setStatusBarContrastEnforced(false)` 才不画。框架 `SystemUiOverlayStyle.light/dark` 预设的 `systemStatusBarContrastEnforced` 为 null → 引擎从不下发 false → scrim 常驻。此前所有「透明状态栏」代码（原生 onCreate + Flutter 各处样式）都没关它。阅读器状态栏用不透明正文底色，不触发 scrim——这就是「阅读界面没有灰条、回到首页又有」的机制，也解释了「进过阅读器后消失」（阅读器退出路径的样式/模式切换副作用临时压掉了 scrim）。
+- 三层修复：
+  1. 原生 `MainActivity.applyStartupThemeColors`：API 29+ 显式 `window.isStatusBarContrastEnforced = false` + `isNavigationBarContrastEnforced = false`——从窗口创建（早于 Flutter 首帧）就关掉；
+  2. main.dart 启动期：`setEnabledSystemUIMode(edgeToEdge)` + 首个 overlay 样式（含 contrast=false）**提前到 runApp 之前**发出（原在 runApp 之后 unawaited，存在首帧已上屏而消息未到的窗口）；
+  3. Flutter 侧全部透明状态栏样式（壳层 AnnotatedRegion、详情页）补 `systemStatusBarContrastEnforced: false` / `systemNavigationBarContrastEnforced: false`。
+- 验证：analyze 0；全量 1547/10/0；真机（Redmi K20 Pro / Android 11）冷启动连拍——启动动画帧之后的所有帧状态栏条带 0% 灰 / 97% 奶油底，加载窗口期无灰条。（本次提交）

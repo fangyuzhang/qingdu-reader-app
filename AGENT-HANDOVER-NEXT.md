@@ -3,9 +3,9 @@
 > 更新时间：2026-10-25 18:10 (UTC+8)（手写墨迹批注 + PDF 阅读 + 标签磁吸拖拽全部交付后重写；本文是唯一有效的当前状态说明，AGENT-HANDOVER.md 是早期归档）
 > 仓库：E:\项目\青茄阅读\repo\fqapp-src（Windows 侧路径；WSL 内为 /mnt/e/项目/青茄阅读/repo/fqapp-src）
 > 远端：https://github.com/fangyuzhang/qingdu-reader-app（旧地址 qingqie-reader-app 自动重定向）
-> 分支：master，HEAD **67bb55f**，已与远端校验一致
+> 分支：master，HEAD **<提交后为准>**，已与远端校验一致
 > 版本：1.0.132+137　包名：com.fqapp.fqapp
-> 逐批变更细节看 QINGQIE-CHANGES.md（已记到第 66 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
+> 逐批变更细节看 QINGQIE-CHANGES.md（已记到第 69 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
 
 ---
 
@@ -13,13 +13,19 @@
 
 | 项 | 值 |
 | --- | --- |
-| 测试基线 | flutter analyze 0 问题；flutter test 1546 通过 / 10 跳过 / 0 失败 |
+| 测试基线 | flutter analyze 0 问题；flutter test 1547 通过 / 10 跳过 / 0 失败 |
 | 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe）；**MatePad 11 + M-Pencil 3 未到位**（压感/帧率实测遗留） |
 | 已装 APK | 验证构建（--dart-define=fqapp.debugTools=true）；正式归档 D:\APP\agent\apk\fqapp-v67.apk（1.0.132+137 无调试页） |
 | 远端同步 | master 已推送并校验 SHA 一致（67bb55f） |
-| 当前代码形态 | v41–v55 全部优化 + **新增 PDF 固定版式阅读、手写墨迹批注（PDF + 阅读器双端）、标签磁吸拖拽垃圾桶删除、笔记「手写」类型筛选**（第 2~7 组 + 63~66 批） |
+| 当前代码形态 | v41–v55 全部优化 + **新增 PDF 固定版式阅读、手写墨迹批注（PDF + 阅读器双端）、标签磁吸拖拽垃圾桶删除、笔记「手写」类型筛选**（第 2~7 组 + 63~69 批） |
 
 ---
+
+## 0.4 最新修复（2026-10-25 晚，第 67~69 批，全部已装真机验证）
+
+1. **冷启动灰条根因终修（69 批，本次）**：根因是 Android 10+ 对「透明状态栏」默认开启对比度保护 scrim（引擎 PlatformPlugin.java 512-514 行证实；框架 SystemUiOverlayStyle 预设的 systemStatusBarContrastEnforced 为 null → 从不下发 false）。三层关闭：MainActivity 原生 isStatusBarContrastEnforced=false（早于首帧）+ main.dart 系统栏消息提前到 runApp 之前 + 全部透明状态栏样式补 contrast=false。真机冷启动连拍验证：状态栏条带 0% 灰 / 97% 奶油底。**教训：透明状态栏必须同时关 contrast，否则必出灰条；阅读器没灰条是因为它用不透明正文底色。**
+2. **垃圾桶交互四连（67 批）**：按住的 chip 必须拖动全程保持 Draggable 存活（隐藏槽位会杀掉 Draggable → onDragEnd 丢失 → 状态卡死）；垃圾桶常驻 AppBar（compact 形态）；armed 唯一来源 = DragTarget candidate；磁吸吸收几何 = 水平≤88 且垂直≤48。
+3. **MIUI 截屏陈旧帧陷阱**：连续快速 screencap 会返回字节级相同帧，验证必须 md5 查重 + 加间隔。
 
 ## 0.5 本轮交付速览（2026-10-25，第 2~7 组 + 63~66 批）
 

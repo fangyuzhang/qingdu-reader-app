@@ -71,12 +71,23 @@ void main() {
     // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
     // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
     RustLogSource.reader = BackendService.instance.readRustLog;
+    // 【青茄修复·冷启动灰条】Android 10+ 会给「透明状态栏」默认垫一层
+    // 半透明灰 scrim（对比度保护），必须显式声明 systemStatusBarContrast
+    // Enforced=false 才不画。两条系统栏消息都要在 runApp 之前发出：放在
+    // runApp 之后（哪怕不 await）也有「首帧已上屏、消息未到」的窗口，
+    // 小说加载期间灰条仍会闪现。引擎侧 setEnabledSystemUIMode(edgeToEdge)
+    // 走 WindowCompat.setDecorFitsSystemWindows(false)，与原生 onCreate 的
+    // 设置一致，图标亮度随后由壳层 AnnotatedRegion 按主题接管。
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle.dark.copyWith(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.transparent,
+        systemStatusBarContrastEnforced: false,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
     runApp(const FqApp());
-    // 【青茄修复·冷启动灰条】MIUI 会对「未启用 edge-to-edge」的应用给
-    // 透明状态栏盖一层灰色渐变 scrim——冷启动后首页/书架顶部的暗色
-    // 条纹即此（进过笔记或阅读器触发过 SystemUiMode.edgeToEdge 后才
-    // 消失）。启动即启用 edge-to-edge，让首帧起状态栏就透出页面底色。
-    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     // 【青茄修复·启动提速】Rust 后端进程的拉起（解压/端口/握手）是
     // 启动最耗时的一步，与本地数据初始化完全独立。这里就并发开跑，
     // RootShell 等待的是同一个 Future（start() 可重入），总耗时从
@@ -440,9 +451,16 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
       // 切走后会残留上一个页的样式。
       // 【青茄重构】删除短剧 tab 后不再有黑底视频流页面，无需按 tab 特判。
       body: AnnotatedRegion<SystemUiOverlayStyle>(
-        // 显式透明状态栏底色：MIUI 在未显式声明时会给状态栏区补灰底。
+        // 显式透明状态栏底色 + 关闭对比度 scrim（Android 10+ 对透明状态栏
+        // 默认垫灰渐变，即冷启动灰条；阅读器页状态栏用不透明正文底色所以
+        // 从没出过灰条，也旁证了这一机制）。
         value: (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
-            .copyWith(statusBarColor: Colors.transparent),
+            .copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: Colors.transparent,
+              systemStatusBarContrastEnforced: false,
+              systemNavigationBarContrastEnforced: false,
+            ),
         child: LazyIndexedStack(
           index: _index,
           children: [
