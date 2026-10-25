@@ -1370,3 +1370,13 @@ flutter test             # 1954 passed / 10 skipped
 - 修掉一颗**时间炸弹测试**：reading_report_page_test 的 seed 硬编码 2026-10-19/20，页面按真实日历算「本周」——2026-10-26 00:00（周一）后种子全落上周、周视图归零，「15 分钟」断言静默失败（本次全量复跑时暴露，与 lint 改动无关）。seed 改为相对 DateTime.now()，7 处调用点全部受益。
 - 结构性债务如实记录（**有意不动**，避免交付前大改引入回归）：reader_page.dart 4963 行 / State 约 26 字段（最长方法 _autoTurnStep 234 行但职责单一）、notes_page.dart 2774 行（拖拽状态机重测覆盖）。二者是仅存的两个巨型文件，自然切割线存在（系统栏/批注/墨迹/自动翻页/朗读各自成 controller），建议规则：**下次因功能再动到对应区域时顺势抽取，不做大爆炸重构**。
 - 验证：analyze（含新 lint）0 问题；全量 1547/10/0。（本次提交）
+
+---
+
+# 七十二、高刷新率适配（RefreshRatePolicy）
+
+- 背景：主流机型面板 90~180Hz，但国产 ROM 的「智能刷新率」默认把**未声明偏好**的应用锁 60Hz（白名单大厂应用除外）；Flutter 引擎本身跟随 Choreographer vsync 无帧率上限，缺的只是应用向系统的「高刷投票」。测试机 K20 Pro 面板本身仅 60Hz（dumpsys 确认单模式），本优化面向未来的 90Hz+ 设备（含待测 MatePad 11 = 120Hz）。
+- 新增 RefreshRatePolicy（MainActivity onCreate 调用）：`preferredRefreshRate`（API 21+）+ `preferredDisplayModeId`（API 23+）投给**同分辨率下最高刷新率**的模式——不跨分辨率（QHD+60 设备不会被迫降 FHD+120）；面板最高档=当前档（60Hz 面板或系统已最高）时零干预。
+- 电池取舍如实记录：投票后面板在应用可见期间倾向保持高刷；静态阅读 Flutter 不持续提交帧，Android 12+ 投票机制仍可降档，部分 ROM 可能常驻高刷——这是「高刷适配」的市场标准取舍。
+- 验证（60Hz 真机）：skip 分支正确触发（logcat `policy=skip`）且窗口零属性变化；apply 分支的写入路径用临时补丁端到端验证（dumpsys window 出现 preferredRefreshRate/preferredDisplayMode 回写生效后已还原）。**120Hz+ 设备上的实际生效待 MatePad 11 到位复验**。
+- analyze 0；全量 1547/10/0。归档 fqapp-v72.apk。

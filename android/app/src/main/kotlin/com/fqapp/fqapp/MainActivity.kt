@@ -29,6 +29,9 @@ class MainActivity : FlutterActivity() {
         // 「App 自己保存的主题」把窗口底色与状态栏图标亮度摆正，之后由页面
         // 内的 SystemUiOverlayStyle 接管。
         applyStartupThemeColors()
+        // 【青茄·高刷适配】向系统声明刷新率偏好，逃出国产 ROM 对未声明
+        // 应用的 60Hz 锁；60Hz 面板自动跳过（见 RefreshRatePolicy）。
+        RefreshRatePolicy.apply(this)
         // 文件管理器/浏览器「打开方式」交给本应用的 PDF：冷启动路径，
         // 引擎就绪前先记在插件静态字段里，Dart 启动后 consume。
         PdfViewIntentPlugin.capture(intent)

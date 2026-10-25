@@ -14,7 +14,7 @@
 | 项 | 值 |
 | --- | --- |
 | 测试基线 | flutter analyze 0 问题；flutter test 1547 通过 / 10 跳过 / 0 失败 |
-| 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe）；**MatePad 11 + M-Pencil 3 未到位**（压感/帧率实测遗留） |
+| 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe）；**MatePad 11 + M-Pencil 3 未到位**（压感/帧率实测遗留；另需复验 RefreshRatePolicy 在其 120Hz 面板上生效——logcat 应出 `policy=high-frame-rate fps=120.0`） |
 | 已装 APK | 验证构建（--dart-define=fqapp.debugTools=true）；正式归档 D:\APP\agent\apk\fqapp-v67.apk（1.0.132+137 无调试页） |
 | 远端同步 | master 已推送并校验 SHA 一致（67bb55f） |
 | 当前代码形态 | v41–v55 全部优化 + **新增 PDF 固定版式阅读、手写墨迹批注（PDF + 阅读器双端）、标签磁吸拖拽垃圾桶删除、笔记「手写」类型筛选**（第 2~7 组 + 63~69 批） |
