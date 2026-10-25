@@ -13,6 +13,12 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <!-- API 29+：透明系统栏不垫对比度 scrim（冷启动灰条根因）。
+             主题层声明是为了覆盖「窗口 attach 到 onCreate 程序化设置之间」
+             的空档；API 29 以下无此机制，属性被忽略。与 MainActivity
+             applyStartupThemeColors 的程序化设置互为兜底。 -->
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.
          This theme determines the color of the Android Window while your
@@ -30,5 +36,11 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <!-- API 29+：透明系统栏不垫对比度 scrim（冷启动灰条根因）。
+             主题层声明是为了覆盖「窗口 attach 到 onCreate 程序化设置之间」
+             的空档；API 29 以下无此机制，属性被忽略。与 MainActivity
+             applyStartupThemeColors 的程序化设置互为兜底。 -->
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>

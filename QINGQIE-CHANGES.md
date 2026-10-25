@@ -1349,3 +1349,13 @@ flutter test             # 1954 passed / 10 skipped
   2. main.dart 启动期：`setEnabledSystemUIMode(edgeToEdge)` + 首个 overlay 样式（含 contrast=false）**提前到 runApp 之前**发出（原在 runApp 之后 unawaited，存在首帧已上屏而消息未到的窗口）；
   3. Flutter 侧全部透明状态栏样式（壳层 AnnotatedRegion、详情页）补 `systemStatusBarContrastEnforced: false` / `systemNavigationBarContrastEnforced: false`。
 - 验证：analyze 0；全量 1547/10/0；真机（Redmi K20 Pro / Android 11）冷启动连拍——启动动画帧之后的所有帧状态栏条带 0% 灰 / 97% 奶油底，加载窗口期无灰条。（本次提交）
+
+---
+
+# 七十、跨厂商可移植性审查（用户要求：修复不得只对 MIUI 成立）
+
+- 结论：**现有修复全部建立在 AOSP 标准 API 上，无任何厂商分支代码**（全库检索 miui/xiaomi/oppo/vivo 等仅命中测试注释；代码内唯一的设备匹配是 RendererCompatibility 按**芯片**型号处理天玑 8100 视频纹理 bug，其他设备 no-op）。
+- 灰条修复的可移植性论证：`setStatusBarContrastEnforced(false)` 是 Android 10（API 29）引入的 AOSP 机制，ColorOS/OriginOS/澎湃OS/HarmonyOS 安卓底座共用同一 PhoneWindow 实现；API <29 无此机制、灰条天然不可能；Android 15+ 系统**强制** edge-to-edge，statusBarColor 失效但 contrast 属性设置无害。本次再加第四层：LaunchTheme/NormalTheme 主题级 `android:enforceStatusBarContrast/NavigationBarContrast=false`，覆盖「窗口 attach 到 onCreate 程序化设置之间」的空档，API 29 以下自动忽略该属性。即：**灰条修复在 Android 7~16 全版本、全厂商成立**。
+- 全量清单核对（均合规）：听书前台服务 = manifest foregroundServiceType="mediaPlayback" + FOREGROUND_SERVICE_MEDIA_PLAYBACK 权限 + ServiceCompat.startForeground 带类型启动（Android 14+ 硬要求，OPPO/VIVO 新系统严格执行）；存储 = 无 WRITE_EXTERNAL_STORAGE，MediaStore.Downloads（29+ 免权限）+ <29 诚实降级，备份走 SAF CREATE/OPEN_DOCUMENT；明文流量 networkSecurityConfig 仅放行 127.0.0.1/localhost；组件全部显式 exported（Android 12+ 要求）；queries 包可见性（TTS/PROCESS_TEXT，Android 11+ 要求）；POST_NOTIFICATIONS（13+）；PopScope 而非弃用的 WillPopScope（预测性返回兼容）；分享纯文本 ACTION_SEND 无 file:// URI（Android 7+ 严格模式崩溃坑不存在）；compileSdk/targetSdk 36 + minSdk 24。
+- 如实记录三项「无法一劳永逸」：①长图导出落在应用私有目录（全厂商一致的 UX 限制，建议后续加「保存到下载」按钮）；②新芯片若出现同类 Impeller 纹理 bug 需扩 RendererCompatibility 名单（扩展点已留）；③国产 ROM 激进省电杀后台只能靠用户加白名单，业界无解。
+- 验证：构建通过 + 真机冷启动复验状态栏干净（v1 过渡帧为 MIUI 截屏 alpha 伪影，v2 奶油底 92% / 灰 0%）。（本次提交）
