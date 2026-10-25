@@ -59,9 +59,13 @@ class NoteTagDrag {
 /// 整组落到别处 = 弹回原位，无任何改动）。
 @immutable
 class NoteTagClusterDrag {
-  const NoteTagClusterDrag(this.tags);
+  const NoteTagClusterDrag(this.tags, {required this.dragged});
 
   final List<NoteTagDrag> tags;
+
+  /// 用户手指按住的那一枚（拖动期间它必须保持 Draggable 活着，
+  /// 否则 onDragEnd 丢失、拖动组状态永久卡死）。
+  final NoteTagDrag dragged;
 
   int get length => tags.length;
 }
@@ -129,7 +133,7 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
   Object get _payload {
     final cluster = widget.cluster;
     if (cluster != null && cluster.length > 1) {
-      return NoteTagClusterDrag(cluster);
+      return NoteTagClusterDrag(cluster, dragged: _data);
     }
     return _data;
   }
@@ -267,24 +271,24 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
     );
   }
 
-  /// 磁吸组的悬浮副本：手机 APP 图标式聚拢——每枚保持自己的颜色，
-  /// 轻微错位叠放 + 阴影抬升；新吸收的成员以缩放入场动画吸附进组。
-  /// 不显示任何数量徽标（产品要求）。
+  /// 磁吸组的悬浮副本：参考手机桌面多选图标的扇形叠放——每枚完整
+  /// 可见、沿对角线错开并微微旋转，各自保持颜色；新成员以缩放动画
+  /// 吸附入列。不显示数量徽标（产品要求）。
   Widget _groupFeedback(NoteTagClusterDrag group) {
     final palette = HomePalette.of(context);
     final visible = group.tags.take(5).toList();
     return Material(
       color: Colors.transparent,
       child: SizedBox(
-        width: 190,
-        height: 52,
+        width: 240,
+        height: 120,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             for (var i = visible.length - 1; i >= 0; i--)
               Positioned(
-                left: i * 24.0,
-                top: 6,
+                left: i * 14.0,
+                top: i * 9.0,
                 child: TweenAnimationBuilder<double>(
                   key: ValueKey('group-fb-${visible[i].label}-$i'),
                   tween: Tween(begin: 0.4, end: 1),
@@ -293,7 +297,7 @@ class _PaletteTagChipState extends State<PaletteTagChip> {
                   builder: (context, scale, child) => Transform.scale(
                     scale: scale,
                     child: Transform.rotate(
-                      angle: (i - (visible.length - 1) / 2) * 0.05,
+                      angle: (i - (visible.length - 1) / 2) * 0.1,
                       child: child,
                     ),
                   ),

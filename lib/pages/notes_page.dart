@@ -175,6 +175,10 @@ class _NotesPageState extends State<NotesPage> {
   /// 空列表 = 没有调色板拖动进行中。
   List<NoteTagDrag> _dragGroup = const [];
 
+  /// 用户手指按住的那一枚：拖动期间它必须保持 Draggable 活着
+  /// （hidden 槽位排除它），否则 onDragEnd 丢失、拖动组状态永久卡死。
+  NoteTagDrag? _dragSource;
+
   /// 拖动组是否允许磁吸吸收邻近标签：只有「以单枚身份拖起」的拖动可以
   /// 吸收；多选组（整组拖起）不再吸收未选中的标签（原地不动）。
   bool _dragAbsorbEnabled = false;
@@ -698,16 +702,27 @@ class _NotesPageState extends State<NotesPage> {
               ),
             ],
           ),
-          // 拖动期间的暗化层：突出垃圾桶与拖拽主体，不完全遮挡原界面。
-          // IgnorePointer 让笔记的「拖入」落点照常命中。
+          // 拖动期间的暗化层：以垃圾桶为中心的径向渐变——近桶最暗、
+          // 越往外越清，突出垃圾桶主题。IgnorePointer 让笔记的「拖入」
+          // 落点照常命中。
           if (_trashVisible)
             Positioned.fill(
               child: IgnorePointer(
                 child: AnimatedOpacity(
                   opacity: 1,
                   duration: const Duration(milliseconds: 160),
-                  child: ColoredBox(
-                    color: Colors.black.withValues(alpha: 0.32),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: const Alignment(0, -0.95),
+                        radius: 1.1,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.52),
+                          Colors.black.withValues(alpha: 0.30),
+                        ],
+                        stops: const [0.0, 1.0],
+                      ),
+                    ),
                     child: const SizedBox.expand(),
                   ),
                 ),
@@ -931,7 +946,9 @@ class _NotesPageState extends State<NotesPage> {
   /// 那条笔记摘掉；调色板标签 → 从所有笔记摘除 + 自定义类型出目录。
   Future<void> _onTrashDropTag(NoteTagDrag tag) async {
     if (_dragGroup.length > 1) {
-      await _onTrashDropCluster(NoteTagClusterDrag(_dragGroup));
+      await _onTrashDropCluster(
+        NoteTagClusterDrag(_dragGroup, dragged: _dragSource ?? tag),
+      );
       return;
     }
     final fromKey = tag.sourceNoteKey;
@@ -1060,13 +1077,16 @@ class _NotesPageState extends State<NotesPage> {
     if (payload is NoteTagClusterDrag) {
       setState(() {
         _dragGroup = List.unmodifiable(payload.tags);
+        _dragSource = payload.dragged;
         _dragAbsorbEnabled = false;
+        _paletteInRow = false;
         _hoverNoteKey = null;
         _hoverTag = null;
       });
       return;
     }
     final dragged = payload as NoteTagDrag;
+    _dragSource = dragged;
     _dragGroup = [dragged];
     _dragAbsorbEnabled = true;
     final entries = _paletteEntries(
@@ -1196,14 +1216,15 @@ class _NotesPageState extends State<NotesPage> {
   /// 松手：单枚组在行内按插入点落位并弹性重生；磁吸组（≥2）无论落点
   /// 一律整组收尾——删除只由垃圾桶落点触发，其余弹回原位。
   void _paletteDragFinished() {
-    final dragged = _paletteDrag;
+    final dragged = _paletteDrag ?? _dragSource;
     if (dragged == null || _dragGroup.length > 1) {
       setState(() {
         _dragGroup = const [];
+        _dragSource = null;
         _dragAbsorbEnabled = false;
         _paletteDrag = null;
         _paletteInRow = false;
-          _paletteCenters = const [];
+        _paletteCenters = const [];
       });
       _clearHover();
       return;
@@ -1212,6 +1233,7 @@ class _NotesPageState extends State<NotesPage> {
     setState(() {
       _rebornTokens[dragged.id] = (_rebornTokens[dragged.id] ?? 0) + 1;
       _dragGroup = const [];
+      _dragSource = null;
       _dragAbsorbEnabled = false;
       _paletteDrag = null;
       _paletteInRow = false;
@@ -2113,8 +2135,10 @@ class _TimelineNoteRow extends StatelessWidget {
                           children: [
                             Expanded(
                               child: SizedBox(
-                                // 书名与章节的行距收到原来的一半。
-                                height: 11,
+                                // 书名与章节的行距收紧（原 22），但保留
+                                // 图标空间——压得太扁会让 18px 的菜单图标
+                                // 溢出行框、与章节名重叠（真机实测）。
+                                height: 20,
                                 child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
@@ -2135,13 +2159,13 @@ class _TimelineNoteRow extends StatelessWidget {
                               tooltip: '更多',
                               padding: EdgeInsets.zero,
                               child: SizedBox(
-                                height: 11,
+                                height: 20,
                                 width: 26,
                                 child: Align(
                                   alignment: Alignment.centerRight,
                                   child: Icon(
                                     LucideIcons.ellipsis_vertical,
-                                    size: 18,
+                                    size: 15,
                                   ),
                                 ),
                               ),

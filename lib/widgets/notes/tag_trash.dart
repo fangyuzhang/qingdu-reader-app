@@ -68,34 +68,53 @@ class _TagTrashTargetState extends State<TagTrashTarget> {
               },
               builder: (context, candidate, _) {
                 final armed = candidate.isNotEmpty;
-                return Container(
-                  key: widget.trashKey,
-                  width: 62,
-                  height: 62,
-                  decoration: BoxDecoration(
-                    color: armed
-                        ? Colors.red.withValues(alpha: 0.14)
-                        : palette.surface,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: armed
-                          ? Colors.red
-                          : palette.line,
-                      width: armed ? 1.6 : 1,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.14),
-                        blurRadius: 14,
-                        offset: const Offset(0, 4),
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedScale(
+                      key: widget.trashKey,
+                      scale: armed ? 1.18 : 1.0,
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeOutBack,
+                      child: Container(
+                        width: 62,
+                        height: 62,
+                        decoration: BoxDecoration(
+                          color: armed
+                              ? Colors.red.withValues(alpha: 0.18)
+                              : palette.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: armed ? Colors.red : palette.line,
+                            width: armed ? 2 : 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: armed
+                                  ? Colors.red.withValues(alpha: 0.35)
+                                  : Colors.black.withValues(alpha: 0.14),
+                              blurRadius: armed ? 20 : 14,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          LucideIcons.trash,
+                          size: 24,
+                          color: armed ? Colors.red : palette.muted,
+                        ),
                       ),
-                    ],
-                  ),
-                  child: Icon(
-                    LucideIcons.trash,
-                    size: 24,
-                    color: armed ? Colors.red : palette.muted,
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      armed ? '松手删除' : '拖到此处删除',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: armed ? Colors.red : palette.muted,
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
