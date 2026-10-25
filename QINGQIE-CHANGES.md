@@ -1435,3 +1435,27 @@ flutter test             # 1954 passed / 10 skipped
 - **残留扫描**：lib/ 无 print/debugPrint 残留（仅 kept_alive_pages_test 一处既有诊断输出，保留）。
 - 新增 test/note_card_export_test.dart（无插件宿主降级私有目录 + public=false + 文件实存断言）。
 - 验证：analyze 0；全量 **1594/10/0**；真机导出→下载目录可见。归档 fqapp-v77.apk。
+
+---
+
+# 七十八、MatePad 11 + M-Pencil 3 手写批注：鸿蒙版本判定与阶段三兼容增强
+
+## 阶段零判定（强制版本闸门）
+- 项目为 **Flutter Android APK 工程**（compileSdk/targetSdk 36、minSdk 24，Android 体系），**不存在鸿蒙工程结构**（无 module.json5/.ets/ohos）——没有鸿蒙 API 版本可读；目标设备 MatePad 11 (2021) 最高 HarmonyOS 4（非 NEXT，对应 API 10/11）< 12。
+- **判定结果：禁止集成 HandwriteComponent / @kit.Penkit / StylusFrameBoost（API 12+/26+，且非 HAP 工程无从导入），自动降级阶段三兼容方案。** 全库零 Penkit 引用已核实。
+
+## 阶段三第一优先（早期 Pencil Engine）执行结果
+- 检索 agent 带来源核验：**Pencil Engine 确以 HMS Android SDK（com.huawei.stylus.penengine / HwPenEngine）对第三方 APK 开放，官方支持 HarmonyOS 2.0+**——存在性成立（华为 HMS 官方页 + 指南「编译出的 APK」原文）。
+- 但**当前构建网络无法访问华为 Maven 仓库**（developer.huawei.com/repo 对本机出口 404/HTML 闸页，连已知 HMS 坐标 maven-metadata 都取不到；公网无镜像索引）→ 闭源 AAR 无法解析编译，本轮不能引入。接入步骤与降级策略成文：PENCIL-ENGINE-INTEGRATION.md（真机/网络到位后照做）。
+
+## 阶段三第二优先落地：自定义 Canvas 渲染增强（本轮代码交付）
+- **倾斜侧锋**：InkPoint 新增归一化 tilt（0=垂直 1=放平；旧存档无字段→0 行为不变，toMap 仅在 >0 时写 'tl'）；pointWidth = base×(0.35+0.65×pressure)×(1+0.6×tilt)——M-Pencil 3 侧锋放平最多加粗 60%（铅笔侧锋感）；手指两值恒定不受影响（测试锁定与旧公式逐点一致）。
+- **预测笔尖**：painter 对 live 笔迹用最近两点速度外推 ≤10dp 视觉段（补偿鸿蒙兼容层无系统报点预测的输入间隔）；**只影响书写中的视觉反馈，不写入笔迹数据**（抬手提交数据不含预测点，形状不变）。
+- **双画布采集**：整页 InkCanvas（stylus PointerEvent.tilt 弧度→归一化）与内嵌 EmbeddedInkCanvas（stylus 事件采集 + 手指路径恒 0）全链路带 tilt。
+- 探测页 stylus_probe_page 早已采集 tilt/orientation（设计时预留），M-Pencil 到位即读。
+- **当前方案为非官方组件的自定义渲染，用于兼容低于 API 12 的 HarmonyOS 版本，开发与维护成本由应用侧承担。**
+
+## 验证
+- 新增 test/ink_tilt_test.dart（tilt 序列化往返/旧档兼容 + pointWidth 压感×倾斜矩阵 5 用例）。
+- analyze 0；全量 **1598/10/0**；真机安装冷启动正常（红米无笔，手指路径 tilt=0 与旧版行为逐点一致由测试锁定）。
+- 归档 fqapp-v78.apk。

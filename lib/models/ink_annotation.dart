@@ -18,6 +18,7 @@ class InkPoint {
     required this.y,
     this.pressure = 0.5,
     this.t = 0,
+    this.tilt = 0,
   });
 
   /// 0~1，相对批注页宽。
@@ -29,6 +30,12 @@ class InkPoint {
   /// 原始压感 0~1（手指恒 1.0，见 stylus_probe_page.dart 实测结论）。
   final double pressure;
 
+  /// 归一化倾斜 0~1（0 = 笔垂直屏幕，1 = 笔放平；手指恒 0）。
+  /// 【青茄·阶段三兼容方案】MatePad 11 + M-Pencil 3（HarmonyOS 2-4
+  /// Android 兼容层）上 stylus 事件带 tilt 弧度；侧锋放平时加粗笔迹
+  /// （铅笔侧锋感）。旧存档无此字段 → 0，行为不变。
+  final double tilt;
+
   /// 相对笔迹起始点的毫秒时间戳（会话内相对时间，避免存墙钟）。
   final int t;
 
@@ -37,6 +44,8 @@ class InkPoint {
     'y': y,
     'p': pressure,
     't': t,
+    // 0（垂直/手指）不写：旧存档体积不变，只在真侧锋时多一个字段。
+    if (tilt > 0.001) 'tl': tilt,
   };
 
   static InkPoint? fromMap(dynamic raw) {
@@ -46,11 +55,13 @@ class InkPoint {
     if (x is! num || y is! num) return null;
     final p = raw['p'];
     final t = raw['t'];
+    final tl = raw['tl'];
     return InkPoint(
       x: x.toDouble(),
       y: y.toDouble(),
       pressure: p is num && p.isFinite ? p.toDouble().clamp(0, 1) : 0.5,
       t: t is num && t.isFinite ? t.toInt() : 0,
+      tilt: tl is num && tl.isFinite ? tl.toDouble().clamp(0, 1) : 0,
     );
   }
 
@@ -60,10 +71,11 @@ class InkPoint {
       other.x == x &&
       other.y == y &&
       other.pressure == pressure &&
-      other.t == t;
+      other.t == t &&
+      other.tilt == tilt;
 
   @override
-  int get hashCode => Object.hash(x, y, pressure, t);
+  int get hashCode => Object.hash(x, y, pressure, t, tilt);
 }
 
 /// 一笔墨迹：点序列 + 笔宽基准 + 颜色。

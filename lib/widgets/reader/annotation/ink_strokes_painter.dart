@@ -34,8 +34,8 @@ class InkStrokesPainter extends CustomPainter {
   /// 当前画布宽（像素），笔宽缩放基准。
   final double canvasWidth;
 
-  /// 进行中一笔的原始点（画布局部像素坐标 + 压感），可为 null。
-  final List<(Offset, double)>? livePoints;
+  /// 进行中一笔的原始点（画布局部像素坐标 + 压感 + 归一化倾斜），可空。
+  final List<(Offset, double, double)>? livePoints;
   final int liveColorValue;
   final double liveBaseWidth;
 
@@ -57,6 +57,14 @@ class InkStrokesPainter extends CustomPainter {
   static double widthPx(double baseWidth, double canvasWidth) =>
       baseWidth * canvasWidth / widthBasis;
 
+  /// 单点线宽：压感决定基础宽度（0.35 + 0.65×p），倾斜在侧锋放平时
+  /// 最多加粗 60%（M-Pencil 3 铅笔侧锋感；手指 tilt 恒 0 不受影响）。
+  static double pointWidth(double basePx, double pressure, double tilt) {
+    final p = pressure.clamp(0.0, 1.0);
+    final tl = tilt.clamp(0.0, 1.0);
+    return math.max(0.6, basePx * (0.35 + 0.65 * p) * (1 + 0.6 * tl));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     for (final stroke in strokes) {
@@ -64,7 +72,11 @@ class InkStrokesPainter extends CustomPainter {
         canvas,
         [
           for (final p in stroke.points)
-            (Offset(p.x * size.width, p.y * size.height), p.pressure),
+            (
+              Offset(p.x * size.width, p.y * size.height),
+              p.pressure,
+              p.tilt,
+            ),
         ],
         Color(stroke.colorValue),
         widthPx(stroke.baseWidth, canvasWidth),
@@ -78,6 +90,11 @@ class InkStrokesPainter extends CustomPainter {
         Color(liveColorValue),
         widthPx(liveBaseWidth, canvasWidth),
       );
+      // 【青茄·阶段三兼容方案】预测笔尖：鸿蒙 Android 兼容层不提供系统级
+      // 报点预测（Pencil Engine 仅对华为系 HAP 开放），用最近两点速度外
+      // 推一小段（≤10dp）缓解感知延迟。只影响书写中的视觉反馈，抬手提交
+      // 的数据不含预测点，笔迹最终形状不变。
+      _paintPredictedTip(canvas, live, Color(liveColorValue), widthPx(liveBaseWidth, canvasWidth));
     }
     _paintSelection(canvas, size);
     _paintLasso(canvas, size);
@@ -141,7 +158,7 @@ class InkStrokesPainter extends CustomPainter {
 
   void _paintStroke(
     Canvas canvas,
-    List<(Offset, double)> points,
+    List<(Offset, double, double)> points,
     Color color,
     double basePx,
   ) {
@@ -152,28 +169,51 @@ class InkStrokesPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
     if (points.length == 1) {
-      final radius = _width(basePx, points.single.$2) / 2;
+      final (pos, p, tl) = points.single;
+      final radius = pointWidth(basePx, p, tl) / 2;
       final dot = Paint()..color = color;
-      canvas.drawCircle(points.single.$1, radius, dot);
+      canvas.drawCircle(pos, radius, dot);
       return;
     }
     // 中点二次贝塞尔：p_{i-1}→p_i 的中点为端点、p_i 为控制点，逐段变线宽。
     for (var i = 1; i < points.length; i++) {
-      final (a, ap) = points[i - 1];
-      final (b, bp) = points[i];
+      final (a, ap, atl) = points[i - 1];
+      final (b, bp, btl) = points[i];
       final start = i == 1 ? a : (a + b) / 2;
       final ctrl = a;
       final end = i == points.length - 1 ? b : (a + b) / 2;
       final path = Path()
         ..moveTo(start.dx, start.dy)
         ..quadraticBezierTo(ctrl.dx, ctrl.dy, end.dx, end.dy);
-      paint.strokeWidth = _width(basePx, (ap + bp) / 2);
+      paint.strokeWidth = pointWidth(basePx, (ap + bp) / 2, (atl + btl) / 2);
       canvas.drawPath(path, paint);
     }
   }
 
-  double _width(double basePx, double pressure) =>
-      math.max(0.6, basePx * (0.35 + 0.65 * pressure.clamp(0, 1)));
+  /// 预测笔尖：最近两点的位移按 1 个采样间隔外推（限幅 10dp），以末端
+  /// 线宽画一段直线。慢速书写时位移小、几乎不可见；快速书写时补上
+  /// 输入事件间隔里的「追手」空隙。
+  void _paintPredictedTip(
+    Canvas canvas,
+    List<(Offset, double, double)> live,
+    Color color,
+    double basePx,
+  ) {
+    if (live.length < 3) return;
+    final (a, _, _) = live[live.length - 2];
+    final (b, bp, btl) = live.last;
+    final delta = b - a;
+    final distance = delta.distance;
+    if (distance < 0.5) return;
+    final lead = math.min(distance, 10.0);
+    final tip = b + Offset.fromDirection(delta.direction, lead);
+    final paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = pointWidth(basePx, bp, btl);
+    canvas.drawLine(b, tip, paint);
+  }
 
   @override
   bool shouldRepaint(InkStrokesPainter old) =>

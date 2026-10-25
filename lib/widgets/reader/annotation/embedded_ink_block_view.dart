@@ -76,7 +76,7 @@ class EmbeddedInkCanvas extends StatefulWidget {
 class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
   late InkController _controller;
   late ValueNotifier<int> _repaint;
-  List<(Offset, double)>? _live;
+  List<(Offset, double, double)>? _live;
   bool _capturing = false;
 
   @override
@@ -116,7 +116,7 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
     _controller.addStroke(
       InkStroke(
         points: [
-          for (final (offset, pressure) in live)
+          for (final (offset, pressure, tilt) in live)
             InkPoint(
               x: offset.dx,
               y: offset.dy,
@@ -124,6 +124,7 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
                   ? 0.5
                   : pressure.toDouble(),
               t: DateTime.now().millisecondsSinceEpoch,
+              tilt: tilt,
             ),
         ],
         colorValue: InkAnnotation.defaultColorValue,
@@ -148,11 +149,21 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
     if (maxY > widget.height * 0.88) grow(widget.height + 48);
   }
 
+  /// 归一化倾斜 0~1（PointerEvent.tilt 弧度 0..π/2；手指恒 0）。
+  static double _tiltOf(PointerEvent e) {
+    final radians = e.tilt;
+    if (!radians.isFinite || radians <= 0) return 0;
+    return (radians / (math.pi / 2)).clamp(0.0, 1.0);
+  }
+
+  /// 手指路径（pan 手势）没有 tilt 信息：恒 0。
+  static const double _liveTilt = 0;
+
   void _onPointerDown(PointerEvent event) {
     // 手写笔直接书写（不参与手势竞技场，滚动不被触发）。
     if (event.kind != PointerDeviceKind.stylus) return;
     _capturing = true;
-    _live = [(event.localPosition, event.pressure)];
+    _live = [(event.localPosition, event.pressure, _tiltOf(event))];
     _repaint.value++;
   }
 
@@ -168,12 +179,12 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
   }
 
   void _appendLive(Offset position, double pressure) {
-    final live = _live ??= <(Offset, double)>[];
+    final live = _live ??= <(Offset, double, double)>[];
     if (live.isNotEmpty) {
       final last = live.last.$1;
       if ((position - last).distance < 1.2) return;
     }
-    live.add((position, pressure));
+    live.add((position, pressure, _liveTilt));
     _repaint.value++;
   }
 
@@ -181,7 +192,7 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
   // 争夺这一区域，画布内手指 = 书写（Scribe 手机端口径）。
   void _onFingerPanStart(DragStartDetails details) {
     _capturing = true;
-    _live = [(details.localPosition, 0.5)];
+    _live = [(details.localPosition, 0.5, 0)];
     _repaint.value++;
   }
 

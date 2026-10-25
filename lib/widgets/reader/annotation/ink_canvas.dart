@@ -1,4 +1,6 @@
 import 'package:flutter/gestures.dart';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../../models/ink_annotation.dart';
@@ -40,8 +42,8 @@ enum _LassoGesture {
 }
 
 class _InkCanvasState extends State<InkCanvas> {
-  final ValueNotifier<List<(Offset, double)>?> _live =
-      ValueNotifier<List<(Offset, double)>?>(null);
+  final ValueNotifier<List<(Offset, double, double)>?> _live =
+      ValueNotifier<List<(Offset, double, double)>?>(null);
   int? _activePointer;
   _LassoGesture _gesture = _LassoGesture.none;
   Offset _lastMove = Offset.zero;
@@ -77,7 +79,7 @@ class _InkCanvasState extends State<InkCanvas> {
       return;
     }
     if (widget.controller.tool == InkTool.pen) {
-      _live.value = [(e.localPosition, e.pressure)];
+      _live.value = [(e.localPosition, e.pressure, _tiltOf(e))];
     } else {
       _eraseAt(e.localPosition);
     }
@@ -107,7 +109,7 @@ class _InkCanvasState extends State<InkCanvas> {
           (e.localPosition - points.last.$1).distance < 1.5) {
         return;
       }
-      _live.value = [...points, (e.localPosition, e.pressure)];
+      _live.value = [...points, (e.localPosition, e.pressure, _tiltOf(e))];
     } else {
       _eraseAt(e.localPosition);
     }
@@ -139,12 +141,13 @@ class _InkCanvasState extends State<InkCanvas> {
       baseWidth: widget.controller.baseWidth,
       colorValue: widget.controller.colorValue,
       points: List.unmodifiable([
-        for (final (offset, pressure) in points)
+        for (final (offset, pressure, tilt) in points)
           InkPoint(
             x: (offset.dx / size.width).clamp(0, 1),
             y: (offset.dy / size.height).clamp(0, 1),
             pressure: pressure,
             t: 0,
+            tilt: tilt,
           ),
       ]),
     );
@@ -170,6 +173,14 @@ class _InkCanvasState extends State<InkCanvas> {
   }
 
   /// 画布局部像素坐标 → 归一化页面坐标。
+  /// 归一化倾斜 0~1（0=垂直，1=放平）。PointerEvent.tilt 为弧度 0..π/2，
+  /// 手指恒 0；M-Pencil 3（鸿蒙 Android 兼容层）stylus 事件携带。
+  static double _tiltOf(PointerEvent e) {
+    final radians = e.tilt;
+    if (!radians.isFinite || radians <= 0) return 0;
+    return (radians / (math.pi / 2)).clamp(0.0, 1.0);
+  }
+
   Offset _normalize(Offset local) {
     final size = context.size;
     if (size == null || size.width <= 0 || size.height <= 0) {
