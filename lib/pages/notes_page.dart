@@ -712,6 +712,8 @@ class _NotesPageState extends State<NotesPage> {
           TagTrashTarget(
             trashKey: const ValueKey('notes-tag-trash'),
             compact: true,
+            // 调色板拖动（单枚/磁吸组）进行中 = 弹性放大示意可投递。
+            active: _paletteDrag != null,
             onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
             onDropCluster: (cluster) =>
                 unawaited(_onTrashDropCluster(cluster)),
@@ -719,7 +721,8 @@ class _NotesPageState extends State<NotesPage> {
           IconButton(
             key: const Key('notes-export-button'),
             tooltip: '导出当前筛选为长图',
-            icon: const Icon(LucideIcons.image_down),
+            // 图标 +10%（默认 24 → 26），与垃圾桶 24 保持同档视觉重量。
+            icon: const Icon(LucideIcons.image_down, size: 26),
             onPressed: exportNotes.isEmpty || _exporting ? null : _exportImage,
           ),
         ],
