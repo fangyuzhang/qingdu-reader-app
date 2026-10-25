@@ -3101,9 +3101,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return items;
   }
 
+  /// 【青茄·宽屏适配】正文栏宽上限：平板/折叠屏/横屏的视口宽超过它时，
+  /// 正文（含墨迹画布）钳制到该宽并居中，行长回到手机阅读的舒适区间，
+  /// 栏外仍渲染正文底色（全屏观感不变）。手机竖屏（≤480dp）不受影响。
+  static const double _kReaderMaxColumnWidth = 560;
+
   ReaderChapterLayout _prepareLayout(BoxConstraints constraints) {
+    // 宽屏钳制见 [_kReaderMaxColumnWidth]。spec.viewport 是分页、墨迹
+    // 归一化、锚点快照的共同基准，必须与实际渲染盒同宽——内容根和墨迹
+    // 画布按同一常量 Center 包裹（见 _buildContent 与 _viewportKey 处）。
+    final rawViewport = constraints.biggest;
+    final viewport = rawViewport.width > _kReaderMaxColumnWidth
+        ? Size(_kReaderMaxColumnWidth, rawViewport.height)
+        : rawViewport;
     final spec = ReaderLayoutSpec(
-      viewport: constraints.biggest,
+      viewport: viewport,
       textScaler: MediaQuery.textScalerOf(context),
       preferences: _displayPreferences,
       fontFamily:
@@ -4119,14 +4131,29 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                                           ),
                                         ),
                                         // 画布尺寸即批注页面快照（墨迹
-                                        // 归一化基准）。
+                                        // 归一化基准）。【青茄·宽屏适配】
+                                        // 与正文同一 [_kReaderMaxColumnWidth]
+                                        // 钳制 + 居中：画布必须与正文盒同宽，
+                                        // 墨迹归一化坐标才不与锚点错位。
                                         Positioned.fill(
                                           child: LayoutBuilder(
                                             builder: (context, constraints) {
-                                              _inkViewport = constraints
-                                                  .biggest;
-                                              return InkCanvas(
-                                                controller: _ink!,
+                                              final raw = constraints.biggest;
+                                              final viewport = raw.width >
+                                                      _kReaderMaxColumnWidth
+                                                  ? Size(
+                                                      _kReaderMaxColumnWidth,
+                                                      raw.height,
+                                                    )
+                                                  : raw;
+                                              _inkViewport = viewport;
+                                              return Center(
+                                                child: SizedBox(
+                                                  width: viewport.width,
+                                                  child: InkCanvas(
+                                                    controller: _ink!,
+                                                  ),
+                                                ),
                                               );
                                             },
                                           ),
@@ -4392,11 +4419,18 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               Positioned.fill(
                 // 键盘弹出只影响弹层自身：把 viewInsets 从正文子树移除，
                 // 输入法动画就不会推动整章重排（真机卡顿的另一半原因）。
-                child: MediaQuery.removeViewInsets(
-                  context: context,
-                  removeBottom: true,
-                  child: RepaintBoundary(
-                    child: _paged
+                // 【青茄·宽屏适配】Center+SizedBox 把正文盒钳到 spec 视口宽
+                // 居中（手机上与全宽一致，无感）；选区手柄/工具栏走
+                // localToGlobal 变换，居中偏移自动正确。
+                child: Center(
+                  child: SizedBox(
+                    key: const ValueKey('reader-column-box'),
+                    width: layout.spec.viewport.width,
+                    child: MediaQuery.removeViewInsets(
+                      context: context,
+                      removeBottom: true,
+                      child: RepaintBoundary(
+                        child: _paged
                         ? ReaderPagedView(
                             key: _pagedKey,
                             layout: layout,
@@ -4432,6 +4466,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             narrationRange: _narrationRange,
                           )
                         : _buildScrollContent(layout, scope),
+                      ),
+                    ),
                   ),
                 ),
               ),
