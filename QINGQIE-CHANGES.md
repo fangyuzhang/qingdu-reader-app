@@ -1262,3 +1262,31 @@ flutter test             # 1954 passed / 10 skipped
 - pubspec 1.0.131+136 → 1.0.132+137；新增依赖 pdfrx（>=2.2.0 <2.3.0）。
 - 新增文档：EXTENSION-SURVEY-REPORT.md（第 1 组施工图）、PDF-RENDER-SELECTION.md（选型）。
 - 本机构建副本（E:\fqapp-build2）pub 缓存补丁 3 处（见 PDF-RENDER-SELECTION.md），flutter pub cache repair 会还原，重建构建环境时需重打。
+
+---
+
+# 六十三、遗留项闭环：批注工具栏溢出修复 + 墨迹落盘加固（多 agent 协同批次）
+
+- 起因：第 7 组遗留「force-stop 偶发丢墨迹未定位」。本批以双 agent 并行
+  （一个调研 Legado/KOReader/Saber 等市面项目的持久化与压感惯例，一个
+  逐行复查墨迹落盘链路）+ 真机 AppLog 轨迹实测收口。
+- **产品级真 bug**：InkToolbar 单行内容 ~600 逻辑像素 > 手机视口，「手指
+  绘制」与「完成」按钮渲染在屏幕外——批注模式无法正常退出/开手指绘制。
+  LayoutBuilder 自适应两行（窄屏）+ 按钮补 tooltip。
+- **观测面**：logTrace 双通道（内存环→诊断页；AppLog→日志查看器，
+  release 唯一可靠观测面）；debugStats 增加盒文件字节。
+- **存储真相（轨迹实锤）**：此前「force-stop 偶发丢墨迹」为自动化假象——
+  adb `input` 注入事件 kind=unknown（非 touch/stylus），画布按规格拒绝，
+  从未画出一笔。真机手指=touch、M-Pencil=stylus 不受影响。调试手指通道
+  放开 unknown 仅影响验证路径。
+- **落盘加固（采纳调研建议，Legado/Saber 同款节奏）**：每笔抬手立即
+  串行落盘+flush（去 600ms 防抖窗口）；跨章先落盘旧章墨迹再清排版；
+  翻页 save 的 then 补 _ink!=null 守卫；_computeAnchor 挪进 try（dispose
+  竞态）；delete 补 flush；updateAnchor 先写后删（kill 残留两键可自愈，
+  先删后写丢整条）；容量淘汰按 updatedAt??createdAt。
+- 验证：analyze 0；全量 1542/10/0；真机闭环——画两笔（trace strokes=1
+  → save: put → len=1）→ 完成正常退出批注模式 → force-stop → 重启
+  entries=1 + 笔画区域像素命中（墨迹原位渲染）。SAF 手选导入：媒体扫描
+  后文件已入选择器列表，但 MIUI DocumentsUI 拦截注入式文件项点击（搜索/
+  菜单/抽屉可自动化）——导入代码与已验证的 ACTION_VIEW 通道同路，留
+  人工手测。遗留仅剩：MatePad 11 + M-Pencil 3 的压感/倾斜/帧率实测。

@@ -14,7 +14,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 测试基线 | flutter analyze 0 问题；flutter test 1542 通过 / 10 跳过 / 0 失败 |
+| 测试基线 | flutter analyze 0 问题；flutter test 1542 通过 / 10 跳过 / 0 失败（63 批后不变） |
 | 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe） |
 | 已装 APK | 最新 release（含 v41–v55 + 瘦身重构），构建产物完好（.so 已修复） |
 | 远端同步 | master 已推送并校验 SHA 一致 |
@@ -28,10 +28,10 @@
 - **新文件**：lib/pages/{pdf_reader_page, stylus_probe_page, annotation_diagnostics_page}.dart、lib/services/{ink_annotation_store, anchor_projector, pdf_intent_import}.dart、lib/models/ink_annotation.dart、lib/widgets/reader/annotation/{ink_canvas, ink_controller, ink_strokes_painter, ink_toolbar}.dart、android/.../PdfViewIntentPlugin.kt。
 - **修改要点**：imported_book_store（pdf 分支/source.pdf 落盘/64MB）、LocalBookPickerPlugin.kt（MIME+上限）、MainActivity/Manifest（VIEW intent）、reader_page（批注模式挂载，全部为附加式插入，分页/滚动/进度逻辑未动）、reader_controls（批注/墨迹入口）、library_store.init（补 InkAnnotationStore.hiveReady=true）。
 - **本机 pub 缓存补丁（3 处，flutter pub cache repair 会还原）**：pdfium_flutter CMake 下载走 ghproxy.net 镜像；同文件 Windows 宿主用合并拷贝替代 .lib/latest 符号链接（并修并行 ABI 竞态导致 libpdfium.so 未入包）；pdfrx_engine 0.3.9 pdf_file_cache.dart 两处 cache!. 空安全 AOT 编译错。详见 PDF-RENDER-SELECTION.md。
-- **验证遗留（设备掉线前未完成，优先级从高到低）**：
-  1. 墨迹存储在极端 force-stop 下偶发丢失（怀疑 Hive 半帧+checksum 误判 wipe；已加 save 后 flush + dispose 落盘两道防线，复验未再出现；encrypted_hive 属禁改区）。复验法：批注→完成→`adb shell am force-stop`→重开看墨迹；异常时设置→服务→批注诊断（调试）看「存储：entries=」与 AppLog ink-store 告警。
-  2. MatePad 11 + M-Pencil 3：pressure 范围/tilt 可用性/书写 ≥50fps（探测页在设置→服务→手写笔探测）。
-  3. SAF 手选导入 PDF 的用户手测（MIUI 拦截系统选择器的自动化点击，代码路径与已验证的 intent 导入相同）。
+- **验证遗留（2026-10-25 下午批注闭环后更新）**：
+  1. ~~墨迹存储 force-stop 丢失~~ 已闭环：真相是自动化假象（adb 注入事件 kind=unknown 被画布按规格拒绝，从未画出一笔）+ 工具栏溢出导致「完成/手指绘制」在屏外。两者均已修复；真机闭环复验通过（画两笔→完成退出→force-stop→重启 entries=1 且墨迹原位渲染）。
+  2. **MatePad 11 + M-Pencil 3**：pressure 范围/tilt 可用性/书写 ≥50fps（设备到位后用设置→服务→手写笔探测实测；注意 63 批起工具栏窄屏折两行，「手指绘制」在第二行）。
+  3. SAF 手选导入 PDF 的人工手测：MIUI DocumentsUI 拦截注入式文件项点击（自动化只能点到搜索/菜单/抽屉，点文件项无效），代码与已验证的 ACTION_VIEW 通道同路，人手点一下即可。
 - **调试开关**：`--dart-define=fqapp.debugTools=true` 让调试页出现在 release 包（默认 release 不可见，签名同正式包可覆盖安装）。
 
 
