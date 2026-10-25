@@ -25,7 +25,9 @@
 
 1. **冷启动灰条根因终修（69 批，本次）**：根因是 Android 10+ 对「透明状态栏」默认开启对比度保护 scrim（引擎 PlatformPlugin.java 512-514 行证实；框架 SystemUiOverlayStyle 预设的 systemStatusBarContrastEnforced 为 null → 从不下发 false）。三层关闭：MainActivity 原生 isStatusBarContrastEnforced=false（早于首帧）+ main.dart 系统栏消息提前到 runApp 之前 + 全部透明状态栏样式补 contrast=false。真机冷启动连拍验证：状态栏条带 0% 灰 / 97% 奶油底。**教训：透明状态栏必须同时关 contrast，否则必出灰条；阅读器没灰条是因为它用不透明正文底色。**
 2. **垃圾桶交互四连（67 批）**：按住的 chip 必须拖动全程保持 Draggable 存活（隐藏槽位会杀掉 Draggable → onDragEnd 丢失 → 状态卡死）；垃圾桶常驻 AppBar（compact 形态）；armed 唯一来源 = DragTarget candidate；磁吸吸收几何 = 水平≤88 且垂直≤48。
-3. **MIUI 截屏陈旧帧陷阱**：连续快速 screencap 会返回字节级相同帧，验证必须 md5 查重 + 加间隔。
+3. **跨厂商可移植性审查（70 批）**：全库无厂商分支代码，灰条等全部修复基于 AOSP 标准 API（Android 7~16 全版本成立）；启动主题补 enforceStatusBarContrast/NavigationBarContrast=false 兜底窗口 attach 空档。合规清单与三项「无法一劳永逸」如实记录见 QINGQIE-CHANGES.md 第 70 批。
+4. **MIUI 截屏陈旧帧陷阱**：连续快速 screencap 会返回字节级相同帧，验证必须 md5 查重 + 加间隔（过渡帧还会出现 alpha=0 伪影，原始 RGB 全黑但实际透明，勿误判黑屏）。
+5. **git 推送通道修复（2026-10-25 晚）**：ghproxy.net 镜像开始拒绝认证转发（"Invalid username or token"）。已在 WSL 全局配置加 `url."https://github.com/".pushInsteadOf = "https://github.com/"`——推送直连 github.com（凭证走 gh CLI，已登录 fangyuzhang），拉取继续走镜像。若再遇推送失败，排查顺序：gh auth status → 该 pushInsteadOf 是否还在 → 换 gh-proxy.com 镜像。
 
 ## 0.5 本轮交付速览（2026-10-25，第 2~7 组 + 63~66 批）
 
