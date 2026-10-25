@@ -23,6 +23,9 @@ class VolumeKeyService {
         final direction = call.arguments as int? ?? 0;
         if (direction != 0) _onVolumeKey?.call(direction);
       }
+      if (call.method == 'stylusDoubleTap') {
+        _onStylusDoubleTap?.call();
+      }
       return Future<void>.value();
     });
   }
@@ -30,6 +33,25 @@ class VolumeKeyService {
   /// 注册/注销音量键回调。传 null 即注销。
   void setOnVolumeKey(void Function(int direction)? callback) {
     _onVolumeKey = callback;
+  }
+
+  /// 【青茄·M-Pencil】手写笔双击手势回调（原生键码 718 拦截后回调）。
+  /// 由阅读页在进入手写墨迹模式时注册。
+  void Function()? _onStylusDoubleTap;
+
+  void setOnStylusDoubleTap(void Function()? callback) {
+    _onStylusDoubleTap = callback;
+  }
+
+  /// 通知原生是否拦截手写笔双击（键码 718）。
+  Future<void> setStylusDoubleTapEnabled(bool enabled) async {
+    try {
+      await _channel.invokeMethod<void>('setStylusDoubleTapEnabled', enabled);
+    } on MissingPluginException {
+      // 插件未注册（如桌面调试）时忽略。
+    } on PlatformException {
+      // 忽略通道异常，不影响阅读。
+    }
   }
 
   /// 通知原生是否拦截音量键。

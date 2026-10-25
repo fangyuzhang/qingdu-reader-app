@@ -1459,3 +1459,11 @@ flutter test             # 1954 passed / 10 skipped
 - 新增 test/ink_tilt_test.dart（tilt 序列化往返/旧档兼容 + pointWidth 压感×倾斜矩阵 5 用例）。
 - analyze 0；全量 **1598/10/0**；真机安装冷启动正常（红米无笔，手指路径 tilt=0 与旧版行为逐点一致由测试锁定）。
 - 归档 fqapp-v78.apk。
+
+---
+
+# 七十九、M-Pencil 双击手势 → 切换笔/橡皮（78 批检索成果落地）+ Pencil Engine 坐标终审
+
+- **Pencil Engine 坐标终审（阶段三第一优先闭环）**：WSL 网络栈可通华为 Maven 仓库（com.huawei.hms:base metadata 200），但 Pencil Engine **不在 Maven 发布**——5 组候选坐标（com/huawei/stylus[/penengine]、com/huawei/hms/penengine|stylus、com/huawei/penengine）全部 404，行业惯例（小米澎湃 PenEngine-release.aar flatDir、华为需开发者后台申请）为**申请后 AAR 放 libs**。结论固化：AAR 获取依赖人工申请，接入步骤见 PENCIL-ENGINE-INTEGRATION.md §4（网络/申请到位后照做，运行时探测失败静默降级自研）。
+- **M-Pencil 双击 = 切换笔/橡皮（无需任何 SDK，本轮交付）**：检索确认 M-Pencil 双击以**非标键码 718** 送达 APK（Krita 官方论坛 MatePad+M-Pencil 3 实测）。接入现有按键拦截桥：MainActivity 同通道新增 setStylusDoubleTapEnabled + dispatchKeyEvent 拦截 718（ACTION_DOWN 首按）→ Dart 回调；阅读页进入手写墨迹模式注册回调（笔↔橡皮 + 提示条），退出/注销/dispose 兜底关闭；未启用时 718 放行（无系统语义，零副作用）。MatePad 真机：双击即切工具。
+- 验证：analyze 0；全量 **1598/10/0**；真机安装冷启动正常 + 718 键码通道冒烟（未启用态放行无崩溃）。归档 fqapp-v79.apk。

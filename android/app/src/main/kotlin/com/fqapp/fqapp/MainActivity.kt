@@ -22,6 +22,11 @@ class MainActivity : FlutterActivity() {
     private var volumeKeyEnabled = false
     private var volumeChannel: MethodChannel? = null
 
+    // 【青茄·M-Pencil】手写笔双击手势：华为笔在鸿蒙/EMUI 上以非标键码
+    // 718 送达（Krita 社区实测，非标准 KeyEvent 常量）。手写墨迹模式下
+    // 拦截并回调 Dart 切换 笔/橡皮；未启用时放行（键码本就无系统语义）。
+    private var stylusDoubleTapEnabled = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 【青茄·启动配色】系统深色 + App 浅色（或反过来）时，启动窗口的
         // windowBackground 只跟随系统，进 App 那一瞬间顶部状态栏会先闪一条
@@ -119,6 +124,11 @@ class MainActivity : FlutterActivity() {
                         volumeKeyEnabled = call.arguments as? Boolean ?: false
                         result.success(null)
                     }
+                    "setStylusDoubleTapEnabled" -> {
+                        stylusDoubleTapEnabled =
+                            call.arguments as? Boolean ?: false
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -137,6 +147,16 @@ class MainActivity : FlutterActivity() {
                 // 无论按下/抬起都吃掉音量键，系统音量面板不再弹出。
                 return true
             }
+        }
+        // 【青茄·M-Pencil】双击手势（键码 718）：启用时吃掉并回调，
+        // 未启用时放行（该键码无系统语义，放行无副作用）。
+        if (stylusDoubleTapEnabled && event != null &&
+            event.keyCode == 718 &&
+            event.action == KeyEvent.ACTION_DOWN &&
+            event.repeatCount == 0
+        ) {
+            volumeChannel?.invokeMethod("stylusDoubleTap", null)
+            return true
         }
         return super.dispatchKeyEvent(event)
     }

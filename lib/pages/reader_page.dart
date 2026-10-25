@@ -2198,8 +2198,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     _ink = controller;
     _closeSelectionBar(clearSelection: true);
+    // 【青茄·M-Pencil】双击手写笔 = 切换 笔/橡皮（原生拦截键码 718）。
+    VolumeKeyService.instance.setOnStylusDoubleTap(_toggleInkTool);
+    unawaited(VolumeKeyService.instance.setStylusDoubleTapEnabled(true));
     setState(() {});
     _notifyInkMismatchOnce();
+  }
+
+  /// M-Pencil 双击：笔 ↔ 橡皮。
+  void _toggleInkTool() {
+    final controller = _ink;
+    if (controller == null) return;
+    controller.selectTool(
+      controller.tool == InkTool.pen ? InkTool.eraser : InkTool.pen,
+    );
+    _showMessage(controller.tool == InkTool.pen ? '已切换为笔' : '已切换为橡皮');
   }
 
   /// 进入批注模式时提示锚点失配的墨迹（正文被外部改动过的旧批注）。
@@ -2221,6 +2234,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _exitInkMode({bool silent = false}) async {
+    VolumeKeyService.instance.setOnStylusDoubleTap(null);
+    unawaited(VolumeKeyService.instance.setStylusDoubleTapEnabled(false));
     await _saveInk();
     if (!mounted) return;
     // 先把画布/工具栏从树上摘除，下一帧再 dispose 控制器——画布 painter
@@ -2537,6 +2552,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _chapterRequest?.cancel();
     VolumeKeyService.instance.setOnVolumeKey(null);
     unawaited(VolumeKeyService.instance.setEnabled(false));
+    VolumeKeyService.instance.setOnStylusDoubleTap(null);
+    unawaited(VolumeKeyService.instance.setStylusDoubleTapEnabled(false));
     ListeningSession.instance.removeListener(_onListeningTick);
     themeModeNotifier.removeListener(_onGlobalThemeModeChanged);
     _introAnimation?.removeStatusListener(_onIntroStatus);
