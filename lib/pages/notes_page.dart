@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/curated_book.dart';
 import '../models/ink_annotation.dart';
@@ -186,6 +187,12 @@ class _NotesPageState extends State<NotesPage> {
   /// 磁吸吸收的距离阈值（逻辑像素）。
   static const double _absorbThreshold = 88;
 
+  /// 被用户拖垃圾桶删除的内置预设标签（疑问/反驳/感悟/待查证）：
+  /// 预设是常量无法从目录移除，用排除集把它们从「全部标签」行藏掉。
+  /// 持久化在 SharedPreferences，重启不复活。
+  static const _deletedPresetsKey = 'notes_deleted_marker_presets';
+  Set<String> _deletedPresets = <String>{};
+
   /// 划线线型筛选（null = 全部线型）；仅当类型筛选选中「划线」时生效。
   ReaderMarkStyle? _markStyleFilter;
 
@@ -199,7 +206,31 @@ class _NotesPageState extends State<NotesPage> {
   void initState() {
     super.initState();
     _store.changes.addListener(_reload);
+    _loadDeletedPresets();
     _reload();
+  }
+
+  Future<void> _loadDeletedPresets() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getStringList(_deletedPresetsKey) ?? const [];
+      if (!mounted || raw.isEmpty) return;
+      setState(() => _deletedPresets = raw.toSet());
+    } catch (_) {
+      // 读不到只是预设复活，无碍。
+    }
+  }
+
+  Future<void> _persistDeletedPresets() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(
+        _deletedPresetsKey,
+        _deletedPresets.toList(growable: false),
+      );
+    } catch (_) {
+      // 写失败只是本次会话生效。
+    }
   }
 
   @override
@@ -370,7 +401,14 @@ class _NotesPageState extends State<NotesPage> {
         ),
       );
     }
-    return ReaderMarkerTypeStore.catalog([..._customMarkerTypes, ...observed]);
+    final catalog = ReaderMarkerTypeStore.catalog([
+      ..._customMarkerTypes,
+      ...observed,
+    ]);
+    if (_deletedPresets.isEmpty) return catalog;
+    return catalog
+        .where((type) => !_deletedPresets.contains(type.key))
+        .toList(growable: false);
   }
 
   /// 没手动排过时，先批注类型、后自由标签；排过一次就完全听用户的。
@@ -669,6 +707,15 @@ class _NotesPageState extends State<NotesPage> {
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
         actions: [
+          // 垃圾桶常驻「保存长图」左侧（产品要求）：与导出按钮同款图标
+          // 样式，拖标签靠近时弹性放大变红。
+          TagTrashTarget(
+            trashKey: const ValueKey('notes-tag-trash'),
+            compact: true,
+            onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
+            onDropCluster: (cluster) =>
+                unawaited(_onTrashDropCluster(cluster)),
+          ),
           IconButton(
             key: const Key('notes-export-button'),
             tooltip: '导出当前筛选为长图',
@@ -703,17 +750,6 @@ class _NotesPageState extends State<NotesPage> {
                   },
               ),
             ],
-          ),
-          // 垃圾桶常驻右上角（产品要求）：拖动时可投递删除，未拖动时
-          // 静默置灰。overlay 不占流式布局。
-          Positioned(
-            top: 10,
-            right: 12,
-            child: TagTrashTarget(
-              onDropTag: (tag) => unawaited(_onTrashDropTag(tag)),
-              onDropCluster: (cluster) =>
-                  unawaited(_onTrashDropCluster(cluster)),
-            ),
           ),
         ],
       ),
@@ -976,6 +1012,16 @@ class _NotesPageState extends State<NotesPage> {
       } catch (_) {
         // 目录移除失败不影响「从笔记摘净」的结果。
       }
+      // 内置预设是常量（readerMarkerPresets），目录移除对它无效——
+      // 用户期望拖垃圾桶删除后从「全部标签」行消失，用排除集承接。
+      final presets = readerMarkerPresets
+          .map((preset) => preset.label)
+          .toSet();
+      if (presets.contains(tag.label) &&
+          !_deletedPresets.contains(tag.label)) {
+        _deletedPresets = {..._deletedPresets, tag.label};
+        unawaited(_persistDeletedPresets());
+      }
     }
     if (!mounted) return;
     setState(() {
@@ -1150,7 +1196,12 @@ class _NotesPageState extends State<NotesPage> {
       final box = _paletteChipKeys[entry.id]?.currentContext?.findRenderObject();
       if (box is! RenderBox || !box.hasSize) continue;
       final center = box.localToGlobal(box.size.center(Offset.zero));
-      if ((center - globalPosition).distance <= _absorbThreshold) {
+      // 吸收几何：水平距离 < 阈值且垂直距离 < 48px（同一水平带附近）。
+      // 此前用纯欧氏距离：指针悬到 AppBar 垃圾桶上时与行末标签的距离
+      // 可能仍 < 88px，把无关标签误吸进组——表现为「经过垃圾桶其他
+      // 标签消失，松手恢复」。
+      if ((center.dx - globalPosition.dx).abs() <= _absorbThreshold &&
+          (center.dy - globalPosition.dy).abs() <= 48) {
         absorb = entry;
         break;
       }

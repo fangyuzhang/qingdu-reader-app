@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fqapp/pages/notes_page.dart';
@@ -86,6 +87,10 @@ ReaderAnnotation _note({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
 
   testWidgets('批注类型 chip 按角标文字筛选时间线', (tester) async {
     final store = _NotesMemoryStore([
@@ -577,6 +582,42 @@ void main() {
     expect(store.notes.first.markerBadges, isEmpty);
     // 垃圾桶常驻右上角：删除后仍在（不再有显隐切换）。
     expect(find.byKey(const ValueKey('notes-tag-trash')), findsOneWidget);
+  });
+
+  testWidgets('内置预设拖入垃圾桶 = 从调色板行消失（排除集）', (tester) async {
+    ReaderMarkerTypeStore.instance.resetForTest();
+    addTearDown(ReaderMarkerTypeStore.instance.resetForTest);
+    final store = _NotesMemoryStore([
+      _note(bookId: 'a', text: '甲', markerLabel: '疑问', createdAt: 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotesPage(store: store, underlineStore: _MemoryUnderlines()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 「疑问」是内置预设，常驻调色板行。
+    final presetChip = find.byKey(const ValueKey('notes-marker-疑问'));
+    expect(presetChip, findsOneWidget);
+
+    final gesture = await tester.startGesture(tester.getCenter(presetChip));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.moveTo(tester.getCenter(find.byKey(
+      const ValueKey('notes-tag-trash'),
+    )));
+    await tester.pump(const Duration(milliseconds: 200));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // 笔记上的角标摘除。
+    expect(
+      store.notes.first.markerBadges.any((badge) => badge.label == '疑问'),
+      isFalse,
+    );
+    // 调色板行不再显示该预设（排除集生效，不因目录常量复活）。
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('notes-marker-疑问')), findsNothing);
   });
 
   testWidgets('调色板标签拖入垃圾桶 = 从所有笔记摘除并出目录', (tester) async {
