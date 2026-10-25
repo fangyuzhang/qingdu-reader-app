@@ -1,13 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
-
-import '../models/ink_annotation.dart';
-import 'dart:io';
-
 import 'package:path_provider/path_provider.dart';
 
+import '../models/ink_annotation.dart';
 import 'app_log.dart';
 import 'encrypted_hive.dart';
 
@@ -54,10 +52,7 @@ class InkAnnotationStore {
   Future<void> _writes = Future<void>.value();
 
   Future<Box<dynamic>?> _box() async {
-    if (!hiveReady) {
-      logTrace('box: hiveReady=false');
-      return null;
-    }
+    if (!hiveReady) return null;
     try {
       final pending = _opening ??= EncryptedHive.openBox<dynamic>(
         _hive,
@@ -72,6 +67,18 @@ class InkAnnotationStore {
       return null;
     }
     return _box();
+  }
+
+  /// 只读操作：直接走单飞的 [_box]，不入写队列。读不需要与写串行；而写
+  /// 队列的 `_writes` 链横跨 fake-async 测试 zone 后，新用例 await 链尾
+  /// 永不完成（读必须绕开它，见 notes 页测试的教训）。
+  Future<T> _read<T>(
+    Future<T> Function(Box<dynamic>) action, {
+    required T onUnavailable,
+  }) async {
+    final box = await _box();
+    if (box == null) return onUnavailable;
+    return action(box);
   }
 
   Future<T> _serialize<T>(
@@ -109,7 +116,7 @@ class InkAnnotationStore {
 
   /// 某书某章（PDF=某页）的全部墨迹，按锚点起点排序。
   Future<List<InkAnnotation>> loadByChapter(String bookId, String chapterId) =>
-      _serialize((box) async {
+      _read((box) async {
         final out = <InkAnnotation>[];
         for (final raw in box.values) {
           final entry = InkAnnotation.fromMap(raw);
@@ -131,7 +138,7 @@ class InkAnnotationStore {
     String bookId,
     String chapterId,
     String chapterText,
-  ) => _serialize((box) async {
+  ) => _read((box) async {
     final out = <InkAnchorReview>[];
     for (final raw in box.values) {
       final entry = InkAnnotation.fromMap(raw);
@@ -153,7 +160,7 @@ class InkAnnotationStore {
   }, onUnavailable: const []);
 
   /// 全部墨迹（诊断页用，第 7 组）。
-  Future<List<InkAnnotation>> loadAll() => _serialize((box) async {
+  Future<List<InkAnnotation>> loadAll() => _read((box) async {
     final out = <InkAnnotation>[];
     for (final raw in box.values) {
       final entry = InkAnnotation.fromMap(raw);
@@ -194,7 +201,7 @@ class InkAnnotationStore {
     }
   }
 
-  Future<int> countAll() => _serialize((box) async {
+  Future<int> countAll() => _read((box) async {
     var count = 0;
     for (final raw in box.values) {
       if (InkAnnotation.fromMap(raw) != null) count++;

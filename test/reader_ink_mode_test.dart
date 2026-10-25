@@ -30,9 +30,9 @@ void main() {
     // 打开底部工具栏（点正文中央切换菜单），「批注」入口可见。
     await tester.tap(find.textContaining('清晨的风').first);
     await tester.pumpAndSettle();
-    expect(find.text('批注'), findsOneWidget);
+    expect(find.text('手写'), findsOneWidget);
 
-    await tester.tap(find.text('批注'));
+    await tester.tap(find.text('手写'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('ink-toolbar')), findsOneWidget);
     expect(find.byKey(const Key('ink-canvas')), findsOneWidget);

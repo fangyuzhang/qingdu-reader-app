@@ -91,9 +91,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('笔记'), findsOneWidget);
     expect(find.textContaining('还没有'), findsOneWidget);
-    // 四个内容 chip（全部/批注/书摘/划线）+ 「全部类型」；
+    // 五个内容 chip（全部/批注/书摘/划线/手写）+ 「全部标签」；
     // 其余类型是可长按拖动的 PaletteTagChip，不再是 ChoiceChip。
-    expect(find.byType(ChoiceChip), findsNWidgets(5));
+    expect(find.byType(ChoiceChip), findsNWidgets(6));
   });
 
   testWidgets('分级标签渲染 12+ 与 15+', (tester) async {

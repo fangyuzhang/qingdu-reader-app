@@ -142,7 +142,7 @@ class _ReaderControlsState extends State<ReaderControls> {
                         if (widget.onInk != null)
                           _Action(
                             icon: LucideIcons.pen_line,
-                            label: '批注',
+                            label: '手写',
                             onTap: () => widget.onInk!(),
                           ),
                         if (widget.onInkList != null)

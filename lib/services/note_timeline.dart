@@ -10,7 +10,9 @@ enum NoteTimePreset { all, today, sevenDays, thirtyDays, custom }
 /// marks = 划线记录（ReaderUnderlineStore 的数据，不在注解列表里）：
 /// 选中时时间线由笔记页直接渲染划线记录，[filterNoteTimeline] 对注解
 /// 返回空列表。
-enum NoteTypeFilter { all, annot, excerpt, marks }
+/// ink = 手写墨迹批注（InkAnnotationStore 的数据）：与 marks 同一模式，
+/// 由笔记页直接渲染墨迹记录。
+enum NoteTypeFilter { all, annot, excerpt, marks, ink }
 
 /// Canonical identity of one note's marker/badge, used by the notes filter.
 ///

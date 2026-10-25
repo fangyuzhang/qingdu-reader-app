@@ -606,7 +606,7 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
             IconButton(
               key: const Key('pdf-annotate'),
               icon: const Icon(LucideIcons.pen_line, color: Colors.white),
-              tooltip: '批注',
+              tooltip: '手写',
               onPressed: _enterAnnotate,
             ),
             IconButton(

@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../models/curated_book.dart';
+import '../models/ink_annotation.dart';
 import '../models/media_item.dart';
 import '../services/api_client.dart';
 import '../services/curated_resolver.dart';
 import '../services/detail_snapshot_cache.dart';
 import '../services/imported_book_store.dart';
+import '../services/ink_annotation_store.dart';
 import '../services/library_store.dart';
 import '../services/note_card_exporter.dart';
 import '../services/note_timeline.dart';
@@ -19,7 +21,9 @@ import '../services/reader_underline_store.dart';
 import '../widgets/home/home_design.dart';
 import '../widgets/home/home_media_card.dart';
 import '../widgets/notes/note_tag_drag.dart';
+import '../widgets/reader/annotation/ink_strokes_painter.dart';
 import '../widgets/reader/reader_note_block.dart';
+import 'pdf_reader_page.dart';
 import 'reader_page.dart';
 
 enum _NotesViewMode { timeline, books }
@@ -59,6 +63,27 @@ class _MarkEntry {
 
   String get key =>
       '$bookId|$chapterId|${startOffset ?? 'b$blockIndex'}|${style.storageValue}';
+}
+
+/// 一条手写墨迹在笔记页里的展示形态：墨迹本体 + 书名/章节（或页码）。
+@immutable
+class _InkEntry {
+  const _InkEntry({
+    required this.annotation,
+    required this.bookTitle,
+    required this.chapterTitle,
+    this.pdfPage,
+  });
+
+  final InkAnnotation annotation;
+  final String bookTitle;
+  final String chapterTitle;
+
+  /// PDF 固定版式书的页码（chapterId = pdf:page:N）；流式书为 null。
+  final int? pdfPage;
+
+  int get createdAt => annotation.createdAt;
+  String get key => annotation.key;
 }
 
 @immutable
@@ -140,6 +165,10 @@ class _NotesPageState extends State<NotesPage> {
 
   /// 划线 / 荧光笔记录，以及按书过滤当前划线视图的选择。
   List<_MarkEntry> _marks = const [];
+
+  /// 手写墨迹批注（InkAnnotationStore 全量，按 createdAt 倒序）。
+  List<InkAnnotation> _ink = const [];
+  List<_InkEntry> _inkEntries = const [];
   /// 划线线型筛选（null = 全部线型）；仅当类型筛选选中「划线」时生效。
   ReaderMarkStyle? _markStyleFilter;
 
@@ -170,6 +199,7 @@ class _NotesPageState extends State<NotesPage> {
         widget.underlineStore ?? ReaderUnderlineStore.instance;
     final ranges = await underlineStore.loadAllRanges();
     final paragraphs = await underlineStore.loadAllParagraphs();
+    final ink = await InkAnnotationStore.instance.loadAll();
     await ReaderMarkerTypeStore.instance.load();
     final meta = _loadBookMeta();
     if (!mounted) return;
@@ -180,6 +210,8 @@ class _NotesPageState extends State<NotesPage> {
       _covers = meta.covers;
       _bookTitles = meta.titles;
       _marks = _buildMarks(ranges, paragraphs, entries, meta.titles);
+      _ink = ink;
+      _inkEntries = _buildInkEntries(ink, meta.titles);
       _loading = false;
       _pruneLeavingBadges(entries);
     });
@@ -459,9 +491,10 @@ class _NotesPageState extends State<NotesPage> {
       // 视图切换一律回到全量：单书范围只属于「按书查看」里的那一层，
       // 否则时间线会莫名只剩一本书，而顶部又没有可见的筛选提示。
       _filters = _filters.without(bookId: true);
-      // 「划线」是时间线里的类型筛选；按书查看只收批注/书摘，
-      // 切走时退出划线模式，避免按书视图意外变成空列表。
-      if (mode != _NotesViewMode.timeline && _type == NoteTypeFilter.marks) {
+      // 「划线」「手写」是时间线里的类型筛选；按书查看只收批注/书摘，
+      // 切走时退出这两类模式，避免按书视图意外变成空列表。
+      if (mode != _NotesViewMode.timeline &&
+          (_type == NoteTypeFilter.marks || _type == NoteTypeFilter.ink)) {
         _type = NoteTypeFilter.all;
       }
       _hoverNoteKey = null;
@@ -480,6 +513,7 @@ class _NotesPageState extends State<NotesPage> {
 
   int get _annotCount => _all.where((e) => e.isAnnot).length;
   int get _excerptCount => _all.length - _annotCount;
+  int get _inkCount => _ink.length;
 
   /// 书名优先用笔记里记下的，其次是阅读历史/书单缓存里的。
   String _titleOf(String bookId, String fallback) {
@@ -514,6 +548,71 @@ class _NotesPageState extends State<NotesPage> {
       if (_markStyleFilter == null || mark.style == _markStyleFilter) mark,
   ];
 
+  /// 「手写」类型的数据：书与时间维度与时间线同一套筛选；线型/标签
+  /// 维度对墨迹不存在。
+  List<_InkEntry> get _visibleInk {
+    final range = _filters.resolveRange(DateTime.now());
+    final start = range == null
+        ? null
+        : DateTime(range.start.year, range.start.month, range.start.day);
+    final endExclusive = range == null
+        ? null
+        : DateTime(range.end.year, range.end.month, range.end.day).add(
+            const Duration(days: 1),
+          );
+    bool inRange(int createdAt) {
+      if (start == null || endExclusive == null) return true;
+      if (createdAt <= 0) return false;
+      final created = DateTime.fromMillisecondsSinceEpoch(createdAt);
+      return !created.isBefore(start) && created.isBefore(endExclusive);
+    }
+
+    return [
+      for (final entry in _inkEntries)
+        if (_filters.bookId == null ||
+            entry.annotation.bookId == _filters.bookId)
+          if (inRange(entry.createdAt)) entry,
+    ];
+  }
+
+  /// 墨迹记录补书名/章节名：PDF 固定版式书的 chapterId 是 pdf:page:N，
+  /// 直接展示「第 N 页」；流式书与划线同一套章节名解析。
+  List<_InkEntry> _buildInkEntries(
+    List<InkAnnotation> ink,
+    Map<String, String> knownTitles,
+  ) {
+    final chapterTitles = <String, Map<String, String>>{};
+    String chapterTitleOf(String bookId, String chapterId) {
+      final cached = chapterTitles[bookId] ??= {
+        for (final chapter
+            in DetailSnapshotCache.instance.read(bookId)?.chapters ??
+                const <Chapter>[])
+          chapter.itemId: chapter.title,
+      };
+      return cached[chapterId] ?? '';
+    }
+
+    final pagePrefix = 'pdf:page:';
+    final entries = <_InkEntry>[
+      for (final item in ink)
+        if (item.chapterId.startsWith(pagePrefix))
+          _InkEntry(
+            annotation: item,
+            bookTitle: knownTitles[item.bookId] ?? '未知书籍',
+            chapterTitle:
+                '第 ${item.chapterId.substring(pagePrefix.length)} 页',
+            pdfPage: int.tryParse(item.chapterId.substring(pagePrefix.length)),
+          )
+        else
+          _InkEntry(
+            annotation: item,
+            bookTitle: knownTitles[item.bookId] ?? '未知书籍',
+            chapterTitle: chapterTitleOf(item.bookId, item.chapterId),
+          ),
+    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List.unmodifiable(entries);
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
@@ -528,8 +627,14 @@ class _NotesPageState extends State<NotesPage> {
         ? const <ReaderAnnotation>[]
         : _bookViewNotes;
     final showMarks = _type == NoteTypeFilter.marks;
-    final exportNotes = showMarks ? const <ReaderAnnotation>[] : visible;
-    final hasContent = showMarks ? _visibleMarks.isNotEmpty : visible.isNotEmpty;
+    final showInk = _type == NoteTypeFilter.ink;
+    final exportNotes =
+        showMarks || showInk ? const <ReaderAnnotation>[] : visible;
+    final hasContent = showMarks
+        ? _visibleMarks.isNotEmpty
+        : showInk
+        ? _visibleInk.isNotEmpty
+        : visible.isNotEmpty;
     return Scaffold(
       backgroundColor: palette.canvas,
       appBar: AppBar(
@@ -562,6 +667,8 @@ class _NotesPageState extends State<NotesPage> {
                           : _buildBookNotes(palette, selectedBookId, bookNotes),
                     _NotesViewMode.timeline => showMarks
                         ? _buildMarkTimeline(palette, _visibleMarks)
+                        : showInk
+                        ? _buildInkTimeline(palette, _visibleInk)
                         : _buildNoteList(palette, visible),
                   },
           ),
@@ -1038,6 +1145,8 @@ class _NotesPageState extends State<NotesPage> {
                 chip(NoteTypeFilter.excerpt, '书摘', _excerptCount),
                 // 【产品调整】划线从独立视图改为与批注/书摘同类的类型筛选。
                 chip(NoteTypeFilter.marks, '划线', _marks.length),
+                // 手写墨迹与批注/书摘/划线同级的类型筛选（时间线直读墨迹）。
+                chip(NoteTypeFilter.ink, '手写', _inkCount),
               ],
             ),
           ),
@@ -1060,9 +1169,10 @@ class _NotesPageState extends State<NotesPage> {
                   child: ChoiceChip(
                     key: const ValueKey('notes-marker-all'),
                     showCheckmark: false,
-                    // 划线类型下「全部类型」= 全部线型。
+                    // 划线类型下这一行是线型筛选，all = 全部线型；
+                    // 其余模式下 all = 清空类型与标签筛选。
                     selected: marksMode ? markStyleAll : allTypes,
-                    label: const Text('全部类型'),
+                    label: Text(marksMode ? '全部线型' : '全部标签'),
                     labelStyle: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
@@ -1255,6 +1365,137 @@ class _NotesPageState extends State<NotesPage> {
         },
       );
 
+  /// 「手写」类型下的时间线：与划线同款日期轴 + 卡片，卡片主体是
+  /// 墨迹缩略（按存储页面宽高比铺宽）。
+  Widget _buildInkTimeline(HomePalette palette, List<_InkEntry> entries) =>
+      ListView.builder(
+        key: const ValueKey('notes-ink-timeline'),
+        padding: const EdgeInsets.fromLTRB(12, 4, 16, 32),
+        itemCount: entries.length,
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          final previous = index == 0 ? null : entries[index - 1];
+          final next = index + 1 >= entries.length ? null : entries[index + 1];
+          final firstOfDay = previous == null ||
+              !_sameDay(previous.createdAt, entry.createdAt);
+          final lastOfDay =
+              next == null || !_sameDay(next.createdAt, entry.createdAt);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: 56,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned(
+                          left: 44,
+                          top: firstOfDay ? 18 : 0,
+                          bottom: lastOfDay ? 20 : 0,
+                          child: Container(width: 1.5, color: palette.line),
+                        ),
+                        Positioned(
+                          left: 39.5,
+                          top: 8,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: Color(InkAnnotation.defaultColorValue),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: palette.canvas,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (firstOfDay)
+                          Positioned(
+                            left: 0,
+                            top: 1,
+                            width: 38,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                _dayLabel(entry.createdAt),
+                                maxLines: 1,
+                                softWrap: false,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  color: palette.muted,
+                                  fontSize: 10,
+                                  height: 1.3,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: _InkRow(
+                      key: ValueKey('ink-row-${entry.key}'),
+                      entry: entry,
+                      onTap: () => _openInk(entry),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+  /// 打开手写批注所在处：PDF 按页直达；流式书按锚点字符偏移定位。
+  Future<void> _openInk(_InkEntry entry) async {
+    final item = entry.annotation;
+    if (entry.pdfPage != null) {
+      try {
+        final book = await ImportedBookStore.instance.book(item.bookId);
+        if (!mounted) return;
+        final path = book?.sourcePath;
+        if (path == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('本地书籍文件不可用')),
+          );
+          return;
+        }
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => PdfReaderPage(
+              bookId: item.bookId,
+              title: entry.bookTitle,
+              pdfPath: path,
+              cover: _covers[item.bookId] ?? '',
+              initialPage: entry.pdfPage!,
+            ),
+          ),
+        );
+        _reload();
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('打开手写批注所在页面失败')),
+          );
+        }
+      }
+      return;
+    }
+    await _openChapter(
+      bookId: item.bookId,
+      bookTitle: entry.bookTitle,
+      chapterId: item.chapterId,
+      textOffset: item.startOffset,
+    );
+  }
+
   Widget _buildBookGrid(List<_BookNotesGroup> groups) => LayoutBuilder(
     builder: (context, constraints) {
       final width = constraints.maxWidth;
@@ -1280,9 +1521,16 @@ class _NotesPageState extends State<NotesPage> {
 
   Widget _buildEmpty(HomePalette palette) {
     final showMarks = _type == NoteTypeFilter.marks;
+    final showInk = _type == NoteTypeFilter.ink;
     final filtered = _filters.isActive ||
-        (_type != NoteTypeFilter.all && !showMarks);
-    final (String title, String hint, IconData icon) = showMarks
+        (_type != NoteTypeFilter.all && !showMarks && !showInk);
+    final (String title, String hint, IconData icon) = showInk
+        ? (
+            _filters.isActive ? '没有符合筛选条件的手写批注' : '还没有手写批注',
+            '阅读时点工具栏「手写」进入手写模式，写下的墨迹会收进来',
+            LucideIcons.signature,
+          )
+        : showMarks
         ? (
             _markStyleFilter == null
                 ? '还没有划线'
@@ -1304,6 +1552,8 @@ class _NotesPageState extends State<NotesPage> {
           };
     final clearable = showMarks
         ? _markStyleFilter != null
+        : showInk
+        ? _filters.isActive
         : filtered;
     return Center(
       child: Column(
@@ -2035,6 +2285,112 @@ class _MarkRow extends StatelessWidget {
                   height: 1.5,
                   color: palette.ink.withValues(alpha: 0.86),
                 ),
+              ),
+              if (entry.chapterTitle.trim().isNotEmpty) ...[
+                const SizedBox(height: 5),
+                Text(
+                  entry.chapterTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10, color: palette.muted),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 手写墨迹卡片：徽标 + 书名/时间 + 墨迹缩略 + 位置行。
+class _InkRow extends StatelessWidget {
+  const _InkRow({super.key, required this.entry, required this.onTap});
+
+  final _InkEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = HomePalette.of(context);
+    final item = entry.annotation;
+    return Material(
+      color: palette.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: palette.line, width: 0.6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Color(
+                        InkAnnotation.defaultColorValue,
+                      ).withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: Color(
+                          InkAnnotation.defaultColorValue,
+                        ).withValues(alpha: 0.45),
+                        width: 0.6,
+                      ),
+                    ),
+                    child: const Text(
+                      '手写',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Color(InkAnnotation.defaultColorValue),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      entry.bookTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: palette.muted,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _timestampLabel(entry.createdAt),
+                    style: TextStyle(fontSize: 10, color: palette.muted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // 墨迹缩略：点序列按存储页面宽高比铺宽，过高压到 96。
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final height = (width * item.pageHeight / item.pageWidth)
+                      .clamp(40.0, 96.0);
+                  return CustomPaint(
+                    size: Size(width, height),
+                    painter: InkStrokesPainter(
+                      strokes: item.strokes,
+                      canvasWidth: width,
+                    ),
+                  );
+                },
               ),
               if (entry.chapterTitle.trim().isNotEmpty) ...[
                 const SizedBox(height: 5),
