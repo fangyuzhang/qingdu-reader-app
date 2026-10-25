@@ -2101,6 +2101,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _sessionActive = false;
     unawaited(_persistProgress());
     _eyeCareTimer?.cancel();
+    // 批注模式中直接返回退出也要落盘（控制器此刻仍存活，异步链自行完成）。
+    _inkDebounce?.cancel();
+    if (_ink != null) unawaited(_saveInk());
     unawaited(ReadingStatsStore.instance.flush());
     _annotationStore.changes.removeListener(_annotationListener);
     // 离开阅读页必须把系统栏还给其他页面，避免沉浸模式泄漏出去。

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 
 import '../models/ink_annotation.dart';
+import 'app_log.dart';
 import 'encrypted_hive.dart';
 
 /// 手写墨迹批注的本地存储（第 3 组，加密 Hive 盒 reader_ink_annotations_v1）。
@@ -43,8 +44,9 @@ class InkAnnotationStore {
       final box = await pending;
       if (box.isOpen) return box;
       _opening = null;
-    } catch (_) {
+    } catch (e) {
       _opening = null;
+      AppLog.w('ink-store', 'open box failed: $e');
       return null;
     }
     return _box();
@@ -59,6 +61,7 @@ class InkAnnotationStore {
       final box = await _box();
       if (box == null) {
         if (failWhenUnavailable) {
+          AppLog.w('ink-store', 'write dropped: box unavailable');
           throw StateError('墨迹批注存储不可用');
         }
         return onUnavailable;
@@ -73,6 +76,9 @@ class InkAnnotationStore {
   Future<void> save(InkAnnotation annotation) => _serialize(
     (box) async {
       await box.put(annotation.key, annotation.toMap());
+      // 立即刷盘：force-stop（SIGKILL）没有盒关闭时机，减少半帧落盘被
+      // 下次打开当损坏处理的窗口。
+      await box.flush();
       await _evictBeyondMax(box);
       changes.value++;
     },
@@ -135,6 +141,20 @@ class InkAnnotationStore {
     out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return out;
   }, onUnavailable: const []);
+
+  /// 诊断页用：盒是否可开、条目数、首个键（不弹出任何数据细节）。
+  Future<String> debugStats() async {
+    if (!hiveReady) return 'hiveReady=false（LibraryStore.init 未跑）';
+    try {
+      final box = await _box();
+      if (box == null) return 'box=null（打开失败，见 AppLog ink-store）';
+      final keys = box.keys.toList();
+      return 'box=ok entries=${box.length}'
+          '${keys.isEmpty ? '' : ' first=${keys.first.toString().substring(0, keys.first.toString().length.clamp(0, 48))}'}';
+    } catch (e) {
+      return 'open threw: $e';
+    }
+  }
 
   Future<int> countAll() => _serialize((box) async {
     var count = 0;

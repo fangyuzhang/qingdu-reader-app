@@ -1208,3 +1208,57 @@ flutter test             # 1954 passed / 10 skipped
 - 根因：构建目录的 gradle 中间产物在某次目录被锁/清理时损坏，后续增量构建持续复用坏拷贝（UP-TO-DATE）；与代码无关（仓库 jniLibs 源文件哈希未变）。
 - 修复：弃用旧构建目录，全新目录完整重拷 + 干净构建。新 APK 内 .so 与历史正常版本（v43）逐字节一致（6,444,168 / sha256 前缀 93d22767），gradle 打包对 .so 的 8 字节规范化属正常差异。
 - 验证：装机后 logcat 出现 `fqapi_core: core init: port=8080`，无 linker 错误；首页正常（书城链路依赖后端）。
+
+---
+
+# 五十六、v56 批次：修复首页推荐磁贴书名与作者行重叠
+
+- 根因：v47 磁贴套白卡后外层定高只加 10px，未算白卡上下 24px 内边距，两个 Flexible 文本被压缩到字形互叠；作者行未显式行高，真机中文字体默认行高 >1.3 加剧重叠。
+- 修法：定高收口 `CuratedBookTile.heightFor`（唯一公式，含卡内边距+2px 余量），书名/作者显式 height:1.3，首页改调 heightFor；新增防重叠回归用例。
+- 验证：analyze 0；test 1512/10/0；真机截图确认各板块书名/作者分行清晰。（37cd8c8）
+
+# 五十七、第 2 组：手写笔输入能力探测页
+
+- 新增 `lib/pages/stylus_probe_page.dart`（Listener 实时 kind/pressure/tilt/orientation/localPosition、压感线性映射笔迹、min/max/avg 统计）+ 设置页「服务」入口（debugToolsEnabled 守卫：kDebugMode 或 `--dart-define=fqapp.debugTools=true`，普通 release 不可见）。
+- 真机实测（K20 Pro 手指）：kind=touch、pressure 恒 1.000、tilt/orientation 恒 0——结论回填文件头。M-Pencil 3 待 MatePad。（5ff377e）
+
+# 五十八、第 3 组：手写墨迹批注领域模型与存储
+
+- `lib/models/ink_annotation.dart`：InkPoint（归一化坐标+压感）/InkStroke（点序列+页宽 1000 基准笔宽+颜色）/InkAnnotation（锚点四元组+前后 32 字符指纹+锚点盒+页面快照+layoutVersion）/verifyAgainst 四态校验。
+- `lib/services/ink_annotation_store.dart`：加密 Hive 盒 reader_ink_annotations_v1（照 ReaderAnnotationStore 模板：串行写/容量淘汰/changes 通知/fromMap 容错）；接口 save/loadByChapter/loadByChapterVerified（失配返回需人工确认标记，不静默丢弃）/delete/updateAnchor/clearBook。测试环境无密钥回落明文盒。
+- 7 用例全过（往返无损/指纹命中/失配不丢/纯页锚点/updateAnchor 重键/未就绪兜底/容错）。（6d183af）
+
+# 五十九、第 4 组：PDF 固定版式阅读
+
+- 选型 pdfrx 2.2.x（锁 <2.3.0：2.3 起 native assets 要求宿主 MSVC，flutter test 直接挂；PDFium 预编译由插件 Gradle/CMake 下载，GPL-3.0 兼容）。详见 PDF-RENDER-SELECTION.md（含 pub 缓存三处本机适配补丁：镜像下载/合并拷贝替代 symlink/引擎空安全）。
+- 导入三通道：parseImportedBookBytes 加 pdf 分支（魔数校验+source.pdf 整体落盘，64MB 上限）；SAF 选择器 MIME 放行；新增 ACTION_VIEW「打开方式」导入（PdfViewIntentPlugin + manifest intent-filter + RootShell 消费）——文件管理器/浏览器可直接交 PDF 入书架。
+- 阅读页 `lib/pages/pdf_reader_page.dart`：PageView+PdfPageView 原版式渲染、左右点击区翻页、页码滑杆、pageText() 逐字符坐标表、进度 positionVersion:3 按页存取。
+- 验证：analyze 0；test 1524/10/0；真机：intent 导入→渲染/翻页/进度→杀进程续读 3/3；libpdfium.so 16KiB 对齐核验 OK。SAF 手选因 MIUI 拦截系统 UI 自动化点击无法机器验证（与 intent 路径同走 importBytes）。（3794a85）
+
+# 六十、第 5 组：PDF 手写批注模式
+
+- `lib/widgets/reader/annotation/` 四件套：InkStrokesPainter（中点二次贝塞尔+压感线宽 0.35+0.65p）/InkController（撤销重做/橡皮/颜色/三档笔宽，不碰存储）/InkCanvas（Listener 只收 stylus，手指穿透翻页；<1.5px 抖动降采样；橡皮按点到笔段距离命中）/InkToolbar（palette.surface 卡片风格；手指绘制开关仅 debugTools 构建）。
+- pdf_reader_page：整页一条 InkAnnotation（bookId+pdf:page:N+pdf-fixed），600ms 防抖落盘；锚点=墨迹包围盒与 PDFium 字符矩形求交→字符区间+32 字符指纹+锚点盒归一化；退出只读态显示；批注中手指翻页自动切页存取。
+- 修复（真机定位）：模式切换重包 ScrollConfiguration dragDevices 重建 PageView 子树→pdfrx 纹理失效→MIUI 渲染面冻结白屏（二次进入必现）。改静态 touch-only dragDevices + 去掉批注进出 SystemUiMode 切换。
+- 验证：analyze 0；ink_canvas_test 5 用例；真机两轮进出批注：画/擦/只读/重启原位。（be3f753）
+
+# 六十一、第 6 组：阅读器固定布局批注模式（EPUB/TXT 复用）
+
+- reader_page：分页模式「批注」入口；进入时 layoutVersion 定格（字号/缩放/视口/页号指纹）；与 PDF 共用画布/工具栏；墨迹=归一化坐标+页文本区间锚点（page.start/end+指纹，取自排版引擎坐标空间）双写。
+- 流式只读投影：锚点区间以墨色虚线并入 _annotationRanges（走 ReaderBlockMarkPainter，分页/滚动都显示）；「墨迹」列表（缩略图+引文+校验状态+跳转）；失配 SnackBar 提示；换章自动落盘退出。
+- 渲染面冻结防线（两处真机复现的根因族）：painter repaint 挂稳定 controller 引用（去掉每帧 Listenable.merge）；控制器「先摘树、下一帧再 dispose」。
+- 验证：analyze 0；全量 1530/10/0；真机（史记·书城链路）：批注→完成→整页虚线投影→改字号重排后虚线仍锚定同段原文→重启投影恢复。（2f75d67）
+
+# 六十二、第 7 组：锚点重投影 + 批注诊断（含存储链路修复）
+
+- `lib/services/anchor_projector.dart`：纯函数 projectInk（锚点盒→平移+缩放变换；exact/partial/mismatch/unverified 四态，失配绝不自动修复）+ relocateAnchor 指纹定位（唯一命中才返回）。12 用例覆盖字号/行距/横竖屏/失配/重定位/区间删除/跨章语义。
+- `lib/pages/annotation_diagnostics_page.dart`：全部墨迹的锚点状态列表（本地书实时 verify+relocate、书城/PDF 标未校验）+ 存储状态行 + 删除；设置页调试入口。
+- 存储链路修复：LibraryStore.init 补 InkAnnotationStore.hiveReady=true（历史同款坑：漏接则读写全部空转）；save 后 box.flush()（force-stop 半帧落盘窗口）；批注模式返回键退出补 dispose 落盘（reader+pdf 两处）。
+- 验证：analyze 0；全量 1542/10/0；真机：修复后画墨迹→杀进程重启原位复验通过；诊断页入口与列表渲染通过。
+- 已知未竟项（设备离场前未能完成）：①同进程内诊断页偶发 entries=0 与阅读器显示并存的矛盾未最终定位（flush/dispose 修复后未再复现，怀疑与 force-stop 半帧+checksum 误判 wipe 相关，encrypted_hive 属禁改区只能从调用侧加固）；②M-Pencil 3 压感/倾斜与 ≥50fps 实测待 MatePad 11；③SAF 手选导入的用户手测。
+
+# 版本与基础设施
+
+- pubspec 1.0.131+136 → 1.0.132+137；新增依赖 pdfrx（>=2.2.0 <2.3.0）。
+- 新增文档：EXTENSION-SURVEY-REPORT.md（第 1 组施工图）、PDF-RENDER-SELECTION.md（选型）。
+- 本机构建副本（E:\fqapp-build2）pub 缓存补丁 3 处（见 PDF-RENDER-SELECTION.md），flutter pub cache repair 会还原，重建构建环境时需重打。

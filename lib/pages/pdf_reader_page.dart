@@ -172,6 +172,9 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
       );
     }
     _inkDebounce?.cancel();
+    // 从批注模式直接返回退出（手势/返回键）也要落盘：dispose 没有等待
+    // 时机，尽力触发（控制器此刻仍存活，异步链自行完成）。
+    if (_ink != null) unawaited(_saveInk());
     _ink?.dispose();
     _pageStrokes.dispose();
     _pageController.dispose();
@@ -274,24 +277,29 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
         .where((a) => a.key == key)
         .firstOrNull;
     final anchor = await _computeAnchor(controller.strokes, _inkPage);
-    await InkAnnotationStore.instance.save(
-      InkAnnotation(
-        bookId: widget.bookId,
-        chapterId: _pageKey(_inkPage),
-        format: InkAnnotation.kFormatPdf,
-        pageWidth: _contentSize.width,
-        pageHeight: _contentSize.height,
-        layoutVersion: _pdfLayoutVersion,
-        strokes: controller.strokes,
-        createdAt: existing?.createdAt ?? DateTime.now().millisecondsSinceEpoch,
-        updatedAt: DateTime.now().millisecondsSinceEpoch,
-        startOffset: anchor.$1,
-        endOffset: anchor.$2,
-        contextBefore: anchor.$3,
-        contextAfter: anchor.$4,
-        anchorBox: anchor.$5,
-      ),
-    );
+    try {
+      await InkAnnotationStore.instance.save(
+        InkAnnotation(
+          bookId: widget.bookId,
+          chapterId: _pageKey(_inkPage),
+          format: InkAnnotation.kFormatPdf,
+          pageWidth: _contentSize.width,
+          pageHeight: _contentSize.height,
+          layoutVersion: _pdfLayoutVersion,
+          strokes: controller.strokes,
+          createdAt:
+              existing?.createdAt ?? DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+          startOffset: anchor.$1,
+          endOffset: anchor.$2,
+          contextBefore: anchor.$3,
+          contextAfter: anchor.$4,
+          anchorBox: anchor.$5,
+        ),
+      );
+    } catch (_) {
+      // 存储不可用不阻断书写；下次编辑仍会整条覆写重试。
+    }
   }
 
   /// 墨迹包围盒 → 命中字符区间与上下文指纹。

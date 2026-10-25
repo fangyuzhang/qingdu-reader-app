@@ -1,6 +1,6 @@
 # 青茄阅读 · 当前状态交接（AGENT-HANDOVER-NEXT）
 
-> 更新时间：2026-10-24 22:30 (UTC+8)
+> 更新时间：2026-10-25 04:30 (UTC+8)（第 2~7 组交付后重写；环境/工具链部分不变，见下）
 > 仓库：E:\项目\青茄阅读\repo\fqapp-src（Windows 侧路径；WSL 内为 /mnt/e/项目/青茄阅读/repo/fqapp-src）
 > 远端：https://github.com/fangyuzhang/qingdu-reader-app（已改名，旧地址 qingqie-reader-app 自动重定向）
 > 分支：master（HEAD de66506，已与远端同步）；本地另有已合并的 refactor/slim-optimize 分支可删
@@ -14,11 +14,26 @@
 
 | 项 | 值 |
 | --- | --- |
-| 测试基线 | flutter analyze 0 问题；flutter test 1511 通过 / 10 跳过 / 0 失败 |
+| 测试基线 | flutter analyze 0 问题；flutter test 1542 通过 / 10 跳过 / 0 失败 |
 | 真机 | Redmi K20 Pro，serial b2f8e975（adb 在 D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe） |
 | 已装 APK | 最新 release（含 v41–v55 + 瘦身重构），构建产物完好（.so 已修复） |
 | 远端同步 | master 已推送并校验 SHA 一致 |
-| 当前代码形态 | 玻璃主题已整体移除；首页为 PageView 融合导航；笔记划线并入类型筛选 |
+| 当前代码形态 | 玻璃主题已整体移除；首页为 PageView 融合导航；笔记划线并入类型筛选；**新增 PDF 固定版式阅读 + 手写墨迹批注（第 2~7 组，v1.0.132+137，提交 37cd8c8..本批）** |
+
+---
+
+## 0.5 七组交付速览（2026-10-25，详见 QINGQIE-CHANGES.md 五十六~六十二）
+
+- **新增能力**：① PDF 导入（SAF 选择器 + 文件管理器「打开方式」ACTION_VIEW 双通道，64MB）与固定版式阅读（pdfrx 2.2.x，进度 positionVersion:3 按页存取）；② 手写墨迹批注：PDF 整页锚定（字符区间+指纹，PDFium 逐字符坐标）与阅读器分页模式固定布局批注（layoutVersion 版本化，退出后锚点区间以虚线投影回流式视图）；③ 批注诊断页（调试）。
+- **新文件**：lib/pages/{pdf_reader_page, stylus_probe_page, annotation_diagnostics_page}.dart、lib/services/{ink_annotation_store, anchor_projector, pdf_intent_import}.dart、lib/models/ink_annotation.dart、lib/widgets/reader/annotation/{ink_canvas, ink_controller, ink_strokes_painter, ink_toolbar}.dart、android/.../PdfViewIntentPlugin.kt。
+- **修改要点**：imported_book_store（pdf 分支/source.pdf 落盘/64MB）、LocalBookPickerPlugin.kt（MIME+上限）、MainActivity/Manifest（VIEW intent）、reader_page（批注模式挂载，全部为附加式插入，分页/滚动/进度逻辑未动）、reader_controls（批注/墨迹入口）、library_store.init（补 InkAnnotationStore.hiveReady=true）。
+- **本机 pub 缓存补丁（3 处，flutter pub cache repair 会还原）**：pdfium_flutter CMake 下载走 ghproxy.net 镜像；同文件 Windows 宿主用合并拷贝替代 .lib/latest 符号链接（并修并行 ABI 竞态导致 libpdfium.so 未入包）；pdfrx_engine 0.3.9 pdf_file_cache.dart 两处 cache!. 空安全 AOT 编译错。详见 PDF-RENDER-SELECTION.md。
+- **验证遗留（设备掉线前未完成，优先级从高到低）**：
+  1. 墨迹存储在极端 force-stop 下偶发丢失（怀疑 Hive 半帧+checksum 误判 wipe；已加 save 后 flush + dispose 落盘两道防线，复验未再出现；encrypted_hive 属禁改区）。复验法：批注→完成→`adb shell am force-stop`→重开看墨迹；异常时设置→服务→批注诊断（调试）看「存储：entries=」与 AppLog ink-store 告警。
+  2. MatePad 11 + M-Pencil 3：pressure 范围/tilt 可用性/书写 ≥50fps（探测页在设置→服务→手写笔探测）。
+  3. SAF 手选导入 PDF 的用户手测（MIUI 拦截系统选择器的自动化点击，代码路径与已验证的 intent 导入相同）。
+- **调试开关**：`--dart-define=fqapp.debugTools=true` 让调试页出现在 release 包（默认 release 不可见，签名同正式包可覆盖安装）。
+
 
 ---
 

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_log.dart';
 import 'encrypted_hive.dart';
+import 'ink_annotation_store.dart';
 import 'reader_annotation_store.dart';
 import 'reader_marker_type_store.dart';
 import 'reader_underline_store.dart';
@@ -145,6 +146,9 @@ class LibraryStore implements ReaderStore {
     // 导致 ReaderAnnotationStore._box() 恒为 null，写批注时抛
     // StateError('批注存储不可用')，阅读器只能提示「保存失败，请重试」。
     ReaderAnnotationStore.hiveReady = true;
+    // 【第 3 组】墨迹盒同一时机就绪（同上一行的先例：漏接则读写全部空转，
+    // 批注「看似成功」实则没有落盘）。
+    InkAnnotationStore.hiveReady = true;
     await _migrateFromSp();
     // Copy typed legacy media before a novel can reuse its original key.
     // The originals remain available if a write fails or migration is retried.

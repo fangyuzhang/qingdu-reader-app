@@ -14,6 +14,7 @@ import '../services/library_store.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/home/home_design.dart';
 import 'about_page.dart';
+import 'annotation_diagnostics_page.dart';
 import 'cached_books_page.dart';
 import 'library_backup_page.dart';
 import 'log_viewer_page.dart';
@@ -84,7 +85,8 @@ class SettingsPage extends StatelessWidget {
         title: '服务',
         subtitle: '本地后端状态',
         items: [
-          // 手写笔能力探测：调试工具，见 services/debug_tools.dart 的开关说明。
+          // 调试工具：见 services/debug_tools.dart 的开关说明。
+          if (debugToolsEnabled) _inkDiagnosticsItem(),
           if (debugToolsEnabled) _stylusProbeItem(),
           _backendItem(),
           _statusItem(),
@@ -384,6 +386,16 @@ class SettingsPage extends StatelessWidget {
       ).showSnackBar(const SnackBar(content: Text('无法打开 Web UI')));
     }
   }
+
+  SettingsItem _inkDiagnosticsItem() => SettingsItem(
+    icon: LucideIcons.signature,
+    title: '批注诊断（调试）',
+    subtitle: '查看全部手写批注的锚点状态',
+    onTap: (context, setState) => Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AnnotationDiagnosticsPage()),
+    ),
+  );
 
   SettingsItem _stylusProbeItem() => SettingsItem(
     icon: LucideIcons.pen_line,

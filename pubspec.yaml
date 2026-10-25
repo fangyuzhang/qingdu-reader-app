@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.131+136
+version: 1.0.132+137
 
 environment:
   sdk: ^3.12.2
@@ -52,6 +52,13 @@ dependencies:
   connectivity_plus: ^7.3.1
   image: ^4.12.0
   flutter_svg: ^2.3.0
+  # 【PDF 固定版式阅读】pdfrx 2.2.x：PDFium 内核（Apache-2.0/BSD，
+  # GPL-3.0 兼容），PdfPage.loadText() 输出逐字符坐标表（墨迹批注锚定的
+  # 前提）。锁 <2.3.0：2.3.0 起改用 Dart native assets，flutter test 会
+  # 在 Windows 宿主上要求 MSVC 编译 pdfium gate（本机无 VS，测试套件直接
+  # 挂）；2.2.x 的 Android 端由插件 Gradle/CMake 下载预编译 libpdfium.so，
+  # 无宿主编译需求。选型对比见 EXTENSION-SURVEY-REPORT.md §4.3。
+  pdfrx: ">=2.2.0 <2.3.0"
   # 【开发工具·仅调试生效】flutter_skill：配合 flutter-skill MCP server，
   # 让 AI agent 能观察/操作运行中的 app（截图、点击、导航）。main.dart
   # 里用 kDebugMode 守卫，release 构建不初始化对应绑定。
