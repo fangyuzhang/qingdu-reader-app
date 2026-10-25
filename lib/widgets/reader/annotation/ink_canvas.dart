@@ -27,9 +27,13 @@ class _InkCanvasState extends State<InkCanvas> {
       ValueNotifier<List<(Offset, double)>?>(null);
   int? _activePointer;
 
+  /// stylus 恒收；touch/unknown 仅在调试手指通道放开时收。unknown 是
+  /// adb `input` 注入事件的 kind（真机手指恒 touch、手写笔恒 stylus，
+  /// 见 stylus_probe_page 实测），放开它只为自动化验证可驱动绘制。
   bool _accepts(PointerEvent e) => switch (e.kind) {
     PointerDeviceKind.stylus => true,
-    PointerDeviceKind.touch => widget.controller.acceptFinger,
+    PointerDeviceKind.touch || PointerDeviceKind.unknown =>
+      widget.controller.acceptFinger,
     _ => false,
   };
 

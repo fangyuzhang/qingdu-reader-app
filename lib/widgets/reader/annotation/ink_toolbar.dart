@@ -47,51 +47,61 @@ class InkToolbar extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: palette.line, width: 0.6),
           ),
-          child: Row(
-            children: [
-              _toolButton(
-                context,
-                icon: LucideIcons.pen_line,
-                active: controller.tool == InkTool.pen,
-                onTap: () => controller.selectTool(InkTool.pen),
-              ),
-              _toolButton(
-                context,
-                icon: LucideIcons.eraser,
-                active: controller.tool == InkTool.eraser,
-                onTap: () => controller.selectTool(InkTool.eraser),
-              ),
-              const SizedBox(width: 2),
-              _iconButton(
-                context,
-                icon: LucideIcons.undo_2,
-                onTap: controller.canUndo ? controller.undo : null,
-                key: const Key('ink-undo'),
-              ),
-              _iconButton(
-                context,
-                icon: LucideIcons.redo_2,
-                onTap: controller.canRedo ? controller.redo : null,
-                key: const Key('ink-redo'),
-              ),
-              const SizedBox(width: 2),
-              for (final color in _colors)
-                _colorDot(context, color),
-              const SizedBox(width: 2),
-              for (final w in _widths)
-                _widthDot(context, w),
-              if (showFingerToggle) ...[
+          // 单行排不下（工具 4 + 颜色 3 + 笔宽 3 + 手指 + 完成 ≈ 600 逻辑
+          // 像素，手机视口只有 ~390）：窄屏折两行，宽屏仍单行。此前 Row
+          // 直接溢出，「完成/手指绘制」被渲染到屏幕外——批注模式既无法
+          // 正常退出也无法开手指绘制（真机 1080px 实测定位）。
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final tools = [
+                _toolButton(
+                  context,
+                  icon: LucideIcons.pen_line,
+                  active: controller.tool == InkTool.pen,
+                  onTap: () => controller.selectTool(InkTool.pen),
+                  tooltip: '笔',
+                ),
+                _toolButton(
+                  context,
+                  icon: LucideIcons.eraser,
+                  active: controller.tool == InkTool.eraser,
+                  onTap: () => controller.selectTool(InkTool.eraser),
+                  tooltip: '橡皮',
+                ),
                 const SizedBox(width: 2),
                 _iconButton(
                   context,
-                  icon: LucideIcons.hand,
-                  active: controller.acceptFinger,
-                  onTap: controller.toggleFinger,
-                  key: const Key('ink-finger-toggle'),
+                  icon: LucideIcons.undo_2,
+                  tooltip: '撤销',
+                  onTap: controller.canUndo ? controller.undo : null,
+                  key: const Key('ink-undo'),
                 ),
-              ],
-              const Spacer(),
-              FilledButton(
+                _iconButton(
+                  context,
+                  icon: LucideIcons.redo_2,
+                  tooltip: '重做',
+                  onTap: controller.canRedo ? controller.redo : null,
+                  key: const Key('ink-redo'),
+                ),
+              ];
+              final palette_ = [
+                const SizedBox(width: 2),
+                for (final color in _colors) _colorDot(context, color),
+                const SizedBox(width: 2),
+                for (final w in _widths) _widthDot(context, w),
+                if (showFingerToggle) ...[
+                  const SizedBox(width: 2),
+                  _iconButton(
+                    context,
+                    icon: LucideIcons.hand,
+                    active: controller.acceptFinger,
+                    tooltip: '手指绘制',
+                    onTap: controller.toggleFinger,
+                    key: const Key('ink-finger-toggle'),
+                  ),
+                ],
+              ];
+              final done = FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: HomePalette.accent,
                   minimumSize: const Size(64, 38),
@@ -101,8 +111,22 @@ class InkToolbar extends StatelessWidget {
                   '完成',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
-              ),
-            ],
+              );
+              final twoRows = constraints.maxWidth < 620;
+              if (twoRows) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(children: [...tools, const Spacer(), done]),
+                    const SizedBox(height: 2),
+                    Row(children: palette_),
+                  ],
+                );
+              }
+              return Row(
+                children: [...tools, ...palette_, const Spacer(), done],
+              );
+            },
           ),
         ),
       ),
@@ -114,8 +138,15 @@ class InkToolbar extends StatelessWidget {
     required IconData icon,
     required bool active,
     required VoidCallback onTap,
+    String? tooltip,
   }) =>
-      _iconButton(context, icon: icon, active: active, onTap: onTap);
+      _iconButton(
+        context,
+        icon: icon,
+        active: active,
+        onTap: onTap,
+        tooltip: tooltip,
+      );
 
   Widget _iconButton(
     BuildContext context, {
@@ -123,10 +154,12 @@ class InkToolbar extends StatelessWidget {
     required VoidCallback? onTap,
     bool active = false,
     Key? key,
+    String? tooltip,
   }) {
     final palette = HomePalette.of(context);
     return IconButton(
       key: key,
+      tooltip: tooltip,
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
       icon: Icon(

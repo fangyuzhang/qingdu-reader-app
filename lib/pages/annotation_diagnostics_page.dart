@@ -103,10 +103,25 @@ class _AnnotationDiagnosticsPageState extends State<AnnotationDiagnosticsPage>
       appBar: AppBar(title: const Text('批注诊断（调试）')),
       bottomSheet: Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Text(
-          '存储：$_stats',
-          key: const Key('ink-diag-stats'),
-          style: TextStyle(fontSize: 11, color: palette.muted),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '存储：$_stats',
+              key: const Key('ink-diag-stats'),
+              style: TextStyle(fontSize: 11, color: palette.muted),
+            ),
+            for (final line in InkAnnotationStore.trace.take(30).toList().reversed)
+              Text(
+                line,
+                key: const Key('ink-diag-trace'),
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: palette.muted.withValues(alpha: 0.85),
+                ),
+              ),
+          ],
         ),
       ),
       body: _error != null

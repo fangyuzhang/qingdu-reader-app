@@ -4,6 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
 
 import '../models/ink_annotation.dart';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 import 'app_log.dart';
 import 'encrypted_hive.dart';
 
@@ -20,6 +24,21 @@ class InkAnnotationStore {
     : _hive = hive ?? Hive;
 
   static final InkAnnotationStore instance = InkAnnotationStore();
+
+  /// 诊断轨迹（诊断页展示；release 无 print 通道，落在这里最可靠）。
+  static final List<String> trace = [];
+  static void logTrace(String message) {
+    // 双通道：内存环（诊断页展示）+ AppLog（日志查看器可查，release 唯一
+    // 可靠观测面——print 在 release 进程不落 logcat）。
+    AppLog.w('ink', message);
+    final now = DateTime.now();
+    trace.add(
+      '${now.minute.toString().padLeft(2, '0')}:'
+      '${now.second.toString().padLeft(2, '0')}:'
+      '${now.millisecond.toString().padLeft(3, '0')} $message',
+    );
+    if (trace.length > 30) trace.removeRange(0, trace.length - 30);
+  }
   static const _boxName = 'reader_ink_annotations_v1';
 
   /// Set once Hive has a directory (app bootstrap).
@@ -35,7 +54,10 @@ class InkAnnotationStore {
   Future<void> _writes = Future<void>.value();
 
   Future<Box<dynamic>?> _box() async {
-    if (!hiveReady) return null;
+    if (!hiveReady) {
+      logTrace('box: hiveReady=false');
+      return null;
+    }
     try {
       final pending = _opening ??= EncryptedHive.openBox<dynamic>(
         _hive,
@@ -75,10 +97,9 @@ class InkAnnotationStore {
   /// 保存（同键整条覆写——一页的全部笔迹作为一条记录，编辑=重写）。
   Future<void> save(InkAnnotation annotation) => _serialize(
     (box) async {
+      logTrace('save: put ${annotation.key}');
       await box.put(annotation.key, annotation.toMap());
-      // 立即刷盘：force-stop（SIGKILL）没有盒关闭时机，减少半帧落盘被
-      // 下次打开当损坏处理的窗口。
-      await box.flush();
+      logTrace('save: put done len=${box.length}');
       await _evictBeyondMax(box);
       changes.value++;
     },
@@ -142,17 +163,34 @@ class InkAnnotationStore {
     return out;
   }, onUnavailable: const []);
 
-  /// 诊断页用：盒是否可开、条目数、首个键（不弹出任何数据细节）。
+  /// 诊断页用：盒是否可开、条目数 + 盒文件字节（force-stop 丢数据问题的
+  /// 文件级证据：重启前后对比文件大小即可判断「没写入」还是「被删重建」）。
   Future<String> debugStats() async {
-    if (!hiveReady) return 'hiveReady=false（LibraryStore.init 未跑）';
+    var filesInfo = '';
+    try {
+      final support = await getApplicationDocumentsDirectory();
+      final dir = Directory(support.path);
+      final names = <String>[];
+      await for (final entity in dir.list(followLinks: false)) {
+        final name = entity.path
+            .replaceAll(Platform.pathSeparator, '/')
+            .split('/')
+            .last;
+        if (name.startsWith('reader_ink_annotations')) {
+          names.add('$name=${entity is File ? entity.lengthSync() : 'dir'}');
+        }
+      }
+      filesInfo = names.isEmpty ? ' files=无' : ' ${names.join(' ')}';
+    } catch (_) {
+      filesInfo = ' files=扫描失败';
+    }
+    if (!hiveReady) return 'hiveReady=false$filesInfo';
     try {
       final box = await _box();
-      if (box == null) return 'box=null（打开失败，见 AppLog ink-store）';
-      final keys = box.keys.toList();
-      return 'box=ok entries=${box.length}'
-          '${keys.isEmpty ? '' : ' first=${keys.first.toString().substring(0, keys.first.toString().length.clamp(0, 48))}'}';
+      if (box == null) return 'box=null$filesInfo';
+      return 'box=ok entries=${box.length}$filesInfo';
     } catch (e) {
-      return 'open threw: $e';
+      return 'open threw: $e $filesInfo';
     }
   }
 
@@ -167,6 +205,8 @@ class InkAnnotationStore {
   Future<void> delete(String key) => _serialize(
     (box) async {
       await box.delete(key);
+      // 与 save 对称：SIGKILL 后「整页擦除」不得从写缓冲复活。
+      await box.flush();
       changes.value++;
     },
     onUnavailable: null,
@@ -178,10 +218,12 @@ class InkAnnotationStore {
     String oldKey,
     InkAnnotation updated,
   ) => _serialize((box) async {
+    // 先写新键再删旧键：中途被杀残留「新旧并存」可被下次同键写覆盖，
+    // 反过来（先删后写）会整条丢失——手写内容不可再生。
+    await box.put(updated.key, updated.toMap());
     if (oldKey != updated.key) {
       await box.delete(oldKey);
     }
-    await box.put(updated.key, updated.toMap());
     changes.value++;
   }, onUnavailable: null, failWhenUnavailable: true);
 
@@ -212,8 +254,12 @@ class InkAnnotationStore {
     if (box.length <= maxEntries) return;
     final oldest = box.keys.toList()
       ..sort((a, b) {
-        final left = InkAnnotation.fromMap(box.get(a))?.createdAt ?? 0;
-        final right = InkAnnotation.fromMap(box.get(b))?.createdAt ?? 0;
+        // 编辑会刷新 updatedAt：淘汰按「最近一次活跃」算，否则满容量时
+        // 编辑最老的一条会把它自己挤出去。
+        final leftEntry = InkAnnotation.fromMap(box.get(a));
+        final rightEntry = InkAnnotation.fromMap(box.get(b));
+        final left = leftEntry?.updatedAt ?? leftEntry?.createdAt ?? 0;
+        final right = rightEntry?.updatedAt ?? rightEntry?.createdAt ?? 0;
         return left.compareTo(right);
       });
     await box.deleteAll(oldest.take(box.length - maxEntries));

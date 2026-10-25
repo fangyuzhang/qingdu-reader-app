@@ -534,7 +534,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   InkController? _ink;
   String _inkVersion = '';
   Size _inkViewport = Size.zero;
-  Timer? _inkDebounce;
 
   /// 本章全部墨迹（只读态：锚点区间以虚线并入正文标记层）。
   List<InkAnnotation> _chapterInk = const [];
@@ -1765,7 +1764,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _exitInkMode({bool silent = false}) async {
-    _inkDebounce?.cancel();
     await _saveInk();
     if (!mounted) return;
     // 先把画布/工具栏从树上摘除，下一帧再 dispose 控制器——画布 painter
@@ -1777,11 +1775,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await _loadChapterInk();
   }
 
+  /// 每笔抬手立即落盘（同 pdf 页；见该处注释）。
   void _scheduleInkSave() {
-    _inkDebounce?.cancel();
-    _inkDebounce = Timer(const Duration(milliseconds: 600), () {
-      unawaited(_saveInk());
-    });
+    unawaited(_saveInk());
   }
 
   Future<void> _saveInk() async {
@@ -2102,9 +2098,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     unawaited(_persistProgress());
     _eyeCareTimer?.cancel();
     // 批注模式中直接返回退出也要落盘（控制器此刻仍存活，异步链自行完成）。
-    _inkDebounce?.cancel();
     if (_ink != null) unawaited(_saveInk());
     unawaited(ReadingStatsStore.instance.flush());
+    _ink?.dispose();
     _annotationStore.changes.removeListener(_annotationListener);
     // 离开阅读页必须把系统栏还给其他页面，避免沉浸模式泄漏出去。
     _appliedSystemUiMode = SystemUiMode.edgeToEdge;
@@ -2150,6 +2146,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final generation = ++_loadGeneration;
     final chapter = _chapter;
     _saveTimer?.cancel();
+    // 批注模式跨章：先落盘旧章墨迹（此刻旧章排版还在，锚点可算）——
+    // 拖到 _loadChapterInk 里再退出就太晚，_chapterLayout 已被清空，
+    // _saveInk 会因无 layout 直接 return，最后一笔静默丢失。
+    if (_ink != null) {
+      await _saveInk();
+      final controller = _ink;
+      _ink = null;
+      controller?.dispose();
+    }
     setState(() {
       _loading = true;
       _progressReady = false;

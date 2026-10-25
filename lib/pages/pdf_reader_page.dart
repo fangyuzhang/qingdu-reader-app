@@ -55,7 +55,6 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
   // ── 批注模式（第 5 组）───────────────────────────────────────────────
   InkController? _ink;
   int _inkPage = 0;
-  Timer? _inkDebounce;
   Size _contentSize = Size.zero;
 
   /// 非批注态的整页墨迹（只读展示）。
@@ -147,7 +146,8 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
       // 批注模式下手指翻页：先落盘当前页墨迹，再载入新页墨迹。
       unawaited(
         _saveInk().then((_) {
-          if (mounted) _ensureInk(newPage);
+          // 期间可能已退出批注模式：守卫，不得自发重进。
+          if (mounted && _ink != null) _ensureInk(newPage);
         }),
       );
     }
@@ -171,7 +171,6 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
             .catchError((_) {}),
       );
     }
-    _inkDebounce?.cancel();
     // 从批注模式直接返回退出（手势/返回键）也要落盘：dispose 没有等待
     // 时机，尽力触发（控制器此刻仍存活，异步链自行完成）。
     if (_ink != null) unawaited(_saveInk());
@@ -213,6 +212,7 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
   }
 
   void _enterAnnotate() {
+    InkAnnotationStore.logTrace('pdf enterAnnotate');
     _ensureInk(_page);
     setState(() => _barsVisible = false);
   }
@@ -239,8 +239,9 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
   }
 
   Future<void> _exitAnnotate() async {
-    _inkDebounce?.cancel();
+    InkAnnotationStore.logTrace('pdf exitAnnotate begin');
     await _saveInk();
+    InkAnnotationStore.logTrace('pdf exitAnnotate save done');
     if (!mounted) return;
     final controller = _ink;
     _ink = null;
@@ -249,15 +250,20 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
     await _loadPageStrokes(_page);
   }
 
+  /// 每笔抬手立即落盘（Legado/Saber 同款节奏）：不设防抖——防抖窗口
+  /// 内 force-stop 会丢最后一笔，而单条墨迹只有几 KB，串行写队列足以
+  /// 合流高频写入。
   void _scheduleInkSave() {
-    _inkDebounce?.cancel();
-    _inkDebounce = Timer(const Duration(milliseconds: 600), () {
-      unawaited(_saveInk());
-    });
+    unawaited(_saveInk());
   }
 
   Future<void> _saveInk() async {
     final controller = _ink;
+    InkAnnotationStore.logTrace(
+      'pdf saveInk: ctrl=${controller != null} page=$_inkPage '
+      'size=${_contentSize == Size.zero ? 'zero' : 'ok'} '
+      'strokes=${controller?.strokes.length ?? 0}',
+    );
     if (controller == null || _inkPage == 0 || _contentSize == Size.zero) {
       return;
     }
@@ -276,8 +282,8 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
     ))
         .where((a) => a.key == key)
         .firstOrNull;
-    final anchor = await _computeAnchor(controller.strokes, _inkPage);
     try {
+      final anchor = await _computeAnchor(controller.strokes, _inkPage);
       await InkAnnotationStore.instance.save(
         InkAnnotation(
           bookId: widget.bookId,
@@ -297,8 +303,9 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
           anchorBox: anchor.$5,
         ),
       );
-    } catch (_) {
-      // 存储不可用不阻断书写；下次编辑仍会整条覆写重试。
+      InkAnnotationStore.logTrace('pdf saveInk: save awaited');
+    } catch (e) {
+      InkAnnotationStore.logTrace('pdf saveInk: FAILED $e');
     }
   }
 
