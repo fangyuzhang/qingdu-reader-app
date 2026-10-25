@@ -7,7 +7,6 @@ import 'package:fqapp/models/reader_ink_block.dart';
 import 'package:fqapp/pages/reader_page.dart';
 import 'package:fqapp/services/reader_device.dart';
 import 'package:fqapp/widgets/reader/annotation/embedded_ink_block_view.dart';
-import 'package:fqapp/widgets/reader/reader_paragraph_menu.dart';
 
 import 'support/fakes.dart';
 
@@ -53,21 +52,14 @@ void main() {
   );
 
   /// 选区菜单 8 项超窄屏宽 → 内容条可横向滚动；把目标按钮拖进可视区。
+  /// 选区菜单两级化：溢出行（书摘/画布/便签/备注）先点「更多」展开。
   Future<void> revealMenuAction(WidgetTester tester, Key key) async {
-    final screen = tester.getSize(find.byType(MaterialApp)).width;
-    final barScrollable = find
-        .descendant(
-          of: find.byType(ReaderParagraphMenu),
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    for (var round = 0; round < 5; round++) {
-      final center = tester.getCenter(find.byKey(key));
-      if (center.dx < screen - 44) return;
-      await tester.drag(barScrollable, const Offset(-200, 0));
-      await settleFrames(tester);
-    }
-    fail('菜单按钮始终没有滚进可视区: $key');
+    if (find.byKey(key).evaluate().isNotEmpty) return;
+    final more = find.byKey(const ValueKey('reader-action-more'));
+    expect(more, findsOneWidget);
+    await tester.tap(more);
+    await settleFrames(tester);
+    expect(find.byKey(key), findsOneWidget);
   }
 
   Future<void> openSelectionMenu(WidgetTester tester) async {
@@ -89,6 +81,9 @@ void main() {
     await settleFrames(tester);
 
     await openSelectionMenu(tester);
+    expect(find.byKey(const ValueKey('reader-action-copy')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reader-action-more')), findsOneWidget);
+    await revealMenuAction(tester, const ValueKey('reader-action-canvas'));
     expect(find.byKey(const ValueKey('reader-action-canvas')), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-action-sticky')), findsOneWidget);
     expect(find.byKey(const ValueKey('reader-action-note')), findsOneWidget);
@@ -148,6 +143,70 @@ void main() {
     );
     await settleFrames(tester);
     expect(inkStore.blocks, isEmpty);
+  });
+
+  testWidgets('草稿书写越界自动向下扩高（C1 验收 d）', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 760));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final inkStore = MemoryInkBlockStore();
+    await tester.pumpWidget(app(inkStore));
+    await settleFrames(tester);
+
+    await openSelectionMenu(tester);
+    await revealMenuAction(tester, const ValueKey('reader-action-canvas'));
+    await tester.tap(find.byKey(const ValueKey('reader-action-canvas')));
+    await settleFrames(tester);
+    final canvasFinder = find.byType(EmbeddedInkCanvas);
+    expect(canvasFinder, findsOneWidget);
+    final before = tester.getSize(canvasFinder).height;
+
+    // 在草稿底部起笔向下划到底外：内容超出 88% → 自动扩高。
+    final center = tester.getCenter(canvasFinder);
+    final gesture = await tester.startGesture(
+      center.translate(0, before / 2 - 8),
+    );
+    for (var i = 1; i <= 14; i++) {
+      await gesture.moveBy(const Offset(2, 9));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await settleFrames(tester);
+    final after = tester.getSize(canvasFinder).height;
+    expect(after, greaterThan(before));
+    // 草稿仍在（未确认），确认后定型。
+    expect(find.byKey(const ValueKey('ink-block-confirm')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ink-block-confirm')));
+    await settleFrames(tester);
+    expect(inkStore.blocks.values.single.height, closeTo(after - 8, 8));
+  });
+
+  testWidgets('画布拖底边手柄改高：实时预览 + 松手落盘（C2 验收）', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 760));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final inkStore = MemoryInkBlockStore();
+    await tester.pumpWidget(app(inkStore));
+    await settleFrames(tester);
+
+    await openSelectionMenu(tester);
+    await revealMenuAction(tester, const ValueKey('reader-action-canvas'));
+    await tester.tap(find.byKey(const ValueKey('reader-action-canvas')));
+    await settleFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('ink-block-confirm')));
+    await settleFrames(tester);
+    final before = inkStore.blocks.values.single.height;
+
+    // 轻点画布进入选中态 → 拖底边手柄向下 60dp → 松手落盘。
+    await tester.tap(find.byType(EmbeddedInkCanvas).first);
+    await settleFrames(tester);
+    final handle = find.byKey(const ValueKey('ink-block-resize-handle'));
+    expect(handle, findsOneWidget);
+    // tester.drag 首段位移被触摸 slop（18dp）吃掉：拖 80 → 实际约 +62。
+    await tester.drag(handle, const Offset(0, 80));
+    await settleFrames(tester);
+    expect(
+      inkStore.blocks.values.single.height,
+      inExclusiveRange(before + 30, before + 62 + 12),
+    );
   });
 
   testWidgets('便签工具：点按正文放置折叠图标，点图标开书写面板并自动保存', (tester) async {

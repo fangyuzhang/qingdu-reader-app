@@ -47,13 +47,18 @@ enum ReaderParagraphAction {
 ///
 /// Note: 官方长按工具的版式与颜色取自反编译 m.java / wt.xml / wr.xml，见
 /// .agents/notes/implemented/feature/2026-09-18-reader-paragraph-actions.md
-class ReaderParagraphMenu extends StatelessWidget {
+class ReaderParagraphMenu extends StatefulWidget {
   /// See `res/layout/wt.xml`.
   static const _itemWidth = 60.0;
 
   /// 「从本段开始听书」比其它标签长，单独加宽；整条操作栏的宽度与
   /// [resolvePosition] 都按同一组宽度计算，避免文字压到相邻按钮。
   static const _listenItemWidth = 84.0;
+
+  /// 【青茄·Active Canvas】溢出按钮（⋯）宽度：新增动作收进第二行，
+  /// 主行恒定 5 项以内——单行 8 项需横向滚动，滚动手势与翻页手势
+  /// 在真机上竞争不可靠（拖动即丢选区，2026-10-26 核验发现）。
+  static const _moreItemWidth = 48.0;
   static const _itemHeight = 48.0;
   static const _iconSize = 24.0;
   static const _labelTopGap = 2.0;
@@ -111,7 +116,6 @@ class ReaderParagraphMenu extends StatelessWidget {
     this.belowAnchor = true,
   });
 
-  Color get _background => isDark ? _barColorDark : _barColor;
 
   /// Number of items the bar will render; the caller sizes the anchor with it.
   static int itemCount({
@@ -119,8 +123,9 @@ class ReaderParagraphMenu extends StatelessWidget {
     required bool paragraphScoped,
     bool showListening = true,
   }) {
-    // 【青茄重构】监听项只要 showListening 就显示（不再区分整段 / 选区），
-    // 另有 复制 / 划线 / 批注 / 书摘 四个常驻动作。
+    // 【青茄重构】监听项只要 showListening 就显示（不再区分整段 / 选区）。
+    // 【青茄·Active Canvas】主行 = 听书? + 复制 + 划线 + 批注 + ⋯（溢出）；
+    // 书摘/画布/便签/备注收进 ⋯ 展开的第二行。
     return 4 + (showListening ? 1 : 0);
   }
 
@@ -132,6 +137,7 @@ class ReaderParagraphMenu extends StatelessWidget {
           ) *
           _itemWidth +
       (showListening ? _listenItemWidth - _itemWidth : 0) +
+      _moreItemWidth +
       _multiPadding * 2;
 
   static double barWidthFor({
@@ -207,6 +213,24 @@ class ReaderParagraphMenu extends StatelessWidget {
   }
 
   @override
+  @override
+  State<ReaderParagraphMenu> createState() => _ReaderParagraphMenuState();
+}
+
+class _ReaderParagraphMenuState extends State<ReaderParagraphMenu> {
+  /// 溢出行展开态（书摘/画布/便签/备注）。
+  bool _more = false;
+
+  bool get showListening => widget.showListening;
+  bool get underlined => widget.underlined;
+  bool get paragraphScoped => widget.paragraphScoped;
+  ValueChanged<ReaderParagraphAction> get onAction => widget.onAction;
+  bool get belowAnchor => widget.belowAnchor;
+  Color get _barBackground => widget.isDark
+      ? ReaderParagraphMenu._barColorDark
+      : ReaderParagraphMenu._barColor;
+
+  @override
   Widget build(BuildContext context) {
     final items = Row(
       mainAxisSize: MainAxisSize.min,
@@ -216,7 +240,7 @@ class ReaderParagraphMenu extends StatelessWidget {
             key: const ValueKey('reader-action-listen'),
             icon: LucideIcons.headphones,
             label: '从本段开始听书',
-            width: _listenItemWidth,
+            width: ReaderParagraphMenu._listenItemWidth,
             onTap: () => onAction(ReaderParagraphAction.listen),
           ),
         _Item(
@@ -242,6 +266,19 @@ class ReaderParagraphMenu extends StatelessWidget {
           label: '批注',
           onTap: () => onAction(ReaderParagraphAction.annot),
         ),
+        // 【青茄·Active Canvas】溢出按钮：展开 书摘/画布/便签/备注 第二行。
+        _Item(
+          key: const ValueKey('reader-action-more'),
+          icon: _more ? LucideIcons.chevron_up : LucideIcons.chevron_down,
+          label: '更多',
+          width: ReaderParagraphMenu._moreItemWidth,
+          onTap: () => setState(() => _more = !_more),
+        ),
+      ],
+    );
+    final overflowRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
         // 【青茄重构·新增】书摘：收藏选中句子（无想法）。
         _Item(
           key: const ValueKey('reader-action-excerpt'),
@@ -282,29 +319,39 @@ class ReaderParagraphMenu extends StatelessWidget {
           // downArrow once it flips above; the other arrow is gone, so it takes
           // no space and the painted tip always touches the paragraph.
           if (belowAnchor)
-            _Arrow(pointingUp: true, color: _background)
+            _Arrow(pointingUp: true, color: _barBackground)
           else
             const SizedBox.shrink(),
           Container(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.sizeOf(context).width - _margin * 2,
+              maxWidth: MediaQuery.sizeOf(context).width - ReaderParagraphMenu._margin * 2,
             ),
-            height: _itemHeight + _verticalPadding * 2,
+            height: ReaderParagraphMenu._itemHeight + ReaderParagraphMenu._verticalPadding * 2,
             padding: const EdgeInsets.symmetric(
-              horizontal: _multiPadding,
-              vertical: _verticalPadding,
+              horizontal: ReaderParagraphMenu._multiPadding,
+              vertical: ReaderParagraphMenu._verticalPadding,
             ),
             decoration: BoxDecoration(
-              color: _background,
-              borderRadius: BorderRadius.circular(_radius),
+              color: _barBackground,
+              borderRadius: BorderRadius.circular(ReaderParagraphMenu._radius),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: items,
-            ),
+            child: items,
           ),
+          if (_more)
+            Container(
+              margin: const EdgeInsets.only(top: 2),
+              padding: const EdgeInsets.symmetric(
+                horizontal: ReaderParagraphMenu._multiPadding,
+                vertical: ReaderParagraphMenu._verticalPadding,
+              ),
+              decoration: BoxDecoration(
+                color: _barBackground,
+                borderRadius: BorderRadius.circular(ReaderParagraphMenu._radius),
+              ),
+              child: overflowRow,
+            ),
           if (!belowAnchor)
-            _Arrow(pointingUp: false, color: _background)
+            _Arrow(pointingUp: false, color: _barBackground)
           else
             const SizedBox.shrink(),
         ],

@@ -324,11 +324,12 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
         ],
       ),
     ),
-    // 底边中央高度手柄：拖动改高（父级实时重排预览）。
+    // 底边中央高度手柄：拖动改高（父级实时重排预览）。必须落在画布盒
+    // 内侧——父级 SizedBox 不含盒外点，盒外手柄命中不到（核验时发现）。
     Positioned(
       left: 0,
       right: 0,
-      bottom: -10,
+      bottom: 2,
       child: Center(
         child: GestureDetector(
           key: const ValueKey('ink-block-resize-handle'),
