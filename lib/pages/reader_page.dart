@@ -29,6 +29,8 @@ import '../services/reader_tap_zones.dart';
 import '../services/app_log.dart';
 import '../services/ink_annotation_store.dart';
 import '../services/reader_annotation_store.dart';
+import '../services/notes_pdf_exporter.dart';
+import '../services/share_service.dart';
 import '../services/reader_ink_block_store.dart';
 import '../services/reading_stats_store.dart';
 import '../services/reader_underline_store.dart';
@@ -2095,6 +2097,68 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       unawaited(_confirmDeleteInkBlock(note));
   void _openInkBlockTearoff(ReaderInlineNote note) =>
       unawaited(_openInkBlock(note));
+
+  /// 【青茄·笔记 PDF 分享】规格 C9 v2：整本 / 当前章节 → PDF → 系统分享。
+  Future<void> _shareBookNotes() async {
+    if (_controlsVisible) _toggleControls();
+    final scope = await showAppDialog<NotesPdfScope>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('分享本书笔记'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: const ValueKey('share-notes-book'),
+              leading: const Icon(Icons.menu_book_outlined),
+              title: const Text('整本笔记'),
+              onTap: () => Navigator.of(dialogContext).pop(NotesPdfScope.book),
+            ),
+            ListTile(
+              key: const ValueKey('share-notes-chapter'),
+              leading: const Icon(Icons.article_outlined),
+              title: Text('当前章节（${_chapter.title}）'),
+              onTap: () =>
+                  Navigator.of(dialogContext).pop(NotesPdfScope.chapter),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (scope == null || !mounted) return;
+    _showMessage('正在生成笔记 PDF…');
+    try {
+      final path = await NotesPdfExporter.export(
+        bookId: widget.bookId,
+        bookTitle: widget.title,
+        scope: scope,
+        chapterId: scope == NotesPdfScope.chapter ? _chapter.itemId : null,
+        documentTitle: '${widget.title} 读书笔记',
+      );
+      if (!mounted) return;
+      final outcome = await SharePlusLite.shareFile(
+        path: path,
+        mime: 'application/pdf',
+        title: '${widget.title} 读书笔记',
+      );
+      if (!mounted) return;
+      if (outcome != ShareLaunchOutcome.launched) {
+        _showMessage('未找到可分享的应用，PDF 已生成');
+      }
+    } on StateError {
+      if (!mounted) return;
+      _showMessage('该范围内没有笔记');
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('生成失败，请重试');
+    }
+  }
 
   /// 创建打字备注（选区菜单「备注」）：同位置已有备注则直接进编辑。
   Future<void> _createNoteFromSelection() async {
@@ -5378,6 +5442,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       onInk: _paged && _chapterLayout != null ? _enterInkMode : null,
       onInkList: _chapterInk.isNotEmpty ? _showInkList : null,
       onSticky: _armSticky,
+      onShareNotes: _shareBookNotes,
     );
   }
 

@@ -35,6 +35,61 @@ class NoteCardExporter {
     String documentTitle = '我的书摘',
     String? bookTitle,
   }) async {
+    final image = await renderImage(
+      notes: notes,
+      documentTitle: documentTitle,
+      bookTitle: bookTitle,
+    );
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (bytes == null) {
+      throw StateError('图片编码失败');
+    }
+    final now = DateTime.now();
+    final stamp = now.millisecondsSinceEpoch;
+    final png = Uint8List.view(bytes.buffer);
+    // 优先直接写进系统「下载」目录（Android 10+ 免权限，市场惯例：
+    // 导出物用户随手可在文件管理器找到）。通道不可用（桌面/测试宿主）
+    // 或写入失败时，诚实降级到应用文档目录并回报 public=false。
+    try {
+      final result = await const MethodChannel(
+        'fqapp/downloads',
+      ).invokeMapMethod<String, Object?>('saveImage', {
+        'fileName': 'qingqie_notes_$stamp.png',
+        'bytes': png,
+        // 某些 ROM（MIUI 实测）会清理缺宽高的图片条目：元数据带上。
+        'width': _width.toInt(),
+        'height': image.height,
+      });
+      final path = result?['path'];
+      if (path is String && path.isNotEmpty) {
+        return (path: path, public: result?['public'] == true);
+      }
+    } on PlatformException {
+      // 落到下面的私有目录降级。
+    } on MissingPluginException {
+      // 桌面/测试宿主无插件：降级。
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final outDir = Directory('${dir.path}/qingqie/exports');
+    if (!await outDir.exists()) {
+      await outDir.create(recursive: true);
+    }
+    final file = File('${outDir.path}/notes_$stamp.png');
+    await file.writeAsBytes(png, flush: true);
+    return (path: file.path, public: false);
+  }
+
+  /// 渲染长图并返回 [ui.Image]（调用方负责 dispose）。
+  ///
+  /// 抽成公有入口供 PDF 导出复用：PDF 走「图片页」方案——中文渲染由
+  /// 本管线完成（Flutter 文本排版），PDF 只承载切片后的位图页，无需
+  /// 打包 CJK 字体。
+  static Future<ui.Image> renderImage({
+    required List<ReaderAnnotation> notes,
+    String documentTitle = '我的书摘',
+    String? bookTitle,
+  }) async {
     final contentWidth = _width - _padding * 2;
     final now = DateTime.now();
     final dateText =
@@ -173,48 +228,10 @@ class NoteCardExporter {
       Offset((_width - footer.width) / 2, height - _padding - footer.height),
     );
 
-    final image = await recorder.endRecording().toImage(
+    return recorder.endRecording().toImage(
       _width.toInt(),
       height.ceil(),
     );
-    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    image.dispose();
-    if (bytes == null) {
-      throw StateError('图片编码失败');
-    }
-
-    final stamp = now.millisecondsSinceEpoch;
-    final png = Uint8List.view(bytes.buffer);
-    // 优先直接写进系统「下载」目录（Android 10+ 免权限，市场惯例：
-    // 导出物用户随手可在文件管理器找到）。通道不可用（桌面/测试宿主）
-    // 或写入失败时，诚实降级到应用文档目录并回报 public=false。
-    try {
-      final result = await const MethodChannel(
-        'fqapp/downloads',
-      ).invokeMapMethod<String, Object?>('saveImage', {
-        'fileName': 'qingqie_notes_$stamp.png',
-        'bytes': png,
-        // 某些 ROM（MIUI 实测）会清理缺宽高的图片条目：元数据带上。
-        'width': _width.toInt(),
-        'height': height.ceil(),
-      });
-      final path = result?['path'];
-      if (path is String && path.isNotEmpty) {
-        return (path: path, public: result?['public'] == true);
-      }
-    } on PlatformException {
-      // 落到下面的私有目录降级。
-    } on MissingPluginException {
-      // 桌面/测试宿主无插件：降级。
-    }
-    final dir = await getApplicationDocumentsDirectory();
-    final outDir = Directory('${dir.path}/qingqie/exports');
-    if (!await outDir.exists()) {
-      await outDir.create(recursive: true);
-    }
-    final file = File('${outDir.path}/notes_$stamp.png');
-    await file.writeAsBytes(png, flush: true);
-    return (path: file.path, public: false);
   }
 
   static ui.Paragraph _paragraph(

@@ -1467,3 +1467,20 @@ flutter test             # 1954 passed / 10 skipped
 - **Pencil Engine 坐标终审（阶段三第一优先闭环）**：WSL 网络栈可通华为 Maven 仓库（com.huawei.hms:base metadata 200），但 Pencil Engine **不在 Maven 发布**——5 组候选坐标（com/huawei/stylus[/penengine]、com/huawei/hms/penengine|stylus、com/huawei/penengine）全部 404，行业惯例（小米澎湃 PenEngine-release.aar flatDir、华为需开发者后台申请）为**申请后 AAR 放 libs**。结论固化：AAR 获取依赖人工申请，接入步骤见 PENCIL-ENGINE-INTEGRATION.md §4（网络/申请到位后照做，运行时探测失败静默降级自研）。
 - **M-Pencil 双击 = 切换笔/橡皮（无需任何 SDK，本轮交付）**：检索确认 M-Pencil 双击以**非标键码 718** 送达 APK（Krita 官方论坛 MatePad+M-Pencil 3 实测）。接入现有按键拦截桥：MainActivity 同通道新增 setStylusDoubleTapEnabled + dispatchKeyEvent 拦截 718（ACTION_DOWN 首按）→ Dart 回调；阅读页进入手写墨迹模式注册回调（笔↔橡皮 + 提示条），退出/注销/dispose 兜底关闭；未启用时 718 放行（无系统语义，零副作用）。MatePad 真机：双击即切工具。
 - 验证：analyze 0；全量 **1598/10/0**；真机安装冷启动正常 + 718 键码通道冒烟（未启用态放行无崩溃）。归档 fqapp-v79.apk。
+
+---
+
+# 八十、「还可以做的优化」全量推进轮（用户指令：都做）
+
+## 已交付
+- **笔记 PDF 导出（规格 C9 v2）**：notes_pdf_exporter——图片页方案（中文排版复用长图 Flutter 管线，零 CJK 字体打包；image 包 copyCrop 按 A4 内容区比例切页）；NoteCardExporter.renderImage 抽成公有入口供两管线复用；新增 pub 依赖 pdf ^3.13.1（纯 Dart，+0.4MB）。范围：整本/当前章节。3 用例（结构 %PDF/%%EOF、章节范围、空范围 StateError）。
+- **阅读界面「分享笔记」入口**（C9 v2）：工具面板新增按钮 → 整本/当前章节弹层 → NotesPdfExporter → SharePlusLite.shareFile → 系统分享面板（邮件可选）。SharePlugin 新增 shareFile（FileProvider 转 content URI，Android 7+ 禁 file://）+ manifest provider（仅 cache 分区）+ res/xml/file_paths.xml。
+- **无障碍（配额受限缩围）**：Agent A 因配额失败改自查——tag_trash compact 形态（DragTarget+Icon 对读屏不可见）补 Semantics(button+label+hint)；墨迹工具栏/菜单项本就有 tooltip/文字标签，主路径其余控件核查无缺口。
+- **包体积审计（Agent B 实测报告）**：43.7MB 构成——libflutter 11.75 / libapp 12.19 / dex 6.84(压缩) / Rust 6.44 / libpdfium 4.98 / pdfium.wasm 1.98(压缩)。无风险可减 = pdfium.wasm（仅 Web 用）——**已试 gradle resources.excludes 无效**（它走 flutter_assets 而非 Android resources，需 Flutter 资产任务钩子，低 ROI 暂缓，结论记入报告）；低风险项（R8 重启 + 混淆 + Rust z）需专门回归轮，暂缓。assets 零未引用项。
+
+## 尝试后回退
+- pdfrx wasm 的 gradle packaging.excludes：对 flutter_assets 无效（实测 APK 仍含），已回退；keepDebugSymbols 误加导致 195MB 事故已即时回退。
+- M-Pencil 双击/倾斜/预测笔尖均维持 78/79 批实现。
+
+## 验证
+- analyze 0；全量 **1601/10/0**（+3 PDF 用例）；真机安装（设备中途 PIN 锁屏，分享面板人工复核留待用户）。归档 fqapp-v80.apk。

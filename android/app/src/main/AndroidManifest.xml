@@ -55,6 +55,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 【青茄·笔记 PDF 分享】缓存文件经 FileProvider 转 content URI
+             （Android 7+ 禁 file://）；只暴露 cache 分区，权限最小化。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

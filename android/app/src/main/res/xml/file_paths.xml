@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 笔记 PDF 分享：只开放缓存目录（分享产物是临时文件，系统可清理）。 -->
+<paths>
+    <cache-path name="share" path="." />
+</paths>

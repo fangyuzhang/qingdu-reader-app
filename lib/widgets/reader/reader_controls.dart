@@ -42,6 +42,9 @@ class ReaderControls extends StatefulWidget {
 
   /// 【青茄·Active Canvas】便签放置工具（null = 不显示）。
   final VoidCallback? onSticky;
+
+  /// 【青茄·笔记 PDF 分享】阅读界面分享本书笔记（null = 不显示）。
+  final VoidCallback? onShareNotes;
   final VoidCallback onAutoTurn;
 
   const ReaderControls({
@@ -72,6 +75,7 @@ class ReaderControls extends StatefulWidget {
     this.onInk,
     this.onInkList,
         this.onSticky,
+        this.onShareNotes,
   });
 
   @override
@@ -162,6 +166,15 @@ class _ReaderControlsState extends State<ReaderControls> {
                             icon: LucideIcons.file_pen,
                             label: '便签',
                             onTap: () => widget.onSticky!(),
+                          ),
+                        // 【青茄·笔记 PDF 分享】规格 C9 v2：阅读界面分享本书
+                        // 笔记（整本/当前章节 → PDF → 系统分享面板）。
+                        if (widget.onShareNotes != null)
+                          _Action(
+                            key: const ValueKey('reader-share-notes'),
+                            icon: LucideIcons.share_2,
+                            label: '分享笔记',
+                            onTap: () => widget.onShareNotes!(),
                           ),
                         _Action(
                           key: const ValueKey('reader-settings'),
