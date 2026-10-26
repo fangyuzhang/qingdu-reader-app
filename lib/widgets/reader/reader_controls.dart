@@ -45,6 +45,9 @@ class ReaderControls extends StatefulWidget {
 
   /// 【青茄·笔记 PDF 分享】阅读界面分享本书笔记（null = 不显示）。
   final VoidCallback? onShareNotes;
+
+  /// 【青茄·侧栏笔记】右侧手写面板开关（null = 不显示）。
+  final VoidCallback? onSidePanel;
   final VoidCallback onAutoTurn;
 
   const ReaderControls({
@@ -76,6 +79,7 @@ class ReaderControls extends StatefulWidget {
     this.onInkList,
         this.onSticky,
         this.onShareNotes,
+        this.onSidePanel,
   });
 
   @override
@@ -175,6 +179,14 @@ class _ReaderControlsState extends State<ReaderControls> {
                             icon: LucideIcons.share_2,
                             label: '分享笔记',
                             onTap: () => widget.onShareNotes!(),
+                          ),
+                        // 【青茄·侧栏笔记】右侧手写面板开关。
+                        if (widget.onSidePanel != null)
+                          _Action(
+                            key: const ValueKey('reader-side-panel-toggle'),
+                            icon: LucideIcons.panel_right,
+                            label: '边栏',
+                            onTap: () => widget.onSidePanel!(),
                           ),
                         _Action(
                           key: const ValueKey('reader-settings'),

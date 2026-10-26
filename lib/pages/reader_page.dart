@@ -546,6 +546,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 草稿画布（未确认不落库；排版层以 [_kDraftInkId] 占位参与重排）。
   _DraftInkBlock? _draftInkBlock;
 
+  // ---- 【青茄·侧栏笔记】Scribe 式右侧手写面板（参考图 1/2）----
+  // 面板打开时正文列变窄并重排；面板内手写独立存储（layoutVersion
+  // 'panel-v1'，与整页墨迹互不干扰）。仅分页模式提供入口。
+  static const _panelLayoutVersion = 'panel-v1';
+  static const _panelMinWidth = 260.0;
+  static const _panelMaxWidth = 460.0;
+  bool _sidePanelOpen = false;
+  InkController? _panelInk;
+  Size _panelViewport = Size.zero;
+  Timer? _panelSaveTimer;
+
   /// 选中态的内嵌块 key（画布边框加亮 + 手柄/垃圾桶）。
   String? _selectedInkKey;
 
@@ -1793,6 +1804,139 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _toggleSidePanel() async {
+    if (_sidePanelOpen) {
+      await _closeSidePanel();
+      return;
+    }
+    final controller = InkController(onChanged: _schedulePanelSave);
+    _panelInk = controller;
+    setState(() => _sidePanelOpen = true);
+    // 面板头部与顶部工具栏同区域：打开即收起控制面板（工具栏随之隐藏），
+    // 否则 ✕/橡皮 被顶栏盖住点不到（核验测试抓到）。
+    if (_controlsVisible) _toggleControls();
+    unawaited(_loadPanelInk());
+  }
+
+  Future<void> _closeSidePanel() async {
+    _panelSaveTimer?.cancel();
+    final controller = _panelInk;
+    final viewport = _panelViewport;
+    // 【青茄·确认即响应】先收面板（UI 立即反馈），落盘异步进行——
+    // 与 _confirmInkDraft 同口径；失败只丢本次未保存的增量。
+    unawaited(_savePanelInkState(controller, viewport));
+    if (!mounted) return;
+    setState(() {
+      _sidePanelOpen = false;
+      _panelInk = null;
+      _panelViewport = Size.zero;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller?.dispose());
+  }
+
+  /// 用局部快照落盘（字段可能已被置空）。
+  Future<void> _savePanelInkState(
+    InkController? controller,
+    Size viewport,
+  ) async {
+    if (controller == null || viewport.isEmpty) return;
+    final chapterId = _chapter.itemId;
+    final key = InkAnnotation.keyFor(
+      bookId: widget.bookId,
+      chapterId: chapterId,
+      layoutVersion: _panelLayoutVersion,
+    );
+    try {
+      if (controller.strokes.isEmpty) {
+        await _inkStore.delete(key);
+        return;
+      }
+      final existing = (await _inkStore.loadByChapter(widget.bookId, chapterId))
+          .where((a) => a.key == key)
+          .firstOrNull;
+      await _inkStore.save(
+        InkAnnotation(
+          bookId: widget.bookId,
+          chapterId: chapterId,
+          format: InkAnnotation.kFormatFlow,
+          pageWidth: viewport.width,
+          pageHeight: viewport.height,
+          layoutVersion: _panelLayoutVersion,
+          strokes: controller.strokes,
+          createdAt:
+              existing?.createdAt ?? DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    } catch (_) {
+      // 存储不可用不阻断书写。
+    }
+  }
+
+  Future<void> _loadPanelInk() async {
+    final chapterId = _chapter.itemId;
+    try {
+      final list = await _inkStore.loadByChapter(widget.bookId, chapterId);
+      final strokes = [
+        for (final a in list.where((a) => a.layoutVersion == _panelLayoutVersion))
+          ...a.strokes,
+      ];
+      if (!mounted || _panelInk == null) return;
+      _panelInk!.seed(strokes);
+    } catch (_) {
+      // 存储不可用：面板仍可写，本次历史不显示。
+    }
+  }
+
+  void _schedulePanelSave() {
+    _panelSaveTimer?.cancel();
+    _panelSaveTimer = Timer(const Duration(milliseconds: 600), () {
+      unawaited(_savePanelInk());
+    });
+  }
+
+  /// 面板墨迹：整章一条记录（layoutVersion 'panel-v1'，锚定章首、
+  /// 无文本区间——不出现在划线投影/整页墨迹里，互不干扰）。
+  Future<void> _savePanelInk() async {
+    final controller = _panelInk;
+    if (controller == null || _panelViewport.isEmpty) return;
+    final chapterId = _chapter.itemId;
+    final key = InkAnnotation.keyFor(
+      bookId: widget.bookId,
+      chapterId: chapterId,
+      layoutVersion: _panelLayoutVersion,
+    );
+    try {
+      if (controller.strokes.isEmpty) {
+        await _inkStore.delete(key);
+        return;
+      }
+      final existing = (await _inkStore.loadByChapter(widget.bookId, chapterId))
+          .where((a) => a.key == key)
+          .firstOrNull;
+      await _inkStore.save(
+        InkAnnotation(
+          bookId: widget.bookId,
+          chapterId: chapterId,
+          format: InkAnnotation.kFormatFlow,
+          pageWidth: _panelViewport.width,
+          pageHeight: _panelViewport.height,
+          layoutVersion: _panelLayoutVersion,
+          strokes: controller.strokes,
+          createdAt:
+              existing?.createdAt ?? DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    } catch (_) {
+      // 存储不可用不阻断书写。
+    }
+  }
+
+  /// 面板宽度：视口的 42%，260~460dp。
+  double _panelWidthOf(double viewportWidth) =>
+      (viewportWidth * 0.42).clamp(_panelMinWidth, _panelMaxWidth);
+
   /// 选区菜单「画布」：在选区起点行后生成草稿画布。
   void _beginInkDraft(int anchor) {
     _closeSelectionBar(clearSelection: true);
@@ -1834,10 +1978,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final draft = _draftInkBlock;
     if (draft == null) return;
     final boxWidth = _inkBlockBoxWidth;
+    // 【青茄·Scribe 对齐】确认时画布收缩至内容高度（参考图 3：框贴合
+    // 笔迹，一行字就是一条小框）。最低保底 80dp。
+    var contentBottom = 0.0;
+    for (final stroke in draft.strokes) {
+      for (final point in stroke.points) {
+        if (point.y > contentBottom) contentBottom = point.y;
+      }
+    }
+    final fitted = contentBottom <= 0
+        ? draft.height
+        : (contentBottom + 18).clamp(
+            ReaderInkBlock.minCanvasHeight,
+            ReaderInkBlock.maxCanvasHeight,
+          );
     final normalized = ReaderInkBlock.normalized(
       draft.strokes,
       boxWidth: boxWidth,
-      boxHeight: draft.height,
+      boxHeight: fitted,
     );
     final now = DateTime.now().millisecondsSinceEpoch;
     final block = ReaderInkBlock(
@@ -1846,7 +2004,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       anchor: draft.anchor,
       anchorContext: _anchorContext(draft.anchor),
       kind: draft.kind,
-      height: draft.height,
+      height: fitted,
       strokes: normalized,
       createdAt: now,
       updatedAt: now,
@@ -4929,7 +5087,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final layout = _prepareLayout(constraints);
+        // 【青茄·侧栏笔记】面板打开时正文列让出右侧宽度：把收窄后的
+        // 合成约束喂给排版（后续文字自然重排），面板作为右侧独立列。
+        final effective = _sidePanelOpen
+            ? BoxConstraints.tight(
+                Size(
+                  math.max(
+                    240.0,
+                    constraints.maxWidth -
+                        _panelWidthOf(constraints.maxWidth),
+                  ),
+                  constraints.maxHeight,
+                ),
+              )
+            : constraints;
+        final layout = _prepareLayout(effective);
         final scope = _marksScopeFor(preset, layout);
         return GestureDetector(
           key: const ValueKey('reader-page-surface'),
@@ -4973,7 +5145,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 // 【青茄·宽屏适配】Center+SizedBox 把正文盒钳到 spec 视口宽
                 // 居中（手机上与全宽一致，无感）；选区手柄/工具栏走
                 // localToGlobal 变换，居中偏移自动正确。
-                child: Center(
+                child: Align(
+                  alignment: _sidePanelOpen
+                      ? Alignment.centerLeft
+                      : Alignment.center,
                   child: SizedBox(
                     key: const ValueKey('reader-column-box'),
                     width: layout.spec.viewport.width,
@@ -5023,6 +5198,73 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+              // 【青茄·侧栏笔记】右侧手写面板（仅非墨迹模式显示；✕ 关闭，
+              // 橡皮切换；InkCanvas 仅 stylus——M-Pencil 目标设备）。
+              if (_sidePanelOpen && _panelInk != null)
+                Positioned(
+                  key: const ValueKey('reader-side-panel'),
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: _panelWidthOf(constraints.maxWidth),
+                  child: ColoredBox(
+                    color: preset.backgroundColor,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            10,
+                            8 + MediaQuery.paddingOf(context).top,
+                            10,
+                            4,
+                          ),
+                          child: Row(
+                            children: [
+                              Text(
+                                '边栏笔记',
+                                style: TextStyle(
+                                  inherit: false,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: preset.textColor.withValues(
+                                    alpha: 0.7,
+                                  ),
+                                ),
+                              ),
+                              const Spacer(),
+                              _PanelIconButton(
+                                key: const ValueKey('side-panel-eraser'),
+                                icon: LucideIcons.eraser,
+                                selected: _panelInk!.tool == InkTool.eraser,
+                                onTap: () => setState(
+                                  () => _panelInk!.selectTool(
+                                    _panelInk!.tool == InkTool.pen
+                                        ? InkTool.eraser
+                                        : InkTool.pen,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              _PanelIconButton(
+                                key: const ValueKey('side-panel-close'),
+                                icon: LucideIcons.x,
+                                onTap: () => unawaited(_closeSidePanel()),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, panelConstraints) {
+                              _panelViewport = panelConstraints.biggest;
+                              return InkCanvas(controller: _panelInk!);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ..._selectionHandles(scope),
               ?_selectionBar(preset, windowPadding),
             ],
@@ -5443,6 +5685,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       onInkList: _chapterInk.isNotEmpty ? _showInkList : null,
       onSticky: _armSticky,
       onShareNotes: _shareBookNotes,
+      // 侧栏是平板特性（Scribe 同款）：窄屏（<600dp）正文让位后不可读，
+      // 不提供入口。宽度在工具栏 build 上下文里取。
+      onSidePanel:
+          _paged &&
+              _chapterLayout != null &&
+              _ink == null &&
+              MediaQuery.sizeOf(context).width >= 600
+          ? _toggleSidePanel
+          : null,
     );
   }
 
@@ -5553,6 +5804,43 @@ class _DraftInkBlock {
   final String kind;
   double height;
   List<InkStroke> strokes = const [];
+}
+
+/// 侧栏面板的小圆钮（橡皮/关闭）。
+class _PanelIconButton extends StatelessWidget {
+  const _PanelIconButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0x332FA98C)
+              : const Color(0x14000000),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 15,
+          color: selected ? const Color(0xFF2FA98C) : const Color(0x993B362C),
+        ),
+      ),
+    );
+  }
 }
 
 ReaderInlineNote _inlineNoteOf(ReaderAnnotation note) {

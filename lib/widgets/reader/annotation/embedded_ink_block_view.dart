@@ -271,31 +271,72 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
     );
   }
 
-  List<Widget> _draftChrome() => [
-    Positioned(
-      right: 8,
-      bottom: 8,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _CanvasButton(
-            key: const ValueKey('ink-block-cancel'),
-            icon: LucideIcons.x,
-            label: '取消',
-            onTap: widget.onCancelDraft,
-          ),
-          const SizedBox(width: 6),
-          _CanvasButton(
-            key: const ValueKey('ink-block-confirm'),
-            icon: LucideIcons.check,
-            label: '确认',
-            filled: true,
-            onTap: widget.onConfirmDraft,
-          ),
-        ],
+  /// 【青茄·Scribe 对齐】草稿确认/取消按钮浮在最近笔迹末端（写哪确认
+  /// 哪），随每一笔实时移动；尚未书写时落在画布右下角。
+  List<Widget> _draftChrome() {
+    return [
+      Positioned.fill(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _repaint,
+          builder: (context, _, _) {
+            final (dx, dy) = _draftChromeOffset();
+            return Stack(
+              children: [
+                Positioned(
+                  left: dx,
+                  top: dy,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _CanvasButton(
+                        key: const ValueKey('ink-block-cancel'),
+                        icon: LucideIcons.x,
+                        label: '取消',
+                        onTap: widget.onCancelDraft,
+                      ),
+                      const SizedBox(width: 6),
+                      _CanvasButton(
+                        key: const ValueKey('ink-block-confirm'),
+                        icon: LucideIcons.check,
+                        label: '确认',
+                        filled: true,
+                        onTap: widget.onConfirmDraft,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
-    ),
-  ];
+    ];
+  }
+
+  /// 按钮组锚点：占位（未书写）= 画布右下；有笔迹 = 末点右下侧，
+  /// 越界时向内收（钳制在画布内）。
+  (double, double) _draftChromeOffset() {
+    const rowWidth = 132.0;
+    const rowHeight = 28.0;
+    Offset? last;
+    for (final stroke in _controller.strokes) {
+      if (stroke.points.isNotEmpty) {
+        last = Offset(stroke.points.last.x * widget.width,
+            stroke.points.last.y * widget.height);
+      }
+    }
+    final live = _live;
+    if (live != null && live.isNotEmpty) {
+      last = live.last.$1;
+    }
+    if (last == null) {
+      return (widget.width - rowWidth - 8, widget.height - rowHeight - 8);
+    }
+    final dx = (last.dx + 10).clamp(4.0, widget.width - rowWidth - 4);
+    final dy = (last.dy + 10).clamp(4.0, widget.height - rowHeight - 4);
+    return (dx, dy);
+  }
+
 
   List<Widget> _selectedChrome() => [
     Positioned(

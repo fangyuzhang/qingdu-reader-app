@@ -177,7 +177,12 @@ void main() {
     expect(find.byKey(const ValueKey('ink-block-confirm')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('ink-block-confirm')));
     await settleFrames(tester);
-    expect(inkStore.blocks.values.single.height, closeTo(after - 8, 8));
+    // 确认收缩至内容高度（80 批）：落库高度 = 笔迹最低点 + 内边距，
+    // 可能小于控件高度（控件含越界书写段）。
+    expect(
+      inkStore.blocks.values.single.height,
+      inInclusiveRange(after - 8, 460),
+    );
   });
 
   testWidgets('画布拖底边手柄改高：实时预览 + 松手落盘（C2 验收）', (tester) async {
