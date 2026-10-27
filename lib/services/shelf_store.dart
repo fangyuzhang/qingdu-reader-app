@@ -6,7 +6,7 @@ import 'encrypted_hive.dart';
 
 /// 书架分组状态。
 ///
-/// 【青茄重构·新增】三段式分组替代「单一书架」：在读 / 想读 / 读完。
+/// 【轻读重构·新增】三段式分组替代「单一书架」：在读 / 想读 / 读完。
 /// 存字符串而非枚举，老记录缺字段时按 [reading] 兜底，不会因为 schema
 /// 升级丢掉整架书。
 abstract final class ShelfStatus {
@@ -31,7 +31,7 @@ class ShelfRecord {
   final MediaItem item;
   final DateTime addedAt;
 
-  /// 【青茄重构·新增】在读 / 想读 / 读完，见 [ShelfStatus]。
+  /// 【轻读重构·新增】在读 / 想读 / 读完，见 [ShelfStatus]。
   final String status;
 
   const ShelfRecord({

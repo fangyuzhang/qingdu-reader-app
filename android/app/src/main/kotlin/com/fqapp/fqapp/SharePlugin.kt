@@ -39,7 +39,7 @@ class SharePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    /// 【青茄·笔记 PDF 分享】分享缓存目录里的文件（PDF 等）：
+    /// 【轻读·笔记 PDF 分享】分享缓存目录里的文件（PDF 等）：
     /// 经 FileProvider 转 content URI（Android 7+ 禁 file://），交给系统
     /// 选择器；邮件类应用可直接读取（拷贝），失败如实返回 false。
     private fun shareFile(call: MethodCall, result: MethodChannel.Result) {

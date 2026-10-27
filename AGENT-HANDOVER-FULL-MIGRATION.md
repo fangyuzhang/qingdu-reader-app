@@ -1,4 +1,4 @@
-# 青茄阅读 · 完整迁移交接文档
+# 轻读 · 完整迁移交接文档
 
 > 更新时间：2026-10-24 08:10 (UTC+8)
 > 本文档对应仓库 HEAD：`0b76acbf397ff6cbc576603c5f53565d177a2d3e`
@@ -10,7 +10,7 @@
 ## 一、文件夹结构说明
 
 ```
-青茄阅读/
+轻读/
 ├── 交接文档-完整版.md          ← 本文档（先读这个）
 ├── repo/
 │   └── fqapp-src/              ← 完整 Git 仓库（干净 clone，含全部历史）
@@ -222,7 +222,7 @@ gh auth login
 
 1. **不要用 Windows 盘符路径操作 WSL 内文件**。WSL 里 `/mnt/c/...` 对应 `C:\...`。
 2. **项目仓库必须在 WSL 原生路径（`~/`）**，不要放在 `/mnt/*` 下编译（9p 协议极慢）。
-3. **路径不能包含中文或非 ASCII 字符**：Dart analysis server（`flutter analyze`）在路径含中文时会崩溃（`FormatException: Unterminated string`）。E 盘的 `青茄阅读` 目录名就触发了这个问题。仓库必须复制到纯 ASCII 路径（如 `~/projects/fqapp-src`）后才能跑分析和构建。E 盘备份包仅用于文件搬运，不在此路径下直接开发。
+3. **路径不能包含中文或非 ASCII 字符**：Dart analysis server（`flutter analyze`）在路径含中文时会崩溃（`FormatException: Unterminated string`）。E 盘的 `轻读` 目录名就触发了这个问题。仓库必须复制到纯 ASCII 路径（如 `~/projects/fqapp-src`）后才能跑分析和构建。E 盘备份包仅用于文件搬运，不在此路径下直接开发。
 4. **Flutter wrapper 的坑**：如果 shell 命中 `/mnt/d/.../Flutter` 的 Windows 版并报 `$'\r'`，把 `$HOME/flutter/bin` 前置到 `PATH`：
    ```bash
    export PATH=$HOME/flutter/bin:$PATH
@@ -252,7 +252,7 @@ gh auth login
 | `README.md` | 项目简介、构建说明、验证命令 |
 | `AGENT-HANDOVER-NEXT.md` | 最新交接状态（本批次 UI 动画） |
 | `AGENT-HANDOVER.md` | 历史总交接（功能背景） |
-| `QINGQIE-CHANGES.md` | 变更日志 |
+| `QINGDU-CHANGES.md` | 变更日志 |
 | `AGENTS.md` | AI 代理工作规范 |
 | `scripts/README.md` | 构建与维护脚本说明 |
 

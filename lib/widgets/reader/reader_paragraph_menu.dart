@@ -6,7 +6,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 /// What the reader can do with a long-pressed paragraph.
 ///
-/// 【青茄重构·新增】annot（批注：写想法并生成行内批注块）与
+/// 【轻读重构·新增】annot（批注：写想法并生成行内批注块）与
 /// excerpt（书摘：收藏选中句子）为蜗牛读书式批注能力，见
 /// docs/02-增删功能方案.md。
 enum ReaderParagraphAction {
@@ -16,7 +16,7 @@ enum ReaderParagraphAction {
   removeUnderline,
   annot,
   excerpt,
-  // 【青茄·Active Canvas】画布（内嵌手写）/ 便签（折叠态画布）/ 备注（打字笔记图标）。
+  // 【轻读·Active Canvas】画布（内嵌手写）/ 便签（折叠态画布）/ 备注（打字笔记图标）。
   canvas,
   sticky,
   note,
@@ -55,7 +55,7 @@ class ReaderParagraphMenu extends StatefulWidget {
   /// [resolvePosition] 都按同一组宽度计算，避免文字压到相邻按钮。
   static const _listenItemWidth = 84.0;
 
-  /// 【青茄·Active Canvas】溢出按钮（⋯）宽度：新增动作收进第二行，
+  /// 【轻读·Active Canvas】溢出按钮（⋯）宽度：新增动作收进第二行，
   /// 主行恒定 5 项以内——单行 8 项需横向滚动，滚动手势与翻页手势
   /// 在真机上竞争不可靠（拖动即丢选区，2026-10-26 核验发现）。
   static const _moreItemWidth = 48.0;
@@ -123,8 +123,8 @@ class ReaderParagraphMenu extends StatefulWidget {
     required bool paragraphScoped,
     bool showListening = true,
   }) {
-    // 【青茄重构】监听项只要 showListening 就显示（不再区分整段 / 选区）。
-    // 【青茄·Active Canvas】主行 = 听书? + 复制 + 划线 + 批注 + ⋯（溢出）；
+    // 【轻读重构】监听项只要 showListening 就显示（不再区分整段 / 选区）。
+    // 【轻读·Active Canvas】主行 = 听书? + 复制 + 划线 + 批注 + ⋯（溢出）；
     // 书摘/画布/便签/备注收进 ⋯ 展开的第二行。
     return 4 + (showListening ? 1 : 0);
   }
@@ -175,7 +175,7 @@ class ReaderParagraphMenu extends StatefulWidget {
     double belowContentHeight = 0,
   }) {
     const flipClearance = 10.0;
-    // 【青茄·Active Canvas】动作增至 8 项后，窄屏放不下整条：定位宽度
+    // 【轻读·Active Canvas】动作增至 8 项后，窄屏放不下整条：定位宽度
     // 钳到可用屏宽（内容条可横向滚动，见 build）。
     final barWidth = math.min(
       _barWidth(showListening: showListening),
@@ -259,14 +259,14 @@ class _ReaderParagraphMenuState extends State<ReaderParagraphMenu> {
                 : ReaderParagraphAction.underline,
           ),
         ),
-        // 【青茄重构·新增】批注：写想法 → 红线 + 行内批注块。
+        // 【轻读重构·新增】批注：写想法 → 红线 + 行内批注块。
         _Item(
           key: const ValueKey('reader-action-annot'),
           icon: LucideIcons.message_square,
           label: '批注',
           onTap: () => onAction(ReaderParagraphAction.annot),
         ),
-        // 【青茄·Active Canvas】溢出按钮：展开 书摘/画布/便签/备注 第二行。
+        // 【轻读·Active Canvas】溢出按钮：展开 书摘/画布/便签/备注 第二行。
         _Item(
           key: const ValueKey('reader-action-more'),
           icon: _more ? LucideIcons.chevron_up : LucideIcons.chevron_down,
@@ -279,14 +279,14 @@ class _ReaderParagraphMenuState extends State<ReaderParagraphMenu> {
     final overflowRow = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 【青茄重构·新增】书摘：收藏选中句子（无想法）。
+        // 【轻读重构·新增】书摘：收藏选中句子（无想法）。
         _Item(
           key: const ValueKey('reader-action-excerpt'),
           icon: LucideIcons.bookmark,
           label: '书摘',
           onTap: () => onAction(ReaderParagraphAction.excerpt),
         ),
-        // 【青茄·Active Canvas】画布：在此行后插入内嵌手写画布（占位、
+        // 【轻读·Active Canvas】画布：在此行后插入内嵌手写画布（占位、
         // 后续文字下移重排）。
         _Item(
           key: const ValueKey('reader-action-canvas'),
@@ -294,14 +294,14 @@ class _ReaderParagraphMenuState extends State<ReaderParagraphMenu> {
           label: '画布',
           onTap: () => onAction(ReaderParagraphAction.canvas),
         ),
-        // 【青茄·Active Canvas】便签：此处放一枚折叠便签图标。
+        // 【轻读·Active Canvas】便签：此处放一枚折叠便签图标。
         _Item(
           key: const ValueKey('reader-action-sticky'),
           icon: LucideIcons.file_pen,
           label: '便签',
           onTap: () => onAction(ReaderParagraphAction.sticky),
         ),
-        // 【青茄·Active Canvas】备注：打字笔记图标行，不占正文空间。
+        // 【轻读·Active Canvas】备注：打字笔记图标行，不占正文空间。
         _Item(
           key: const ValueKey('reader-action-note'),
           icon: LucideIcons.message_square,

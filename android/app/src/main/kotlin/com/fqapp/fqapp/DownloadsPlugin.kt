@@ -55,7 +55,7 @@ class DownloadsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
         val fileName = sanitize(call.argument<String>("fileName").orEmpty())
-        // 【青茄·长图导出】saveImage = 笔记长图 PNG 直接入系统下载目录；
+        // 【轻读·长图导出】saveImage = 笔记长图 PNG 直接入系统下载目录；
         // saveText = 整本书 TXT（原路径）。两者共用同一套落库/降级管线。
         val bytes: ByteArray = if (isImage) {
             call.argument<ByteArray>("bytes") ?: ByteArray(0)
@@ -99,7 +99,7 @@ class DownloadsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
-                // 【青茄·长图导出修复】MIUI 实测会清理缺宽高的图片条目
+                // 【轻读·长图导出修复】MIUI 实测会清理缺宽高的图片条目
                 // （转正后行被删、文件消失，但 insert/write 均返回成功）：
                 // 图片必须带 WIDTH/HEIGHT。
                 if (width != null) put(MediaStore.MediaColumns.WIDTH, width)
@@ -131,7 +131,7 @@ class DownloadsPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 Environment.DIRECTORY_DOWNLOADS,
             )
             val finalPath = File(downloads, stored)
-            // 【青茄·长图导出修复】个别 ROM 转正后静默清行：落盘实存校验，
+            // 【轻读·长图导出修复】个别 ROM 转正后静默清行：落盘实存校验，
             // 不存在就当失败（Dart 侧自动降级私有目录），绝不虚报成功。
             if (!finalPath.exists() || finalPath.length() != bytes.size.toLong()) {
                 try {

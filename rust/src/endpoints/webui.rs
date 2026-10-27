@@ -149,7 +149,7 @@ async fn handle_web_detail(server: &Server, q: &Params) -> Response {
         return web_json(400, &web_err(400, "需要 source=番茄 和 book_id"));
     }
     if !matches!(tab.as_str(), "" | "小说" | "听书") {
-        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
+        return web_json(400, &web_err(400, "轻读仅支持小说与听书"));
     }
     let (ep_name, params) = match tab.as_str() {
         "听书" => {
@@ -181,7 +181,7 @@ async fn handle_web_directory(server: &Server, q: &Params) -> Response {
         return web_json(400, &web_err(400, "需要 source=番茄 和 book_id"));
     }
     if !matches!(tab.as_str(), "" | "小说" | "听书") {
-        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
+        return web_json(400, &web_err(400, "轻读仅支持小说与听书"));
     }
 
     let result: Result<Value, String>;
@@ -384,7 +384,7 @@ async fn handle_web_content(server: &Server, q: &Params) -> Response {
         return web_json(400, &web_err(400, "需要 source=番茄 和 item_id"));
     }
     if !matches!(tab.as_str(), "" | "小说" | "听书") {
-        return web_json(400, &web_err(400, "青茄阅读仅支持小说与听书"));
+        return web_json(400, &web_err(400, "轻读仅支持小说与听书"));
     }
 
     let result = match tab.as_str() {

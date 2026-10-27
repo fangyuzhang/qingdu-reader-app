@@ -14,7 +14,7 @@ class SharePlusLite {
 
   static const _shareChannel = MethodChannel('fqapp/share');
 
-  /// 【青茄·笔记 PDF 分享】把已生成的文件（PDF 等）交给系统分享面板。
+  /// 【轻读·笔记 PDF 分享】把已生成的文件（PDF 等）交给系统分享面板。
   /// Android 侧经 FileProvider 转 content URI（见 SharePlugin.shareFile）。
   /// 桌面/测试宿主无插件 → unavailable（与文本分享同语义）。
   static Future<ShareLaunchOutcome> shareFile({

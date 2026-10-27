@@ -5,7 +5,7 @@ import '../../services/app_theme.dart';
 
 /// The home surface keeps its warm paper / tomato identity in both themes.
 class HomePalette {
-  // 【青茄重构】青少年版视觉：青茄绿为主，珊瑚橙做点缀（highlight）。
+  // 【轻读重构】青少年版视觉：轻读绿为主，珊瑚橙做点缀（highlight）。
   static const accent = Color(0xFF2FA98C);
   static const accentStrong = Color(0xFF1F8A72);
   static const highlight = Color(0xFFE2603F);

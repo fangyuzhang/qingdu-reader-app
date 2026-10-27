@@ -144,7 +144,7 @@ Future<void> _showRecentBook(WidgetTester tester, String title) async {
 
 Future<void> _saveProgress(WidgetTester tester, int update) async {
   await tester.runAsync(() async {
-    // 【青茄重构】短剧已从产品删除（书架/历史过滤 video 类），
+    // 【轻读重构】短剧已从产品删除（书架/历史过滤 video 类），
     // 本测试改用 book 验证「隐藏页下次可见时追上最新数据」。
     await LibraryStore.instance.addHistory({
       'id': 'visible-book',

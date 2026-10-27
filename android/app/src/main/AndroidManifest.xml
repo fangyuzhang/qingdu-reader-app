@@ -55,7 +55,7 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- 【青茄·笔记 PDF 分享】缓存文件经 FileProvider 转 content URI
+        <!-- 【轻读·笔记 PDF 分享】缓存文件经 FileProvider 转 content URI
              （Android 7+ 禁 file://）；只暴露 cache 分区，权限最小化。 -->
         <provider
             android:name="androidx.core.content.FileProvider"

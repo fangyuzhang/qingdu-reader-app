@@ -103,7 +103,7 @@ class ReaderTextLine {
 
 /// 行内批注块（蜗牛读书式）的排版数据。
 ///
-/// 【青茄重构·新增】批注块在排版层是一个「单行、整块高度」的合成块：
+/// 【轻读重构·新增】批注块在排版层是一个「单行、整块高度」的合成块：
 /// 分页时整块落页（本页放不下就整块推到下一页，绝不从中间切断），
 /// 滚动时按同一高度占位。分页与滚动因此共用一套测量结果，
 /// 不需要为两种阅读模式各写一套批注排版。
@@ -152,7 +152,7 @@ class ReaderInlineNote {
   final ReaderMarkStyle markStyle;
   final int markColorValue;
 
-  /// 【青茄·Active Canvas】非空 = 手写内嵌块：'canvas'（画布，正文直接
+  /// 【轻读·Active Canvas】非空 = 手写内嵌块：'canvas'（画布，正文直接
   /// 可见、占位可调）/ 'sticky'（便签，图标行折叠态）/ 'note'（打字备注，
   /// 图标行）。空串 = 普通文字批注块。
   final String inkKind;
@@ -217,7 +217,7 @@ class ReaderContentBlock {
   /// Whether this paragraph carries a locally saved 划线.
   final bool underlined;
 
-  /// 【青茄重构·新增】非空表示这是一个行内批注块（不是正文段落）。
+  /// 【轻读重构·新增】非空表示这是一个行内批注块（不是正文段落）。
   final ReaderInlineNote? inlineNote;
 
   /// 批注块正文的实测行数（渲染时限制 maxLines，保证不发生溢出）。
@@ -249,7 +249,7 @@ class ReaderContentBlock {
   bool get isImage => illustration != null;
   bool get hasBubble => bubbleCount != null;
 
-  /// 【青茄重构·新增】行内批注块；正文段落为 false。
+  /// 【轻读重构·新增】行内批注块；正文段落为 false。
   bool get isNote => inlineNote != null;
 
   /// 可参与选区/划线/复制的正文段落。
@@ -575,7 +575,7 @@ class ReaderChapterLayout {
         top += block.height + spec.paragraphSpacing;
       }
     }
-    // 【青茄重构·新增】把批注块插到所属段落之后，并统一重排纵向位置。
+    // 【轻读重构·新增】把批注块插到所属段落之后，并统一重排纵向位置。
     final (laidOutBlocks, contentTop) = inlineNotes.isEmpty
         ? (blocks, top)
         : _insertInlineNotes(blocks, inlineNotes, spec);
@@ -777,7 +777,7 @@ class ReaderChapterLayout {
       locale: const Locale('zh', 'CN'),
     );
     if (!title && placeholders > 0) {
-      // 【青茄·Active Canvas 修复】占位维度必须与 span 实际含有的占位符
+      // 【轻读·Active Canvas 修复】占位维度必须与 span 实际含有的占位符
       // 一一对应：行内批注/手写块把段落按行切片后，中段切片可能不含
       // 首行缩进（from>0）或段尾气泡（to<len），无条件发 1~2 个维度会
       // 触发 TextPainter 的 placeholderCount 断言（分页模式 + 同段多块
@@ -1133,7 +1133,7 @@ const int _kNoteMaxLines = 8;
 /// 13px 的中文一行只放得下 3 个字，行数被极端放大。
 const double _kNoteMinBodyWidth = 120;
 
-/// 【青茄·Active Canvas】画布块的框外装饰高度（上下边框+底距，与
+/// 【轻读·Active Canvas】画布块的框外装饰高度（上下边框+底距，与
 /// ReaderNoteBlock 的 padding/底距口径一致）与折叠图标行定高。
 const double _kInkBlockChrome = 8;
 const double _kInlineIconRowHeight = 34;
@@ -1351,7 +1351,7 @@ ReaderContentBlock _measureInlineNote(
     letterSpacing: 0,
     textBaseline: TextBaseline.alphabetic,
   );
-  // 【青茄·Active Canvas】手写内嵌块不测文字：画布按用户框高定型，图标
+  // 【轻读·Active Canvas】手写内嵌块不测文字：画布按用户框高定型，图标
   // 行定高。同样记录为单行整块高度，分页时整块落页绝不拦腰切断。
   if (note.inkKind.isNotEmpty) {
     final height = note.inkKind == ReaderInlineNote.inkKindCanvas
@@ -1423,7 +1423,7 @@ ReaderContentBlock _measureInlineNote(
 
 /// 在一段文字里找出包含 [index] 的句子范围（半开区间，返回 `(start, end)`）。
 ///
-/// 【青茄修复·长按选句】长按选区的默认粒度从「整段」改成「一句话」：
+/// 【轻读修复·长按选句】长按选区的默认粒度从「整段」改成「一句话」：
 /// 句末按中文句读切分——`。！？!?…；;` 与换行；紧随其后的右引号/右书名号
 /// 计入本句（"好吧。" 整体算一句）。与 TTS 的分句口径保持一致
 /// （system_tts 的 `_speak` 用同一组断句字符）。
@@ -1496,7 +1496,7 @@ class ReaderBlockContent extends StatelessWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
-  /// 【青茄重构·新增】批注/书摘范围（红色下划线 + 行内批注块）。
+  /// 【轻读重构·新增】批注/书摘范围（红色下划线 + 行内批注块）。
   final List<ReaderRangeUnderline> annotationRanges;
 
   /// The sentence being narrated, in chapter display-text coordinates.
@@ -1518,13 +1518,13 @@ class ReaderBlockContent extends StatelessWidget {
     this.inkActions,
   });
 
-  /// 【青茄·Active Canvas】手写内嵌块回调（画布/便签/备注），透传给
+  /// 【轻读·Active Canvas】手写内嵌块回调（画布/便签/备注），透传给
   /// [ReaderNoteBlock]；null = 纯展示。
   final ReaderInkBlockActions? inkActions;
 
   @override
   Widget build(BuildContext context) {
-    // 【青茄重构·新增】批注块：按排版层实测高度渲染，不再走正文/划线分支。
+    // 【轻读重构·新增】批注块：按排版层实测高度渲染，不再走正文/划线分支。
     final inlineNote = block.inlineNote;
     if (inlineNote != null) {
       return ReaderNoteBlock(

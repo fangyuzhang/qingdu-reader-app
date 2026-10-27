@@ -23,7 +23,7 @@ void main() {
 
   setUp(() {
     calls.clear();
-    // 【青茄重构】段评默认关闭（UGC 不可控），本文件的段评用例需显式开启。
+    // 【轻读重构】段评默认关闭（UGC 不可控），本文件的段评用例需显式开启。
     SharedPreferences.setMockInitialValues({
       'reader_show_paragraph_bubbles': true,
     });
@@ -64,7 +64,7 @@ void main() {
       MaterialPageRoute<void>(builder: (_) => _reader()),
     );
     await tester.pumpAndSettle();
-    // 【青茄·沉浸式系统栏】进正文默认收起工具栏：状态栏与手势条隐藏。
+    // 【轻读·沉浸式系统栏】进正文默认收起工具栏：状态栏与手势条隐藏。
     expect(lastUiMode(), 'SystemUiMode.immersiveSticky');
     final viewport = tester.getRect(_surface);
     final layout = tester

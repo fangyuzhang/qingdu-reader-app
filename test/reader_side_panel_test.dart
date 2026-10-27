@@ -9,7 +9,7 @@ import 'package:fqapp/widgets/reader/annotation/ink_canvas.dart';
 
 import 'support/fakes.dart';
 
-/// 【青茄·侧栏笔记】（Scribe 参考：右栏手写、正文变窄重排、✕ 关闭）
+/// 【轻读·侧栏笔记】（Scribe 参考：右栏手写、正文变窄重排、✕ 关闭）
 Future<void> settleFrames(WidgetTester tester) async {
   for (var i = 0; i < 12; i++) {
     await tester.pump(const Duration(milliseconds: 100));

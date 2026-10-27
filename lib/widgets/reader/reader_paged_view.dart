@@ -62,7 +62,7 @@ class ReaderPagedView extends StatefulWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
-  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  /// 【轻读重构·新增】批注/书摘范围（红色下划线）。
   final List<ReaderRangeUnderline> annotationRanges;
 
   /// The sentence being narrated, in chapter display-text coordinates.
@@ -89,7 +89,7 @@ class ReaderPagedView extends StatefulWidget {
   final ReaderChapterTurn? chapterTurn;
   final VoidCallback? onChapterTurnCompleted;
 
-  /// 【青茄·Active Canvas】手写内嵌块回调（透传 ReaderPageContent）。
+  /// 【轻读·Active Canvas】手写内嵌块回调（透传 ReaderPageContent）。
   final ReaderInkBlockActions? inkActions;
 
   const ReaderPagedView({
@@ -872,11 +872,11 @@ class ReaderPageContent extends StatelessWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
-  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  /// 【轻读重构·新增】批注/书摘范围（红色下划线）。
   final List<ReaderRangeUnderline> annotationRanges;
   final (int, int)? narrationRange;
 
-  /// 【青茄·Active Canvas】手写内嵌块回调（见 ReaderNoteBlock）。
+  /// 【轻读·Active Canvas】手写内嵌块回调（见 ReaderNoteBlock）。
   final ReaderInkBlockActions? inkActions;
 
   const ReaderPageContent({
@@ -910,7 +910,7 @@ class ReaderPageContent extends StatelessWidget {
               height: fragment.height,
               child: Builder(
                 builder: (context) {
-                  // 【青茄重构·新增】批注块：整块渲染，不参与选区与划线。
+                  // 【轻读重构·新增】批注块：整块渲染，不参与选区与划线。
                   final note = fragment.block.inlineNote;
                   if (note != null) {
                     return ReaderNoteBlock(

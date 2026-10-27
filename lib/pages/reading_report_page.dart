@@ -15,7 +15,7 @@ import '../widgets/home/home_design.dart';
 import 'notes_page.dart';
 import '../services/reading_report_exporter.dart';
 
-/// 【青茄重构·新增】「我的阅读」详细报告。
+/// 【轻读重构·新增】「我的阅读」详细报告。
 ///
 /// 从「我的」页的阅读热力图点进来（热力图答「哪天读了多久」，这一页答
 /// 「这一周一月一年读了多少、读了几本、最久的是哪天哪本书」）。
@@ -124,7 +124,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       readTimeSeconds: readTime,
     );
     _bookMeta = metas.values.toList();
-    // 【青茄重构·修复】先出报告，批注（Hive 读盘）异步补齐。
+    // 【轻读重构·修复】先出报告，批注（Hive 读盘）异步补齐。
     // 之前先 await loadAll 再 setState：盒子没开/读盘慢时整页一直转圈，
     // 真机冷启动和 widget 测试里都会卡在这一步。
     _applyNotes(const <ReaderAnnotation>[]);

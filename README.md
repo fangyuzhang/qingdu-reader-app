@@ -1,4 +1,4 @@
-# 青茄阅读 · qingqie-reader-app
+# 轻读 · qingdu-reader-app
 
 面向 12–18 岁读者的**纯净小说与听书** Android 阅读器。
 Flutter 负责 UI 与阅读体验，Rust 以进程内库的形式承担上游接口签名与正文解密，Android 原生层负责加密听书播放。
@@ -10,7 +10,7 @@ Flutter 负责 UI 与阅读体验，Rust 以进程内库的形式承担上游接
 
 | 项目 | 值 |
 | --- | --- |
-| 仓库 | 私有仓库 `fangyuzhang/qingqie-reader-app` |
+| 仓库 | 私有仓库 `fangyuzhang/qingdu-reader-app` |
 | 当前版本 | `1.0.129+134` |
 | 包名 | `com.fqapp.fqapp` |
 | 系统要求 | Android 7.0+（`minSdk 24`），`targetSdk 36` |
@@ -23,7 +23,7 @@ Flutter 负责 UI 与阅读体验，Rust 以进程内库的形式承担上游接
 | 文档 | 用途 |
 | --- | --- |
 | `README.md` | 产品范围、功能、架构、构建与验证（本文） |
-| `QINGQIE-CHANGES.md` | 逐批改造记录：改了什么、为什么、如何验证 |
+| `QINGDU-CHANGES.md` | 逐批改造记录：改了什么、为什么、如何验证 |
 | `AGENT-HANDOVER-NEXT.md` | **接手先看**：当前代码状态、命令、已知问题 |
 | `AGENT-HANDOVER.md` | 早期总交接归档（历史背景，状态已过期） |
 | `AGENTS.md` / `DEVELOPMENT.md` | 协作规则与开发约定 |
@@ -161,7 +161,7 @@ python3 scripts/verify_android_apk.py \
 ## 版本与发布
 
 - 版本号在 `pubspec.yaml` 的 `version:` 一处维护（当前 `1.0.129+134`）。
-- `master` 是唯一开发分支；每个批次一条独立提交，记录同步写进 `QINGQIE-CHANGES.md`。
+- `master` 是唯一开发分支；每个批次一条独立提交，记录同步写进 `QINGDU-CHANGES.md`。
 - 基准：tag `baseline-1.0.129-20261023`（提交 `0bea552`），附 38,524,657 字节基准 APK。
 - 当前 `master`：tag `v35-20261023`（提交 `e78f93a`），APK 38,524,655 字节，SHA-256 `130b302f6aa8310974c19b090053383189d9d273692bb75182b013b70dd31041`。
 

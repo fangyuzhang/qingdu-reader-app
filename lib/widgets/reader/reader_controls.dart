@@ -40,13 +40,13 @@ class ReaderControls extends StatefulWidget {
   /// 查看本章墨迹列表。
   final VoidCallback? onInkList;
 
-  /// 【青茄·Active Canvas】便签放置工具（null = 不显示）。
+  /// 【轻读·Active Canvas】便签放置工具（null = 不显示）。
   final VoidCallback? onSticky;
 
-  /// 【青茄·笔记 PDF 分享】阅读界面分享本书笔记（null = 不显示）。
+  /// 【轻读·笔记 PDF 分享】阅读界面分享本书笔记（null = 不显示）。
   final VoidCallback? onShareNotes;
 
-  /// 【青茄·侧栏笔记】右侧手写面板开关（null = 不显示）。
+  /// 【轻读·侧栏笔记】右侧手写面板开关（null = 不显示）。
   final VoidCallback? onSidePanel;
   final VoidCallback onAutoTurn;
 
@@ -163,7 +163,7 @@ class _ReaderControlsState extends State<ReaderControls> {
                             label: '墨迹',
                             onTap: () => widget.onInkList!(),
                           ),
-                        // 【青茄·Active Canvas】便签工具：轻点正文放置折叠便签。
+                        // 【轻读·Active Canvas】便签工具：轻点正文放置折叠便签。
                         if (widget.onSticky != null)
                           _Action(
                             key: const ValueKey('reader-sticky-tool'),
@@ -171,7 +171,7 @@ class _ReaderControlsState extends State<ReaderControls> {
                             label: '便签',
                             onTap: () => widget.onSticky!(),
                           ),
-                        // 【青茄·笔记 PDF 分享】规格 C9 v2：阅读界面分享本书
+                        // 【轻读·笔记 PDF 分享】规格 C9 v2：阅读界面分享本书
                         // 笔记（整本/当前章节 → PDF → 系统分享面板）。
                         if (widget.onShareNotes != null)
                           _Action(
@@ -180,7 +180,7 @@ class _ReaderControlsState extends State<ReaderControls> {
                             label: '分享笔记',
                             onTap: () => widget.onShareNotes!(),
                           ),
-                        // 【青茄·侧栏笔记】右侧手写面板开关。
+                        // 【轻读·侧栏笔记】右侧手写面板开关。
                         if (widget.onSidePanel != null)
                           _Action(
                             key: const ValueKey('reader-side-panel-toggle'),

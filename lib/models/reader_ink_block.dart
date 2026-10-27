@@ -1,6 +1,6 @@
 import 'ink_annotation.dart';
 
-/// 【青茄·Active Canvas】正文内嵌手写块（画布 / 粘性便签）。
+/// 【轻读·Active Canvas】正文内嵌手写块（画布 / 粘性便签）。
 ///
 /// 感知口径（SCRIBE-NOTES-SPEC.md C1/C3/C4）：块绑定**章节文本偏移锚点**
 /// （不是屏幕像素），排版层把它插在锚定行之后、后续文字下移重排；改字号

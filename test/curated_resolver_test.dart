@@ -96,7 +96,7 @@ void main() {
         item('1', '完全不同的书'),
         item('2', '另一本'),
       ];
-      // 【青茄】收紧后不再赌「第一条结果」：宁可让用户在搜索页挑，
+      // 【轻读】收紧后不再赌「第一条结果」：宁可让用户在搜索页挑，
       // 也不能点《小王子》打开《完全不同的书》。
       expect(CuratedResolver.pickBest(items, '小王子', ''), isNull);
       expect(CuratedResolver.pickBest([], '小王子', ''), isNull);

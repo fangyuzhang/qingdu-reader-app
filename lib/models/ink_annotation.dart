@@ -31,7 +31,7 @@ class InkPoint {
   final double pressure;
 
   /// 归一化倾斜 0~1（0 = 笔垂直屏幕，1 = 笔放平；手指恒 0）。
-  /// 【青茄·阶段三兼容方案】MatePad 11 + M-Pencil 3（HarmonyOS 2-4
+  /// 【轻读·阶段三兼容方案】MatePad 11 + M-Pencil 3（HarmonyOS 2-4
   /// Android 兼容层）上 stylus 事件带 tilt 弧度；侧锋放平时加粗笔迹
   /// （铅笔侧锋感）。旧存档无此字段 → 0，行为不变。
   final double tilt;

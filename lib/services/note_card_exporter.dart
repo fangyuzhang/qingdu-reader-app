@@ -9,12 +9,12 @@ import 'reader_annotation_store.dart';
 
 /// 把批注/书摘导出成一张长图（PNG）。
 ///
-/// 【青茄重构·新增】上游只有文字分享，没有「金句卡片」。这里用
+/// 【轻读重构·新增】上游只有文字分享，没有「金句卡片」。这里用
 /// [ui.PictureRecorder] 直接绘制，不依赖任何图片库：
 ///
 /// * 先量后画（两趟）：第一趟排好每段文字拿到高度，算出整图高度，
 ///   第二趟按 y 偏移逐段绘制，因此长图高度永远是内容高度；
-/// * 输出到应用文档目录 `qingqie/exports/`，返回绝对路径供 UI 提示。
+/// * 输出到应用文档目录 `qingdu/exports/`，返回绝对路径供 UI 提示。
 class NoteCardExporter {
   NoteCardExporter._();
 
@@ -55,7 +55,7 @@ class NoteCardExporter {
       final result = await const MethodChannel(
         'fqapp/downloads',
       ).invokeMapMethod<String, Object?>('saveImage', {
-        'fileName': 'qingqie_notes_$stamp.png',
+        'fileName': 'qingdu_notes_$stamp.png',
         'bytes': png,
         // 某些 ROM（MIUI 实测）会清理缺宽高的图片条目：元数据带上。
         'width': _width.toInt(),
@@ -71,7 +71,7 @@ class NoteCardExporter {
       // 桌面/测试宿主无插件：降级。
     }
     final dir = await getApplicationDocumentsDirectory();
-    final outDir = Directory('${dir.path}/qingqie/exports');
+    final outDir = Directory('${dir.path}/qingdu/exports');
     if (!await outDir.exists()) {
       await outDir.create(recursive: true);
     }
@@ -108,7 +108,7 @@ class NoteCardExporter {
       [
         if (bookTitle != null && bookTitle.isNotEmpty) bookTitle,
         '${notes.length} 条 · $dateText',
-        '青茄阅读',
+        '轻读',
       ].join('  ·  '),
       size: 26,
       color: _muted,
@@ -165,7 +165,7 @@ class NoteCardExporter {
     }
 
     final footer = _paragraph(
-      '— 用青茄阅读写下 —',
+      '— 用轻读写下 —',
       size: 24,
       color: _muted,
       width: contentWidth,

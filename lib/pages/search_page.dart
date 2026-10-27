@@ -1008,7 +1008,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
-/// Content kinds offered by Qingqie Reading.
+/// Content kinds offered by Qingdu Reading.
 const Set<String> _supportedKinds = {'book', 'audio'};
 
 enum _SearchCategory {

@@ -22,19 +22,19 @@ class MainActivity : FlutterActivity() {
     private var volumeKeyEnabled = false
     private var volumeChannel: MethodChannel? = null
 
-    // 【青茄·M-Pencil】手写笔双击手势：华为笔在鸿蒙/EMUI 上以非标键码
+    // 【轻读·M-Pencil】手写笔双击手势：华为笔在鸿蒙/EMUI 上以非标键码
     // 718 送达（Krita 社区实测，非标准 KeyEvent 常量）。手写墨迹模式下
     // 拦截并回调 Dart 切换 笔/橡皮；未启用时放行（键码本就无系统语义）。
     private var stylusDoubleTapEnabled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 【青茄·启动配色】系统深色 + App 浅色（或反过来）时，启动窗口的
+        // 【轻读·启动配色】系统深色 + App 浅色（或反过来）时，启动窗口的
         // windowBackground 只跟随系统，进 App 那一瞬间顶部状态栏会先闪一条
         // 系统底色（浅色系统上常见为一条黑边）。这里在 Flutter 首帧之前按
         // 「App 自己保存的主题」把窗口底色与状态栏图标亮度摆正，之后由页面
         // 内的 SystemUiOverlayStyle 接管。
         applyStartupThemeColors()
-        // 【青茄·高刷适配】向系统声明刷新率偏好，逃出国产 ROM 对未声明
+        // 【轻读·高刷适配】向系统声明刷新率偏好，逃出国产 ROM 对未声明
         // 应用的 60Hz 锁；60Hz 面板自动跳过（见 RefreshRatePolicy）。
         RefreshRatePolicy.apply(this)
         // 文件管理器/浏览器「打开方式」交给本应用的 PDF：冷启动路径，
@@ -62,7 +62,7 @@ class MainActivity : FlutterActivity() {
         window.setBackgroundDrawable(ColorDrawable(windowColor))
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        // 【青茄修复·冷启动灰条】Android 10+ 对「透明状态栏」默认开启对比度
+        // 【轻读修复·冷启动灰条】Android 10+ 对「透明状态栏」默认开启对比度
         // 保护——系统会在状态栏后面垫一层半透明灰色渐变 scrim，这就是用户
         // 看到的小灰条（进过阅读器后消失，是因为阅读页状态栏用不透明正文
         // 底色，不触发 scrim）。必须显式声明不强制对比度，从窗口创建起就
@@ -148,7 +148,7 @@ class MainActivity : FlutterActivity() {
                 return true
             }
         }
-        // 【青茄·M-Pencil】双击手势（键码 718）：启用时吃掉并回调，
+        // 【轻读·M-Pencil】双击手势（键码 718）：启用时吃掉并回调，
         // 未启用时放行（该键码无系统语义，放行无副作用）。
         if (stylusDoubleTapEnabled && event != null &&
             event.keyCode == 718 &&

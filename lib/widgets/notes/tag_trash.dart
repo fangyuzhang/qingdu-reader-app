@@ -70,7 +70,7 @@ class _TagTrashTargetState extends State<TagTrashTarget> {
         if (widget.compact) {
           // AppBar 形态：与「保存长图」同款图标；拖动一开始弹性放大
           // 示意可投递，悬停时更大 + 变红 + 光晕。
-          // 【青茄·无障碍】DragTarget+Icon 对读屏不可见：包一层语义
+          // 【轻读·无障碍】DragTarget+Icon 对读屏不可见：包一层语义
           // （按钮 + 状态：拖动标签过来可删除）。
           return Semantics(
             button: true,

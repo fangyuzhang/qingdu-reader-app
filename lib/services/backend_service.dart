@@ -146,7 +146,7 @@ class BackendService {
     final configDir = Directory('${dir.path}/config');
     await configDir.create(recursive: true);
 
-    // 【青茄修复·启动提速】部署以前逐个 await 拷贝（几十个文件串行读 +
+    // 【轻读修复·启动提速】部署以前逐个 await 拷贝（几十个文件串行读 +
     // 字节比对），是后端启动的大头之一。文件之间互不依赖，改成并行；
     // 内容没变的文件在 _copyAsset 里直接跳过写入。
     final tasks = <Future<void>>[

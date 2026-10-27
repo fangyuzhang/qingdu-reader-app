@@ -259,7 +259,7 @@ class FakeNativePlayer extends NativePlayer {
 }
 
 
-/// 【青茄·Active Canvas】内嵌手写块的内存版：widget 测试注入用，
+/// 【轻读·Active Canvas】内嵌手写块的内存版：widget 测试注入用，
 /// 全程不碰 Hive/真实 IO（假时钟 zone 里真实文件 IO 永不推进）。
 class MemoryInkBlockStore extends ReaderInkBlockStore {
   final Map<String, ReaderInkBlock> blocks = {};

@@ -605,7 +605,7 @@ class _DetailPageState extends State<DetailPage> {
                       child: !_supported
                           ? _stateCard(
                               icon: LucideIcons.file_question_mark,
-                              title: '青茄阅读仅提供小说与听书',
+                              title: '轻读仅提供小说与听书',
                               message: '请返回继续挑选小说或听书。',
                             )
                           : _detail == null &&

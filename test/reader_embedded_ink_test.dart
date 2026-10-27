@@ -10,7 +10,7 @@ import 'package:fqapp/widgets/reader/annotation/embedded_ink_block_view.dart';
 
 import 'support/fakes.dart';
 
-/// 【青茄·Active Canvas】阅读器集成：画布/便签/备注入口与草稿状态机
+/// 【轻读·Active Canvas】阅读器集成：画布/便签/备注入口与草稿状态机
 /// （规格 C1/C2/C4/C6 的验收路径）。存储注入内存版，全程无真实 IO。
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fqapp/models/ink_annotation.dart';
 import 'package:fqapp/widgets/reader/annotation/ink_strokes_painter.dart';
 
-/// 【青茄·阶段三兼容方案】M-Pencil 3 侧锋与宽度映射：
+/// 【轻读·阶段三兼容方案】M-Pencil 3 侧锋与宽度映射：
 /// - InkPoint.tilt 归一化 0~1，旧存档无字段 → 0（行为不变）；
 /// - pointWidth：压感定基础宽，倾斜侧锋最多加粗 60%；手指两值恒定不受影响。
 void main() {

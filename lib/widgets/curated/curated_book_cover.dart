@@ -8,7 +8,7 @@ import '../home/home_design.dart';
 /// 文字封面：书单本身没有封面图时，用分类渐变 + 书名排版生成，
 /// 保证离线也能有稳定的视觉识别（每本书的颜色只取决于分类）。
 ///
-/// 【青茄修复·新增】[coverUrl] 非空时改为渲染书城真实封面；加载中/失败
+/// 【轻读修复·新增】[coverUrl] 非空时改为渲染书城真实封面；加载中/失败
 /// 仍然显示文字封面（占位与 errorWidget 都返回它），所以不会闪白块，
 /// 断网时观感与以前完全一致。
 class CuratedBookCover extends StatelessWidget {

@@ -9,7 +9,7 @@ import '../../../models/reader_ink_block.dart';
 import '../../../services/reader_ink_block_store.dart';
 import 'embedded_ink_block_view.dart';
 
-/// 【青茄·Active Canvas】便签书写面板：点正文里的便签图标从底部升起，
+/// 【轻读·Active Canvas】便签书写面板：点正文里的便签图标从底部升起，
 /// 大画布书写，每笔即时落盘，关闭/完成自动保存（规格 C4）。
 class InkBlockEditorSheet extends StatefulWidget {
   const InkBlockEditorSheet({

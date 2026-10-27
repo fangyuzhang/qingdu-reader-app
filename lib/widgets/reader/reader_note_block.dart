@@ -30,7 +30,7 @@ class ReaderNoteBlock extends StatefulWidget {
   final int maxLines;
   final ReaderAnnotationStore? store;
 
-  /// 【青茄·Active Canvas】手写内嵌块（画布/便签/备注）的回调集；普通
+  /// 【轻读·Active Canvas】手写内嵌块（画布/便签/备注）的回调集；普通
   /// 文字批注块为 null。回调与状态都归阅读页所有（草稿状态机/存储/重排）。
   final ReaderInkBlockActions? inkActions;
 
@@ -47,7 +47,7 @@ class _ReaderNoteBlockState extends State<ReaderNoteBlock> {
   @override
   Widget build(BuildContext context) {
     final note = widget.note;
-    // 【青茄·Active Canvas】手写内嵌块分派：画布 / 折叠图标行（便签/备注）。
+    // 【轻读·Active Canvas】手写内嵌块分派：画布 / 折叠图标行（便签/备注）。
     final actions = widget.inkActions;
     if (actions != null && note.inkKind.isNotEmpty) {
       return _buildInkBlock(context, note, actions);
@@ -268,7 +268,7 @@ class _ReaderNoteBlockState extends State<ReaderNoteBlock> {
   }
 }
 
-/// 【青茄·Active Canvas】手写内嵌块的回调集：状态与存储都在阅读页，
+/// 【轻读·Active Canvas】手写内嵌块的回调集：状态与存储都在阅读页，
 /// 块渲染层只上报事件。
 class ReaderInkBlockActions {
   ReaderInkBlockActions({

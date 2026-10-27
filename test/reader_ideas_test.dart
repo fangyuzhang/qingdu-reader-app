@@ -52,7 +52,7 @@ void main() {
   // The reader resolves its preferences through SharedPreferences, which never
   // answers in a widget test unless a mock store is installed first.
   setUp(() {
-    // 【青茄重构】段评默认关闭（UGC 不可控），断言气泡的用例需显式开启。
+    // 【轻读重构】段评默认关闭（UGC 不可控），断言气泡的用例需显式开启。
     SharedPreferences.setMockInitialValues({
       'reader_page_mode': 'paged',
       'reader_show_paragraph_bubbles': true,

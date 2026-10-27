@@ -7,7 +7,7 @@ import 'package:fqapp/services/reader_preferences.dart';
 import 'package:fqapp/widgets/reader/reader_chapter_layout.dart';
 import 'package:fqapp/widgets/reader/reader_note_block.dart';
 
-/// 【青茄重构·新增】批注排版与展示测试。
+/// 【轻读重构·新增】批注排版与展示测试。
 ///
 /// 覆盖四件事：
 /// 1. 批注块被插到所属段落之后（顺序正确）；

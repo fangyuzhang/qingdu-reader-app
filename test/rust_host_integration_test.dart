@@ -325,7 +325,7 @@ void main() {
           isA<ApiException>().having(
             (error) => error.message,
             'message',
-            '青茄阅读仅支持小说与听书',
+            '轻读仅支持小说与听书',
           ),
         ),
       );
@@ -342,7 +342,7 @@ void main() {
         isA<ApiException>().having(
           (error) => error.message,
           'message',
-          '青茄阅读仅支持小说与听书',
+          '轻读仅支持小说与听书',
         ),
       ),
     );
@@ -364,7 +364,7 @@ void main() {
           isA<ApiException>().having(
             (error) => error.message,
             'message',
-            '青茄阅读仅支持小说与听书',
+            '轻读仅支持小说与听书',
           ),
         ),
       );

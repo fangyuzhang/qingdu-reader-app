@@ -6,7 +6,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:fqapp/services/reader_annotation_store.dart';
 import 'package:fqapp/services/reader_mark_style.dart';
 
-/// 【青茄重构】批注存储的落盘测试。
+/// 【轻读重构】批注存储的落盘测试。
 ///
 /// 真机上曾出现「保存失败，请重试」：`ReaderAnnotationStore.hiveReady`
 /// 从未被置位，`_box()` 恒为 null，`add()` 直接抛错。这里把

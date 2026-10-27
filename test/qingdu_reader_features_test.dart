@@ -8,7 +8,7 @@ import 'package:fqapp/services/reader_annotation_store.dart';
 import 'package:fqapp/services/shelf_store.dart';
 import 'package:fqapp/widgets/content_rating_chip.dart';
 
-/// 【青茄重构·新增】分级 / 书架分组 / 笔记页的单元与组件测试。
+/// 【轻读重构·新增】分级 / 书架分组 / 笔记页的单元与组件测试。
 class _NotesMemoryStore extends ReaderAnnotationStore {
   _NotesMemoryStore(this.notes);
 

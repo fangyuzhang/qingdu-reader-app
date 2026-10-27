@@ -35,7 +35,7 @@ class VolumeKeyService {
     _onVolumeKey = callback;
   }
 
-  /// 【青茄·M-Pencil】手写笔双击手势回调（原生键码 718 拦截后回调）。
+  /// 【轻读·M-Pencil】手写笔双击手势回调（原生键码 718 拦截后回调）。
   /// 由阅读页在进入手写墨迹模式时注册。
   void Function()? _onStylusDoubleTap;
 

@@ -6,7 +6,7 @@ import android.util.Log
 import android.view.Display
 
 /**
- * 【青茄·高刷适配】把窗口刷新率偏好指到面板最高档。
+ * 【轻读·高刷适配】把窗口刷新率偏好指到面板最高档。
  *
  * 背景：主流机型面板 90~180Hz，但国产 ROM（MIUI/ColorOS/OriginOS 的
  * 「智能刷新率」）默认把**未声明偏好**的应用锁在 60Hz——只有白名单大厂

@@ -88,7 +88,7 @@ class ReaderPage extends StatefulWidget {
   final bool localOnly;
   final ChapterTextLoader? chapterLoader;
 
-  /// 【青茄·Active Canvas】内嵌手写块存储（测试注入内存版；null = 真实加密盒）。
+  /// 【轻读·Active Canvas】内嵌手写块存储（测试注入内存版；null = 真实加密盒）。
   final ReaderInkBlockStore? inkBlockStore;
   final ReaderStore? readerStore;
   final ChapterCache? chapterCache;
@@ -98,14 +98,14 @@ class ReaderPage extends StatefulWidget {
   /// Local 划线 storage. Defaults to the device-wide box.
   final ReaderUnderlineStore? underlineStore;
 
-  /// 【青茄重构·新增】批注/书摘存储（默认单例；测试可注入）。
+  /// 【轻读重构·新增】批注/书摘存储（默认单例；测试可注入）。
   final ReaderAnnotationStore? annotationStore;
 
-  /// 【青茄重构·新增】打开后直接定位到的正文偏移（字符坐标）。
+  /// 【轻读重构·新增】打开后直接定位到的正文偏移（字符坐标）。
   /// 笔记页「定位原文」用它覆盖已保存进度。
   final int? startTextOffset;
 
-  /// 【青茄重构·新增】内容分级（12+ / 15+），null 表示入口未提供，
+  /// 【轻读重构·新增】内容分级（12+ / 15+），null 表示入口未提供，
   /// 不显示标签。见 `ContentRating`。
   final String? ageRating;
 
@@ -349,14 +349,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 听书跟随：把正在朗读/高亮的那一行送到可视区上部约 1/3 处。
   ///
-  /// 【青茄修复·听书跟随】原实现用 `jumpTo(top + progress * extent)` 把
+  /// 【轻读修复·听书跟随】原实现用 `jumpTo(top + progress * extent)` 把
   /// 章内进度当成视口顶部，朗读行因此被顶到屏幕外；而且每次 tick 直接
   /// 跳，表现为“一点一点突然下降”。现在按排版里的真实行位置换算，
   /// 目标 = 行顶部 - 视口高度/3，并用 [animateTo] 缓动过去。
   void _followListeningScroll(double progress) {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
-    // 【青茄修复·滚动无缝】跟着读的是「活动段」，不是整条窗口：
+    // 【轻读修复·滚动无缝】跟着读的是「活动段」，不是整条窗口：
     // 段内坐标要加上段起点才是列表偏移。
     final segment = _activeScrollSegment;
     final layout = segment?.layout ?? _chapterLayout;
@@ -486,7 +486,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   ReaderPageMode? _layoutMode;
   int _layoutRevision = 0;
 
-  // ===== 【青茄修复·滚动无缝】章节段窗口 =====
+  // ===== 【轻读修复·滚动无缝】章节段窗口 =====
   //
   // 滚动模式不再「一章一个 ListView」：当前章之后预取的一章作为「段」接在
   // 同一棵 ListView 的尾部，段与段之间不留间隔、不插任何按钮。视口中心滚到
@@ -532,10 +532,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// records; paragraph ones live in [_underlines]).
   List<ReaderRangeUnderline> _rangeUnderlines = const [];
 
-  /// 【青茄重构·新增】本章批注/书摘（行内批注块 + 红线）。
+  /// 【轻读重构·新增】本章批注/书摘（行内批注块 + 红线）。
   List<ReaderAnnotation> _annotations = const [];
 
-  // ==================== 【青茄·Active Canvas】内嵌手写块 ====================
+  // ==================== 【轻读·Active Canvas】内嵌手写块 ====================
 
   late final ReaderInkBlockStore _inkBlockStore =
       widget.inkBlockStore ?? ReaderInkBlockStore.instance;
@@ -546,7 +546,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 草稿画布（未确认不落库；排版层以 [_kDraftInkId] 占位参与重排）。
   _DraftInkBlock? _draftInkBlock;
 
-  // ---- 【青茄·侧栏笔记】Scribe 式右侧手写面板（参考图 1/2）----
+  // ---- 【轻读·侧栏笔记】Scribe 式右侧手写面板（参考图 1/2）----
   // 面板打开时正文列变窄并重排；面板内手写独立存储（layoutVersion
   // 'panel-v1'，与整页墨迹互不干扰）。仅分页模式提供入口。
   static const _panelLayoutVersion = 'panel-v1';
@@ -585,7 +585,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 本章全部墨迹（只读态：锚点区间以虚线并入正文标记层）。
   List<InkAnnotation> _chapterInk = const [];
 
-  // ===== 【青茄重构·新增】护眼提醒 =====
+  // ===== 【轻读重构·新增】护眼提醒 =====
   /// 连续阅读提醒间隔（青少年护眼边界，不做家长监护）。
 
   Timer? _eyeCareTimer;
@@ -593,7 +593,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 本次阅读会话选择「今天不再提醒」后置位。
   bool _eyeCareMuted = false;
 
-  // ===== 【青茄重构·新增】阅读字数统计 =====
+  // ===== 【轻读重构·新增】阅读字数统计 =====
   /// 当前章正文长度，以及本次进入该章后已经计入的字数。
   ///
   /// 字数 = 停留时长 × 阅读速度，并用本章长度封顶：目录跳到最后一章、
@@ -677,7 +677,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     VolumeKeyService.instance.setOnVolumeKey(_onVolumeKey);
     _syncVolumeKeyEnabled();
     ListeningSession.instance.addListener(_onListeningTick);
-    // 【青茄·全局日夜同步】App 全局切深/浅色（设置页或「我的」的切换按钮）
+    // 【轻读·全局日夜同步】App 全局切深/浅色（设置页或「我的」的切换按钮）
     // 时，正文跟着切；正文的夜间按钮也回写全局，两边是同一条偏好。
     themeModeNotifier.addListener(_onGlobalThemeModeChanged);
     WidgetsBinding.instance.addObserver(this);
@@ -688,12 +688,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         ? 0
         : widget.startIndex.clamp(0, widget.chapters.length - 1);
     _scrollController.addListener(_onScroll);
-    // 【青茄重构·新增】批注块内的删除/编辑直接写存储，这里跟随后刷新。
+    // 【轻读重构·新增】批注块内的删除/编辑直接写存储，这里跟随后刷新。
     _annotationListener = () {
       if (mounted) unawaited(_loadAnnotations());
     };
     _annotationStore.changes.addListener(_annotationListener);
-    // 【青茄·Active Canvas】内嵌手写块存储变化 → 重载重排。
+    // 【轻读·Active Canvas】内嵌手写块存储变化 → 重载重排。
     _inkBlockListener = _onInkBlockStoreChanged;
     _inkBlockStore.changes.addListener(_inkBlockListener);
     _preferencesFuture = _loadPreferences();
@@ -722,10 +722,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // Note: Route/lifecycle ownership and SDK 36 compatibility; see
   // .agents/notes/implemented/bug-fix/2026-10-12-reader-system-bars.md.
-  // 【青茄·沉浸式系统栏】显隐只在状态真正变化时下发（见 _syncSystemBars），
+  // 【轻读·沉浸式系统栏】显隐只在状态真正变化时下发（见 _syncSystemBars），
   // 路由切换与 dispose 都会恢复 edge-to-edge，不会把沉浸模式带到别的页面。
 
-  // 【青茄修复·进章顺滑】正文排版是重活（整章逐段 TextPainter 量高），
+  // 【轻读修复·进章顺滑】正文排版是重活（整章逐段 TextPainter 量高），
   // 若在路由转场动画进行中排版，动画必掉帧。等转场完成再放正文：
   // 代价是内容晚约 200ms 出现，换来整段动画全程流畅。
   bool _routeIntroReady = false;
@@ -766,7 +766,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   void _syncSystemBars() {
-    // 【青茄·沉浸式系统栏】工具栏收起（正文沉浸）时隐藏状态栏与手势条，
+    // 【轻读·沉浸式系统栏】工具栏收起（正文沉浸）时隐藏状态栏与手势条，
     // 工具栏出现时恢复 edge-to-edge。弹层/对话框会把自己压到栈顶，此时
     // `_routeCurrent` 为 false，按“面板打开着算工具栏显示态”处理，系统
     // 栏随之恢复，避免「面板开着但系统栏被隐藏」。
@@ -970,7 +970,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         }
       }
     }
-    // 【青茄修复·长按选句】默认粒度从「整段」改成「手指下的那句话」：
+    // 【轻读修复·长按选句】默认粒度从「整段」改成「手指下的那句话」：
     // 点在已有划线上仍恢复划线范围；位置取不到（落在插图/边缘）时兜底整段。
     var selectionStart = hit?.start ?? block.start;
     var selectionEnd = hit?.end ?? block.end;
@@ -1401,12 +1401,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         if (mounted) setState(() => _underlinePanelOpen = true);
       case ReaderParagraphAction.removeUnderline:
         await _removeSelectionUnderline();
-      // 【青茄重构·新增】批注 / 书摘：选中范围落库后由排版层插入行内批注块。
+      // 【轻读重构·新增】批注 / 书摘：选中范围落库后由排版层插入行内批注块。
       case ReaderParagraphAction.annot:
         await _createAnnotation(excerpt: false);
       case ReaderParagraphAction.excerpt:
         await _createAnnotation(excerpt: true);
-      // 【青茄·Active Canvas】画布/便签/备注（规格 C1/C4/C6）。
+      // 【轻读·Active Canvas】画布/便签/备注（规格 C1/C4/C6）。
       case ReaderParagraphAction.canvas:
         _beginInkDraft(selection.start);
       case ReaderParagraphAction.sticky:
@@ -1611,7 +1611,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
-  // ==================== 【青茄重构·新增】护眼提醒 ====================
+  // ==================== 【轻读重构·新增】护眼提醒 ====================
 
   /// 每 [eyeCareInterval] 提醒一次休息。只在本页仍是当前路由时弹出，
   /// 避免用户已经退出阅读却突然收到弹窗。
@@ -1690,7 +1690,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
   }
 
-  // ==================== 【青茄重构·新增】批注 / 书摘 ====================
+  // ==================== 【轻读重构·新增】批注 / 书摘 ====================
 
   ReaderAnnotationStore get _annotationStore =>
       widget.annotationStore ?? ReaderAnnotationStore.instance;
@@ -1776,7 +1776,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
-  // ---- 【青茄·Active Canvas】内嵌手写块：加载 / 草稿 / 确认 / 删除 ----
+  // ---- 【轻读·Active Canvas】内嵌手写块：加载 / 草稿 / 确认 / 删除 ----
 
   void _onInkBlockStoreChanged() {
     if (mounted) unawaited(_loadInkBlocks());
@@ -1822,7 +1822,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _panelSaveTimer?.cancel();
     final controller = _panelInk;
     final viewport = _panelViewport;
-    // 【青茄·确认即响应】先收面板（UI 立即反馈），落盘异步进行——
+    // 【轻读·确认即响应】先收面板（UI 立即反馈），落盘异步进行——
     // 与 _confirmInkDraft 同口径；失败只丢本次未保存的增量。
     unawaited(_savePanelInkState(controller, viewport));
     if (!mounted) return;
@@ -1978,7 +1978,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final draft = _draftInkBlock;
     if (draft == null) return;
     final boxWidth = _inkBlockBoxWidth;
-    // 【青茄·Scribe 对齐】确认时画布收缩至内容高度（参考图 3：框贴合
+    // 【轻读·Scribe 对齐】确认时画布收缩至内容高度（参考图 3：框贴合
     // 笔迹，一行字就是一条小框）。最低保底 80dp。
     var contentBottom = 0.0;
     for (final stroke in draft.strokes) {
@@ -2011,7 +2011,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       bookTitle: widget.title,
       chapterTitle: _chapter.title,
     );
-    // 【青茄·Active Canvas】确认即响应：先摘草稿重排（用户立刻看到
+    // 【轻读·Active Canvas】确认即响应：先摘草稿重排（用户立刻看到
     // 「画布定型」），落盘异步进行——失败只记日志，下一次进章重读。
     unawaited(_inkBlockStore.add(block));
     setState(() {
@@ -2256,7 +2256,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _openInkBlockTearoff(ReaderInlineNote note) =>
       unawaited(_openInkBlock(note));
 
-  /// 【青茄·笔记 PDF 分享】规格 C9 v2：整本 / 当前章节 → PDF → 系统分享。
+  /// 【轻读·笔记 PDF 分享】规格 C9 v2：整本 / 当前章节 → PDF → 系统分享。
   Future<void> _shareBookNotes() async {
     if (_controlsVisible) _toggleControls();
     final scope = await showAppDialog<NotesPdfScope>(
@@ -2420,7 +2420,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     _ink = controller;
     _closeSelectionBar(clearSelection: true);
-    // 【青茄·M-Pencil】双击手写笔 = 切换 笔/橡皮（原生拦截键码 718）。
+    // 【轻读·M-Pencil】双击手写笔 = 切换 笔/橡皮（原生拦截键码 718）。
     VolumeKeyService.instance.setOnStylusDoubleTap(_toggleInkTool);
     unawaited(VolumeKeyService.instance.setStylusDoubleTapEnabled(true));
     setState(() {});
@@ -2674,7 +2674,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final end = selection.end;
     final quote = layout.textInRange(start, end).trim();
     if (quote.isEmpty) return;
-    // 【青茄重构·修复】弹层之前先收掉选区与工具条：否则弹层动画期间
+    // 【轻读重构·修复】弹层之前先收掉选区与工具条：否则弹层动画期间
     // 选区高亮 + 两端手柄仍在逐帧重绘，真机上表现为「弹出特别卡」。
     _closeSelectionBar(clearSelection: true);
     // 等当前帧结束，让选区先真正从画面消失，再开始弹层动画。
@@ -2867,7 +2867,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _requestedStartAtEnd = startAtEnd;
       _sessionActive = false;
       _chapterTurnRequest = chapterTurn;
-      // 【青茄修复·滚动无缝】整章加载（目录跳转 / 首尾跨章兜底）后窗口
+      // 【轻读修复·滚动无缝】整章加载（目录跳转 / 首尾跨章兜底）后窗口
       // 从当前章重建：旧段全部作废，等新排版出来后重新长出第 0 段。
       _clearScrollWindow();
     });
@@ -2924,7 +2924,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _index = selected.index;
         _content = text;
         _chapterContent = content;
-        // 【青茄重构·新增】笔记页定位：首次加载的目标章直接跳到批注位置，
+        // 【轻读重构·新增】笔记页定位：首次加载的目标章直接跳到批注位置，
         // 用与自动存档一致的 positionVersion=2 结构复用恢复逻辑。
         final jump = widget.startTextOffset;
         _savedPosition =
@@ -3103,7 +3103,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         ),
       );
     } finally {
-      // 【青茄修复·状态栏常显】沉浸模式已下线：状态栏全程可见，弹层
+      // 【轻读修复·状态栏常显】沉浸模式已下线：状态栏全程可见，弹层
       // 关闭不需要任何系统栏同步（曾有的 #57 闪烁问题随沉浸一起消失）。
     }
   }
@@ -3340,7 +3340,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       }
       if (superseded()) return _latestChapterText(chapter);
       if (mounted && !widget.localOnly) {
-        // 【青茄性能·改】目录与正文落盘都不该挡在正文前面：整本目录写一次
+        // 【轻读性能·改】目录与正文落盘都不该挡在正文前面：整本目录写一次
         // 就可能上百毫秒，用户却只想马上看到这一章。落盘转后台，且先确认
         // 这期间内容没被刷新版本覆盖，避免旧文字盖掉新图文。
         final pending = text;
@@ -3396,7 +3396,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  // ==================== 【青茄修复·滚动无缝】段窗口 ====================
+  // ==================== 【轻读修复·滚动无缝】段窗口 ====================
 
   /// 作废整个段窗口。下一次 build 会用当前章重新长出第 0 段。
   void _clearScrollWindow() {
@@ -3481,7 +3481,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   ///
   /// 幂等，只在一处（[_buildScrollContent]）调用。
   ///
-  /// 【青茄修复·滚动无缝】判据是「当前章在不在窗口里」，不再是「窗口是不是
+  /// 【轻读修复·滚动无缝】判据是「当前章在不在窗口里」，不再是「窗口是不是
   /// 以当前章开头」。窗口现在两头都会长（后面接下一章、前面接上一章），
   /// 原来按「书 + 章」比对，视口一越过章界当前章就变了，窗口被整块重建，
   /// 读者被留在新列表的同一个像素偏移上 —— 表现就是跨章时突兀地跳一下。
@@ -3530,7 +3530,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (remaining <= viewport * 1.5) {
       unawaited(_prefetchScrollSegment());
     }
-    // 【青茄修复·滚动无缝】往上同理：窗头上沿离视口不足 1.5 屏，就把上一章
+    // 【轻读修复·滚动无缝】往上同理：窗头上沿离视口不足 1.5 屏，就把上一章
     // 排好插到窗口最前面。这样拉到章首继续往下拖时，接上的是上一章末尾的
     // 正文本身，而不是一次「整章加载 → 版面重建 → 跳到别处」。
     final first = _scrollSegments.first;
@@ -3700,7 +3700,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _switchScrollSegment(index);
   }
 
-  /// 【青茄修复·滚动无缝】跨段静默换章：列表内容与滚动位置都不动，
+  /// 【轻读修复·滚动无缝】跨段静默换章：列表内容与滚动位置都不动，
   /// 只把「当前章」指向新段，并把它需要的装饰数据补上。
   void _switchScrollSegment(int index) {
     if (index < 0 || index >= _scrollSegments.length) return;
@@ -3748,7 +3748,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     unawaited(_loadUnderlines());
     unawaited(_loadChapterInk());
-    // 【青茄修复·滚动无缝】静默换章把 _ideas 清空了，工具栏「本章评论」
+    // 【轻读修复·滚动无缝】静默换章把 _ideas 清空了，工具栏「本章评论」
     // 入口（要求 total > 0）会随之消失；按整章加载同样的路径把新章的
     // 段评拉回来。气泡开着时 IdeasRevision 会让该段按完整数据重排，
     // 几何变化走 _resetScrollWindow 的补偿路径，不会跳屏。
@@ -3799,7 +3799,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return items;
   }
 
-  /// 【青茄·宽屏适配】正文栏宽上限：平板/折叠屏/横屏的视口宽超过它时，
+  /// 【轻读·宽屏适配】正文栏宽上限：平板/折叠屏/横屏的视口宽超过它时，
   /// 正文（含墨迹画布）钳制到该宽并居中，行长回到手机阅读的舒适区间，
   /// 栏外仍渲染正文底色（全屏观感不变）。手机竖屏（≤480dp）不受影响。
   static const double _kReaderMaxColumnWidth = 560;
@@ -3857,7 +3857,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 : const {},
             underlinedParagraphs: _underlines,
             bubbleBuilder: bubblesVisible ? _buildParagraphBubble : null,
-            // 【青茄重构·新增】批注块参与排版：分页/滚动两种模式共用。
+            // 【轻读重构·新增】批注块参与排版：分页/滚动两种模式共用。
             inlineNotes: _inlineNotes,
           );
     _layoutIdeasRevision = _ideasRevision;
@@ -3883,7 +3883,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _pageIndex = layout.pageForOffset(_textOffset);
     _needsRestore = false;
     _progressReady = false;
-    // 【青茄修复·滚动无缝】只有「恢复进度 / 切页模式 / 换排版规格」才需要
+    // 【轻读修复·滚动无缝】只有「恢复进度 / 切页模式 / 换排版规格」才需要
     // 把滚动位置重新定位到章内目标偏移。段评、划线、批注到达时的重排不改
     // 几何，此时列表里的 offset 是「段窗口」坐标，按章内坐标跳会甩飞。
     _layoutRepositioned =
@@ -3927,7 +3927,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _onScroll() {
     _saveTimer?.cancel();
     if (!_progressReady || _paged) return;
-    // 【青茄修复·滚动无缝】先按视口中心判断跨段，再记进度：
+    // 【轻读修复·滚动无缝】先按视口中心判断跨段，再记进度：
     // 顺序反过来会把「上一章的偏移」记到刚切过去的章上。
     _syncActiveScrollSegment();
     _captureScrollProgress(updateTextOffset: true);
@@ -3991,7 +3991,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       return;
     }
     if (!_scrollController.hasClients) return;
-    // 【青茄修复·滚动无缝】滚动模式下 position 要按「活动段」换算：
+    // 【轻读修复·滚动无缝】滚动模式下 position 要按「活动段」换算：
     // 列表 offset 是整条窗口的，减去段起点才是本章内的位置。
     final segment = _activeScrollSegment;
     if (segment != null) {
@@ -4346,7 +4346,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 点击区域九宫格分发：按点按位置取九宫格动作执行。
   void _handleTapZone(Offset position, BoxConstraints constraints) {
-    // 【青茄·Active Canvas】便签放置模式：下一次点按 = 放置（不翻页）。
+    // 【轻读·Active Canvas】便签放置模式：下一次点按 = 放置（不翻页）。
     if (_stickyArmed) {
       setState(() => _stickyArmed = false);
       final anchor = _inkAnchorAtLocalPoint(position);
@@ -4695,7 +4695,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         body: _errorView(),
       );
     }
-    // 【青茄重构·修复】把输入法 inset 从整个阅读页里冻结掉。
+    // 【轻读重构·修复】把输入法 inset 从整个阅读页里冻结掉。
     // 阅读页自己没有任何输入框（写想法、目录搜索都是独立路由），键盘只该
     // 影响弹层。这里做两件事：
     //   1. viewInsets 清零 —— 否则 Scaffold 默认会缩小 body；
@@ -4716,7 +4716,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           )
         : raw;
     _stableInsetsInitialized = true;
-    // 【青茄·工具栏覆盖】正文不再为工具栏让位：工具栏与系统栏滑上来盖住
+    // 【轻读·工具栏覆盖】正文不再为工具栏让位：工具栏与系统栏滑上来盖住
     // 正文，视口大小全程不变，切换时文字不动。唯一例外是章节第一页——
     // 此时开头还在屏幕上，额外让出一条工具栏高度，避免开篇文字被盖住。
     // 这个让位是锁存的（见 _liftForToolbar），滚动过程中不会中途消失。
@@ -4750,7 +4750,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       canPop: !_controlsVisible,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          // 【青茄修复·返回抖动】返回动画一开始就把系统栏还给系统：
+          // 【轻读修复·返回抖动】返回动画一开始就把系统栏还给系统：
           // 沉浸模式是在 dispose（动画结束）时才恢复的，那时详情页已完全
           // 可见，状态栏/手势条回归的 MediaQuery 变化会让整页让位、抖一下。
           // 提前到 pop 起始帧，让位发生在阅读器还盖着详情页的时候。
@@ -4770,7 +4770,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           data: preset.theme(Theme.of(context)),
           child: Scaffold(
             backgroundColor: preset.backgroundColor,
-            // 【青茄重构·修复】阅读页不随输入法缩放。
+            // 【轻读重构·修复】阅读页不随输入法缩放。
             // 默认 true 时键盘一弹，body 高度被压掉约 300px，LayoutBuilder 的
             // constraints 随之变化 → ReaderLayoutSpec 变化 → 整章重新测量分页，
             // 真机上就表现为「正文带着插图上下跳一下，然后卡几百毫秒」。
@@ -4839,7 +4839,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                                           ),
                                         ),
                                         // 画布尺寸即批注页面快照（墨迹
-                                        // 归一化基准）。【青茄·宽屏适配】
+                                        // 归一化基准）。【轻读·宽屏适配】
                                         // 与正文同一 [_kReaderMaxColumnWidth]
                                         // 钳制 + 居中：画布必须与正文盒同宽，
                                         // 墨迹归一化坐标才不与锚点错位。
@@ -5071,7 +5071,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         ),
       );
     }
-    // 【青茄修复·进章顺滑】转场动画没走完就先保持加载态，正文排版
+    // 【轻读修复·进章顺滑】转场动画没走完就先保持加载态，正文排版
     // 留到动画结束后再做（见 _watchRouteIntro 的注释）。
     _watchRouteIntro();
     if (_loading || _error != null || !_routeIntroReady) {
@@ -5087,7 +5087,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 【青茄·侧栏笔记】面板打开时正文列让出右侧宽度：把收窄后的
+        // 【轻读·侧栏笔记】面板打开时正文列让出右侧宽度：把收窄后的
         // 合成约束喂给排版（后续文字自然重排），面板作为右侧独立列。
         final effective = _sidePanelOpen
             ? BoxConstraints.tight(
@@ -5108,7 +5108,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           behavior: HitTestBehavior.translucent,
           onTapUp: (details) {
             if (_selection != null) {
-              // 【青茄修复·划线预选】划线面板还开着时，面板里高亮的线型和
+              // 【轻读修复·划线预选】划线面板还开着时，面板里高亮的线型和
               // 颜色就是用户已经「选好」的预选项。点其他部位不该把这次划线
               // 悄悄丢掉——按预选落笔再收起，与点「确定」等价；否则用户会
               // 以为已经划上了。
@@ -5137,12 +5137,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           child: Stack(
             key: _selectionOverlayKey,
             children: [
-              // 【青茄重构·修复】内容区独立成层：弹层/键盘动画期间正文
+              // 【轻读重构·修复】内容区独立成层：弹层/键盘动画期间正文
               // 不必跟着重绘，真机上的弹出卡顿主要来自这里。
               Positioned.fill(
                 // 键盘弹出只影响弹层自身：把 viewInsets 从正文子树移除，
                 // 输入法动画就不会推动整章重排（真机卡顿的另一半原因）。
-                // 【青茄·宽屏适配】Center+SizedBox 把正文盒钳到 spec 视口宽
+                // 【轻读·宽屏适配】Center+SizedBox 把正文盒钳到 spec 视口宽
                 // 居中（手机上与全宽一致，无感）；选区手柄/工具栏走
                 // localToGlobal 变换，居中偏移自动正确。
                 child: Align(
@@ -5198,7 +5198,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-              // 【青茄·侧栏笔记】右侧手写面板（仅非墨迹模式显示；✕ 关闭，
+              // 【轻读·侧栏笔记】右侧手写面板（仅非墨迹模式显示；✕ 关闭，
               // 橡皮切换；InkCanvas 仅 stylus——M-Pencil 目标设备）。
               if (_sidePanelOpen && _panelInk != null)
                 Positioned(
@@ -5472,7 +5472,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// The final chapter keeps a stable completion page. Other chapters go
   /// directly to the next text page; their comments are in the reader toolbar.
   ///
-  /// 【青茄修复·滚动无缝】章末只留「本章完」一行文字：章末的
+  /// 【轻读修复·滚动无缝】章末只留「本章完」一行文字：章末的
   /// 「查看本章评论」按钮已经删掉（评论入口在顶部工具栏）。
   Widget _buildChapterEndPage(ReaderThemePreset preset) {
     return ColoredBox(
@@ -5504,7 +5504,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     ReaderChapterLayout layout,
     ReaderSelectionScope scope,
   ) {
-    // 【青茄修复·滚动无缝】先校准段窗口，再拍平列表项。
+    // 【轻读修复·滚动无缝】先校准段窗口，再拍平列表项。
     // 所有段共用这一棵 ListView：段与段之间没有 footer、没有按钮、
     // 没有额外间隔，滚过章界就是下一章的开头。
     _syncScrollWindow(layout);
@@ -5750,7 +5750,7 @@ class _ReaderToolbarPresenceState extends State<_ReaderToolbarPresence> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// 【青茄修复·滚动无缝】滚动模式的一个「章节段」：一章的排版 + 批注数据，
+/// 【轻读修复·滚动无缝】滚动模式的一个「章节段」：一章的排版 + 批注数据，
 /// 拼进同一棵 ListView。段与段之间不插任何组件，跨章就是下一段的第一块。
 class _ScrollSegment {
   _ScrollSegment({
@@ -5789,7 +5789,7 @@ class _ScrollSegment {
 }
 
 /// 一条批注/书摘 → 排版层行内块；当前章与相邻章的加载路径共用。
-/// 【青茄·Active Canvas】草稿画布在排版层的占位 id（未确认不落库）。
+/// 【轻读·Active Canvas】草稿画布在排版层的占位 id（未确认不落库）。
 const String _kDraftInkId = '__draft_ink__';
 
 /// 草稿画布状态：锚点 + 当前高度 + 暂存笔迹（块本地像素坐标）。
@@ -5859,7 +5859,7 @@ ReaderInlineNote _inlineNoteOf(ReaderAnnotation note) {
     markerColorValue: note.effectiveMarkerColorValue,
     markStyle: note.markStyle,
     markColorValue: note.effectiveMarkColorValue,
-    // 【青茄·Active Canvas】打字备注 = 折叠图标行，不占正文空间（D8）。
+    // 【轻读·Active Canvas】打字备注 = 折叠图标行，不占正文空间（D8）。
     inkKind: isNote ? ReaderInlineNote.inkKindNote : '',
     inkFilled: isNote && note.thought.trim().isNotEmpty,
   );

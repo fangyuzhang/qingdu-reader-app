@@ -1,11 +1,11 @@
-# 青茄阅读 · 当前状态交接（AGENT-HANDOVER-NEXT）
+# 轻读 · 当前状态交接（AGENT-HANDOVER-NEXT）
 
 > 更新时间：2026-10-25 18:10 (UTC+8)（手写墨迹批注 + PDF 阅读 + 标签磁吸拖拽全部交付后重写；本文是唯一有效的当前状态说明，AGENT-HANDOVER.md 是早期归档）
 > 仓库：E:\项目\青茄阅读\repo\fqapp-src（Windows 侧路径；WSL 内为 /mnt/e/项目/青茄阅读/repo/fqapp-src）
 > 远端：https://github.com/fangyuzhang/qingdu-reader-app（旧地址 qingqie-reader-app 自动重定向）
 > 分支：master，HEAD **<提交后为准>**，已与远端校验一致
 > 版本：1.0.132+137　包名：com.fqapp.fqapp
-> 逐批变更细节看 QINGQIE-CHANGES.md（已记到第 76 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
+> 逐批变更细节看 QINGDU-CHANGES.md（已记到第 76 批）；扩展点施工图在 EXTENSION-SURVEY-REPORT.md；PDF 选型在 PDF-RENDER-SELECTION.md
 
 ---
 
@@ -33,7 +33,7 @@
 
 1. **冷启动灰条根因终修（69 批，本次）**：根因是 Android 10+ 对「透明状态栏」默认开启对比度保护 scrim（引擎 PlatformPlugin.java 512-514 行证实；框架 SystemUiOverlayStyle 预设的 systemStatusBarContrastEnforced 为 null → 从不下发 false）。三层关闭：MainActivity 原生 isStatusBarContrastEnforced=false（早于首帧）+ main.dart 系统栏消息提前到 runApp 之前 + 全部透明状态栏样式补 contrast=false。真机冷启动连拍验证：状态栏条带 0% 灰 / 97% 奶油底。**教训：透明状态栏必须同时关 contrast，否则必出灰条；阅读器没灰条是因为它用不透明正文底色。**
 2. **垃圾桶交互四连（67 批）**：按住的 chip 必须拖动全程保持 Draggable 存活（隐藏槽位会杀掉 Draggable → onDragEnd 丢失 → 状态卡死）；垃圾桶常驻 AppBar（compact 形态）；armed 唯一来源 = DragTarget candidate；磁吸吸收几何 = 水平≤88 且垂直≤48。
-3. **跨厂商可移植性审查（70 批）**：全库无厂商分支代码，灰条等全部修复基于 AOSP 标准 API（Android 7~16 全版本成立）；启动主题补 enforceStatusBarContrast/NavigationBarContrast=false 兜底窗口 attach 空档。合规清单与三项「无法一劳永逸」如实记录见 QINGQIE-CHANGES.md 第 70 批。
+3. **跨厂商可移植性审查（70 批）**：全库无厂商分支代码，灰条等全部修复基于 AOSP 标准 API（Android 7~16 全版本成立）；启动主题补 enforceStatusBarContrast/NavigationBarContrast=false 兜底窗口 attach 空档。合规清单与三项「无法一劳永逸」如实记录见 QINGDU-CHANGES.md 第 70 批。
 4. **MIUI 截屏陈旧帧陷阱**：连续快速 screencap 会返回字节级相同帧，验证必须 md5 查重 + 加间隔（过渡帧还会出现 alpha=0 伪影，原始 RGB 全黑但实际透明，勿误判黑屏）。
 5. **git 推送通道修复（2026-10-25 晚）**：ghproxy.net 镜像开始拒绝认证转发（"Invalid username or token"）。已在 WSL 全局配置加 `url."https://github.com/".pushInsteadOf = "https://github.com/"`——推送直连 github.com（凭证走 gh CLI，已登录 fangyuzhang），拉取继续走镜像。若再遇推送失败，排查顺序：gh auth status → 该 pushInsteadOf 是否还在 → 换 gh-proxy.com 镜像。
 
@@ -84,12 +84,12 @@
 
 ### 1.1 路径与验证
 
-1. flutter analyze / flutter test / flutter build 绝不能在中文路径下执行——仓库在 E:\项目\青茄阅读\...，Dart analysis server 遇中文路径直接崩溃（FormatException）。
-   标准流程：改 E:\项目\青茄阅读\repo\fqapp-src → robocopy 同步到 E:\fqapp-build2（ASCII 构建副本）→ 在副本里跑验证：
+1. flutter analyze / flutter test / flutter build 绝不能在中文路径下执行——仓库在 E:\项目\轻读\...，Dart analysis server 遇中文路径直接崩溃（FormatException）。
+   标准流程：改 E:\项目\轻读\repo\fqapp-src → robocopy 同步到 E:\fqapp-build2（ASCII 构建副本）→ 在副本里跑验证：
 
-   cd /e/ && robocopy "E:\项目\青茄阅读\repo\fqapp-src\lib" "E:\fqapp-build2\lib" //MIR //NFL //NDL //NJH //NP
-   robocopy "E:\项目\青茄阅读\repo\fqapp-src\test" "E:\fqapp-build2\test" //MIR //NFL //NDL //NJH //NP
-   cp "E:\项目\青茄阅读\repo\fqapp-src\pubspec.yaml" /e/fqapp-build2/
+   cd /e/ && robocopy "E:\项目\轻读\repo\fqapp-src\lib" "E:\fqapp-build2\lib" //MIR //NFL //NDL //NJH //NP
+   robocopy "E:\项目\轻读\repo\fqapp-src\test" "E:\fqapp-build2\test" //MIR //NFL //NDL //NJH //NP
+   cp "E:\项目\轻读\repo\fqapp-src\pubspec.yaml" /e/fqapp-build2/
    cd /e/fqapp-build2 && flutter pub get && flutter analyze && flutter test
 
 2. E:\fqapp-build（无 2）是废弃目录，勿用：曾因构建中被锁/强删导致 gradle 中间产物损坏，打出的 APK 里 libfqapi_core.so 被截断 145 字节，装机后报「本地服务启动失败」（v55 事故）。构建目录损坏的修法：换全新目录完整 robocopy + flutter pub get + 干净构建；验收标准是 APK 内 .so 长度 6,444,168（与源文件差 8 字节为 gradle 规范化，正常）。E:\fqapp-build 现仍被进程锁着删不净，重启后可 cmd //c "rmdir /S /Q E:\fqapp-build" 清掉。
@@ -118,7 +118,7 @@
   $ADB -s b2f8e975 install -r build/app/outputs/flutter-apk/app-release.apk
   $ADB -s b2f8e975 shell am start -n com.fqapp.fqapp/.MainActivity
 
-- keystore 密码在 E:\项目\青茄阅读\signing\SIGNING-SECRETS.txt；android/keystore.properties 是 git 忽略的本地文件。
+- keystore 密码在 E:\项目\轻读\signing\SIGNING-SECRETS.txt；android/keystore.properties 是 git 忽略的本地文件。
 - ~/.gradle/gradle.properties 里的 VPN 代理（127.0.0.1:51981）已被注释——仓库走阿里云镜像可直连。若用户开了 VPN 导致构建失败，按文件内注释改回端口。
 - APK 归档惯例：cp <apk> /d/APP/agent/apk/fqapp-vNN.apk（最新 v67 = 1.0.132+137）。
 - debugTools 开关：--dart-define=fqapp.debugTools=true 让调试页（手写笔探测/批注诊断）出现在 release 包；签名与正式包一致，可直接覆盖安装再换回。
@@ -132,7 +132,7 @@
 
   （WSL 内 gh 已登录 fangyuzhang，ghproxy 镜像规则在 WSL 的 ~/.gitconfig。仓库本地 credential helper 用了裸 gh，必须先 export PATH，否则 Invalid username or token。bash -c 外层的 Windows PATH 混入会报一条 export 错误——无害，忽略。）
 - 推送后校验：git ls-remote origin master 与 git rev-parse HEAD 一致（连接重置就重试一次，本会话两次成功前各重试过）。
-- git 身份已配：青茄阅读 <dev@qingqie.local>（仓库本地 config）。
+- git 身份已配：轻读 <dev@qingdu.local>（仓库本地 config）。
 - 提交规范（AGENTS.md）：area: 结果，正文写 为什么/怎么验/影响面。
 
 ### 1.5 真机验证手法（视觉取证链）
@@ -146,7 +146,7 @@
   - 系统文件选择器（DocumentsUI）：搜索/菜单/抽屉/筛选 chip 可注入，**文件项点击无效**（SAF 手测留人工）；
   - 通知栏展开时先 `cmd statusbar collapse`。
 - dumpsys gfxinfo 对 Flutter 自绘 surface 统计恒 0 帧（MIUI Android 11 限制），帧率取证不可行。
-- 证据截图归档：E:\项目\青茄阅读\releases\glass-theme-shots\。
+- 证据截图归档：E:\项目\轻读\releases\glass-theme-shots\。
 
 ### 1.6 脚本/工具坑（改代码时）
 

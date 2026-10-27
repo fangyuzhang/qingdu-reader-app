@@ -28,7 +28,7 @@ import 'widgets/lazy_indexed_stack.dart';
 import 'widgets/home/home_design.dart';
 
 void main() {
-  // 【青茄重构·修复】绑定初始化与 runApp 必须落在**同一个 zone**：
+  // 【轻读重构·修复】绑定初始化与 runApp 必须落在**同一个 zone**：
   // 原先 ensureInitialized() 在根 zone、runApp 在 runZonedGuarded 的子 zone，
   // debug 模式启动即抛 "Zone mismatch"（BindingBase.debugCheckZone），
   // 且子 zone 的未捕获异常处理对绑定回调不生效。
@@ -44,7 +44,7 @@ void main() {
     if (kDebugMode) {
       FlutterSkillBinding.ensureInitialized(autoEnableIndicators: false);
     }
-    // 【青茄·竖屏】全应用只接受竖屏：手机横过来时界面保持竖向，不再整体
+    // 【轻读·竖屏】全应用只接受竖屏：手机横过来时界面保持竖向，不再整体
     // 转成横向排版（阅读、听书、笔记都在竖屏完成）。清单里的
     // android:screenOrientation="portrait" 在系统层兜同一件事，避免
     // 启动瞬间先转一次再被 Flutter 拉回来。
@@ -71,7 +71,7 @@ void main() {
     // Rust 核心日志的读取入口：日志页「Rust」视图读 runtime_dir/rust.log。
     // 核心只在 Android 落盘（桌面/测试构建不装 logger），读不到时页面给空态。
     RustLogSource.reader = BackendService.instance.readRustLog;
-    // 【青茄修复·冷启动灰条】Android 10+ 会给「透明状态栏」默认垫一层
+    // 【轻读修复·冷启动灰条】Android 10+ 会给「透明状态栏」默认垫一层
     // 半透明灰 scrim（对比度保护），必须显式声明 systemStatusBarContrast
     // Enforced=false 才不画。两条系统栏消息都要在 runApp 之前发出：放在
     // runApp 之后（哪怕不 await）也有「首帧已上屏、消息未到」的窗口，
@@ -88,7 +88,7 @@ void main() {
       ),
     );
     runApp(const FqApp());
-    // 【青茄修复·启动提速】Rust 后端进程的拉起（解压/端口/握手）是
+    // 【轻读修复·启动提速】Rust 后端进程的拉起（解压/端口/握手）是
     // 启动最耗时的一步，与本地数据初始化完全独立。这里就并发开跑，
     // RootShell 等待的是同一个 Future（start() 可重入），总耗时从
     // 「本地 + 后端 相加」变成「两者取最大」。失败由 RootShell 的
@@ -101,7 +101,7 @@ void main() {
 
 Future<void> _initializeLocalData() async {
   await Hive.initFlutter();
-  // 【青茄修复·启动提速】AppBootstrap 会等本方法返回才放出首页。
+  // 【轻读修复·启动提速】AppBootstrap 会等本方法返回才放出首页。
   // 首页真正依赖的只有三个：书架历史、书架收藏、偏好（含主题），
   // 三者互相独立，并行打开；其余可选数据挪到 [_initializeOptionalData]，
   // 在首帧之后继续，不再串行拖住进入首页。
@@ -179,7 +179,7 @@ class _FqAppState extends State<FqApp> {
                 navigatorKey: _navigatorKey,
                 child: child ?? const SizedBox.shrink(),
               ),
-              title: '青茄阅读',
+              title: '轻读',
               debugShowCheckedModeBanner: false,
               theme: _theme(Brightness.light, eink: eink),
               darkTheme: _theme(Brightness.dark, eink: eink),
@@ -337,7 +337,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
     try {
       await (widget.backendStarter ?? BackendService.instance.start)();
     } catch (e) {
-      // 【青茄修复·启动提速】后端失败不再扣住整页：弹一条可重试的提示，
+      // 【轻读修复·启动提速】后端失败不再扣住整页：弹一条可重试的提示，
       // 页面照常显示（本地功能全可用；在线功能由请求侧等待/重试）。
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -354,7 +354,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final palette = HomePalette.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 【青茄重构·删除】短剧 tab（原 index 1）已移除，剩余三页均为浅色内容页，
+    // 【轻读重构·删除】短剧 tab（原 index 1）已移除，剩余三页均为浅色内容页，
     // 状态栏与玻璃拟态配色只跟随系统明暗，不再需要 isDramaTab 特判。
     final darkNav = isDark;
     // 墨水屏模式：本 build 由 Theme 变化触发重建（上面读了 Theme.of），
@@ -421,7 +421,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
             selectedIcon: Icon(LucideIcons.library_big),
             label: '书架',
           ),
-          // 【青茄重构·新增】笔记升为主导航：批注/书摘是核心能力，
+          // 【轻读重构·新增】笔记升为主导航：批注/书摘是核心能力，
           // 要能从任意位置一步到达（点条目回原文）。
           NavigationDestination(
             icon: Icon(LucideIcons.pen_line),
@@ -437,11 +437,11 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
       ),
     );
 
-    // 【青茄修复·启动提速】不再用「正在启动本地服务」的整页加载门挡住
+    // 【轻读修复·启动提速】不再用「正在启动本地服务」的整页加载门挡住
     // 首页：首页内容是本地的（书单/缓存封面），后端只服务搜索与在线阅读。
     // 后台把服务拉起来；某次启动失败时用 SnackBar 提示 + 可重试，不再
     // 把所有页面一起扣住 2~3 秒。
-    // 【青茄修复·底栏固定】extendBody 关闭：底栏是实心固定条（对齐番茄
+    // 【轻读修复·底栏固定】extendBody 关闭：底栏是实心固定条（对齐番茄
     // 正式版的处理），正文不再垫到底栏后面。之前悬浮玻璃条 + extendBody
     // 会让每个列表的底部内容被底栏遮住一截，页内只好各自垫大 padding。
     return Scaffold(
@@ -449,7 +449,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
       // 状态栏图标亮度挂在壳层、按主题明暗切换。样式放壳层而不是各页内部，
       // 是因为 IndexedStack 里未选中的页不参与绘制，页内 AnnotatedRegion
       // 切走后会残留上一个页的样式。
-      // 【青茄重构】删除短剧 tab 后不再有黑底视频流页面，无需按 tab 特判。
+      // 【轻读重构】删除短剧 tab 后不再有黑底视频流页面，无需按 tab 特判。
       body: AnnotatedRegion<SystemUiOverlayStyle>(
         // 显式透明状态栏底色 + 关闭对比度 scrim（Android 10+ 对透明状态栏
         // 默认垫灰渐变，即冷启动灰条；阅读器页状态栏用不透明正文底色所以
@@ -465,7 +465,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
           index: _index,
           children: [
             const HomePage(),
-            // 【青茄重构·删除】原第二个页面为 DramaPage（短剧 feed），
+            // 【轻读重构·删除】原第二个页面为 DramaPage（短剧 feed），
             // 主导航为 首页/书架/笔记/我的 四 tab。
             // 空书架上的「去书城找书」切回首页 tab。
             LibraryPage(onBrowse: () => setState(() => _index = 0)),
@@ -474,7 +474,7 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
           ],
         ),
       ),
-      // 【青茄修复·底栏固定】整宽固定条（学习番茄正式版的处理方式）：
+      // 【轻读修复·底栏固定】整宽固定条（学习番茄正式版的处理方式）：
       // 不悬浮、不圆角，顶部一条细分隔线与正文区分，SafeArea 只保手势区
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(

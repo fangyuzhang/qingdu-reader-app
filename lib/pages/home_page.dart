@@ -15,13 +15,13 @@ import 'search_page.dart';
 
 /// 首页：编辑部精选书单（分类推荐）。
 ///
-/// 【青茄重构·重写】原首页拉的是上游网文推荐流（homeProvider），
+/// 【轻读重构·重写】原首页拉的是上游网文推荐流（homeProvider），
 /// 与「面向青少年、不推荐网络文学」的定位冲突，这里整页换成策划书单：
 ///
 /// * 数据来自打包的 `assets/config/curated_books.json`，不联网、不受上游影响；
 /// * 按 7 个类型分组（古典名著/世界文学/历史人文/科普百科/科幻想象/成长青春/诗歌散文）；
 /// * 顶部「今日荐读」按日期稳定轮换（同一天固定同一本）；
-/// * 【青茄修复·新增】点书直接进阅读器（书单条目先解析成书城书籍）；
+/// * 【轻读修复·新增】点书直接进阅读器（书单条目先解析成书城书籍）；
 ///   长按卡片才进荐读页，荐语入口仍然保留。
 class HomePage extends StatefulWidget {
   const HomePage({super.key, this.catalog, this.categoryLoader});
@@ -135,7 +135,7 @@ class _HomePageState extends State<HomePage> {
             bottom: false,
             child: Column(
               children: [
-                // 【青茄修复·固定标签栏】分类条固定在顶部，不再随内容滚走；
+                // 【轻读修复·固定标签栏】分类条固定在顶部，不再随内容滚走；
                 // 滑到再深的位置也能随时换分类或听书。
                 _topBar(palette),
                 Expanded(
@@ -485,7 +485,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 【青茄修复·分类功能按钮】推荐页直接摆出全部分类入口，点一下切到
+  /// 【轻读修复·分类功能按钮】推荐页直接摆出全部分类入口，点一下切到
   /// 对应分类，不用先滚回顶部。
   Widget _categoryButtons(HomePalette palette) {
     final categories = _catalog.categories
@@ -516,7 +516,7 @@ class _HomePageState extends State<HomePage> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: palette.line, width: 0.6),
                   ),
-                  // 【青茄修复】1.8x 字号下按钮高度不够，整体等比缩放防溢出。
+                  // 【轻读修复】1.8x 字号下按钮高度不够，整体等比缩放防溢出。
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Column(

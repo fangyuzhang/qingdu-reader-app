@@ -1,8 +1,8 @@
-# 青茄阅读 Agent 交接文档
+# 轻读 Agent 交接文档
 
 > ## 本文是历史归档，不是当前状态
 >
-> 当前状态请看 **[`AGENT-HANDOVER-NEXT.md`](AGENT-HANDOVER-NEXT.md)**，逐批改动看 **[`QINGQIE-CHANGES.md`](QINGQIE-CHANGES.md)**。
+> 当前状态请看 **[`AGENT-HANDOVER-NEXT.md`](AGENT-HANDOVER-NEXT.md)**，逐批改动看 **[`QINGDU-CHANGES.md`](QINGDU-CHANGES.md)**。
 >
 > 本文记录的是 2026-10-23 之前那一轮「正文沉浸态 + 全局日夜联动」的完整实现过程，其中的路径、HEAD、测试数字、工作树描述都已过期，**只作为功能背景与踩坑记录阅读**。特别是下面这些说法已经不对：
 >
@@ -314,7 +314,7 @@ adb -s b2f8e975 forward tcp:8080 tcp:8080
 - `lib/services/chapter_text_formatter.dart`
 - `lib/pages/about_page.dart`
 - `pubspec.yaml`
-- `QINGQIE-CHANGES.md`
+- `QINGDU-CHANGES.md`
 - 对应测试文件
 
 依赖状态：
@@ -348,7 +348,7 @@ adb -s b2f8e975 forward tcp:8080 tcp:8080
 4. **分页边界**：分类页用 offset 分页；“换一批”到末尾会回绕首页批次。若上游 offset 不稳定，建议记录 cursor 而不是仅依赖偏移。
 5. **未提交基线**：工作树包含用户既有改动，提交前必须逐文件审查，不要把用户改动误归为本次任务。
 6. **跨章长按选区**仍是独立已知限制：选区几何表按块下标建键会跨章冲突。
-7. 若继续发布：先跑全量测试、构建脚本、APK 校验、真机安装和历史数据保留检查，再更新 `QINGQIE-CHANGES.md`，重新生成归档和 `SHA256SUMS`。
+7. 若继续发布：先跑全量测试、构建脚本、APK 校验、真机安装和历史数据保留检查，再更新 `QINGDU-CHANGES.md`，重新生成归档和 `SHA256SUMS`。
 8. 若接入新的分类来源，优先复用 `CategoryBrowsePage` 的加载器接口，不要绕开它直接在某一个页面里写另一套请求/去重逻辑。
 
 ## 8. 快速接手检查清单
@@ -372,7 +372,7 @@ $adb='D:\APP\DevTools\Android\Sdk\platform-tools\adb.exe'
 
 ## 9. 参考文档
 
-- `QINGQIE-CHANGES.md`：按批次记录 v5 到 v11 的变更、验证和已知限制。
+- `QINGDU-CHANGES.md`：按批次记录 v5 到 v11 的变更、验证和已知限制。
 - `DEVELOPMENT.md`：架构、目录、构建入口和开发边界。
 - `release-archives/v11/VERIFICATION.md`：本轮构建验证摘要。
 - `release-archives/v11/device-acceptance/ACCEPTANCE.md`：本轮真机验收记录。

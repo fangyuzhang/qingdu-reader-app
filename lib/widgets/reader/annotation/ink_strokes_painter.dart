@@ -90,7 +90,7 @@ class InkStrokesPainter extends CustomPainter {
         Color(liveColorValue),
         widthPx(liveBaseWidth, canvasWidth),
       );
-      // 【青茄·阶段三兼容方案】预测笔尖：鸿蒙 Android 兼容层不提供系统级
+      // 【轻读·阶段三兼容方案】预测笔尖：鸿蒙 Android 兼容层不提供系统级
       // 报点预测（Pencil Engine 仅对华为系 HAP 开放），用最近两点速度外
       // 推一小段（≤10dp）缓解感知延迟。只影响书写中的视觉反馈，抬手提交
       // 的数据不含预测点，笔迹最终形状不变。

@@ -135,7 +135,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(requested, 0);
-      expect(find.text('青茄阅读仅提供小说与听书'), findsOneWidget);
+      expect(find.text('轻读仅提供小说与听书'), findsOneWidget);
       expect(find.byKey(const Key('detail_id_row')), findsNothing);
     });
   });

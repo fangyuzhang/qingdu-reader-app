@@ -4,7 +4,7 @@ import '../services/content_rating.dart';
 
 /// 内容分级标签（12+ / 15+）。
 ///
-/// 【青茄重构·新增】只做提示，不做拦截；15+ 用描边强调，12+ 用弱化灰。
+/// 【轻读重构·新增】只做提示，不做拦截；15+ 用描边强调，12+ 用弱化灰。
 class ContentRatingChip extends StatelessWidget {
   const ContentRatingChip({
     super.key,

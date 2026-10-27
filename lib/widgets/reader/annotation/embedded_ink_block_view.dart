@@ -9,7 +9,7 @@ import '../reader_chapter_layout.dart';
 import 'ink_controller.dart';
 import 'ink_strokes_painter.dart';
 
-/// 【青茄·Active Canvas】正文内嵌手写块的渲染层。
+/// 【轻读·Active Canvas】正文内嵌手写块的渲染层。
 ///
 /// 三种形态（见 SCRIBE-NOTES-SPEC.md C1/C2/C4）：
 /// - 草稿画布（[EmbeddedInkCanvas.isDraft]）：半透明虚线边框 + 右下角
@@ -271,7 +271,7 @@ class _EmbeddedInkCanvasState extends State<EmbeddedInkCanvas> {
     );
   }
 
-  /// 【青茄·Scribe 对齐】草稿确认/取消按钮浮在最近笔迹末端（写哪确认
+  /// 【轻读·Scribe 对齐】草稿确认/取消按钮浮在最近笔迹末端（写哪确认
   /// 哪），随每一笔实时移动；尚未书写时落在画布右下角。
   List<Widget> _draftChrome() {
     return [

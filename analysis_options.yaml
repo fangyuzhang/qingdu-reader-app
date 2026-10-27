@@ -29,7 +29,7 @@ linter:
   # `// ignore_for_file: name_of_lint` syntax on the line or in the file
   # producing the lint.
   rules:
-    # 【青茄护栏·防屎山增量】低噪音规则：必须声明返回类型、统一单引号、
+    # 【轻读护栏·防屎山增量】低噪音规则：必须声明返回类型、统一单引号、
     # lambda 该用 tearoff 就用 tearoff。违反会直接挂 analyze，新增代码
     # 不再悄悄引入风格漂移。
     always_declare_return_types: true

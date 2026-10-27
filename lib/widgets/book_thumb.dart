@@ -4,7 +4,7 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 
 import '../services/poster_cache.dart';
 
-/// 【青茄重构·新增】小尺寸书籍封面（列表行、报告页共用）。
+/// 【轻读重构·新增】小尺寸书籍封面（列表行、报告页共用）。
 ///
 /// 统一处理三件容易各写一遍的事：空链接兜底、加载失败兜底、按显示尺寸
 /// 限制解码分辨率（走 [PosterCache] 磁盘缓存，滚动回来不再重新下载）。

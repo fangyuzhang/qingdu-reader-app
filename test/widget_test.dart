@@ -58,7 +58,7 @@ void main() {
     );
     await tester.pump();
 
-    // 【青茄】启动失败不再扣住整页：壳与首页照常渲染（首页自身目录
+    // 【轻读】启动失败不再扣住整页：壳与首页照常渲染（首页自身目录
     // 加载的转圈除外），失败只体现为一条可重试的 SnackBar。
     expect(find.byKey(const Key('home-category-bar')), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);

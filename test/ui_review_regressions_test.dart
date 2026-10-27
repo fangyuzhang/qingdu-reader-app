@@ -233,7 +233,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('本章完').hitTestable(), findsOneWidget);
       expect(find.text('已是最后一章'), findsNothing);
-      // 【青茄】章末「查看本章评论」按钮已删除；入口移到顶部工具栏。
+      // 【轻读】章末「查看本章评论」按钮已删除；入口移到顶部工具栏。
       expect(find.byKey(const ValueKey('reader-chapter-comments')), findsNothing);
       await tester.tap(
         find.byKey(const ValueKey('reader-page-surface')),

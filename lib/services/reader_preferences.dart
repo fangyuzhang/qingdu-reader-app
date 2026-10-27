@@ -135,7 +135,7 @@ class ReaderPreferences {
     this.instantSwipeTurn = false,
     this.tapLeftTurnsNext = false,
     this.tapZones = defaultReaderTapZones,
-    // 【青茄重构】段评来自上游 UGC，内容不可控：青少年版默认关闭，
+    // 【轻读重构】段评来自上游 UGC，内容不可控：青少年版默认关闭，
     // 需要时仍可在「排版」面板自行打开。
     this.showParagraphBubbles = false,
   }) : readingInfoMode = showReadingInfo == false

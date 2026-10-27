@@ -120,7 +120,7 @@ void main() {
     expect(restored.pageMode, ReaderPageMode.paged);
     // A wrong-typed stored value falls back to the default (on).
     expect(restored.continuousReading, isTrue);
-    // 【青茄重构】段评默认关闭（上游 UGC 不可控），读坏值也回落到关闭。
+    // 【轻读重构】段评默认关闭（上游 UGC 不可控），读坏值也回落到关闭。
     expect(restored.showParagraphBubbles, isFalse);
   });
 

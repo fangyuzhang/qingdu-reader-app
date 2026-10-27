@@ -32,7 +32,7 @@ void main() {
       expect(ids, [_id]);
       expect(keywordCalls, 0);
       expect(find.text('精确作品'), findsOneWidget);
-      // 【青茄重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书。
+      // 【轻读重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书。
       expect(find.byType(ChoiceChip), findsNWidgets(3));
       expect(find.text('加载更多'), findsNothing);
       expect(find.text('没有更多了'), findsNothing);

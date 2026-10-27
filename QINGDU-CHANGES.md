@@ -1,4 +1,4 @@
-# 青茄阅读改造说明（基于 fqapp）
+# 轻读改造说明（基于 fqapp）
 
 本仓库是 [fqapp](https://github.com/ch6vip/fqapp) 的**功能增删分支**，不是重写：
 在保留原有「番茄系上游 API + Rust 进程内核心 + Flutter UI」架构的前提下，
@@ -8,8 +8,8 @@
 - 本分支：https://github.com/fangyuzhang/qingqie-reader-app （**私有仓库**）
   - 历史仓库 `fangyuzhang/fqapp-qingqie`、`fangyuzhang/qingqie-reader` 已停止更新，仅作存档，不要往那里推
 - 协议：沿用 **GPL-3.0**（见 `LICENSE`，未改动上游版权与署名）
-- 代码标注约定：新增/修改处以 `【青茄重构·新增】`、`【青茄重构·删除】`、
-  `【青茄重构】` 注释标出，便于审查归属
+- 代码标注约定：新增/修改处以 `【轻读重构·新增】`、`【轻读重构·删除】`、
+  `【轻读重构】` 注释标出，便于审查归属
 
 > **免责声明**：本项目仅用于个人学习与研究，不提供、不分发任何内容，
 > 不绕过任何付费/版权机制。请勿用于任何侵犯版权的用途。
@@ -85,7 +85,7 @@ v5 已进一步删除短剧、漫剧、漫画的客户端页面、组件、下�
 
 笔记页右上角「导出长图」：`lib/services/note_card_exporter.dart` 用
 `PictureRecorder` 直接绘制 1080 宽 PNG（两趟排版：先量后画），
-输出到应用文档目录 `qingqie/exports/notes_<时间戳>.png` 并在 SnackBar 提示路径。
+输出到应用文档目录 `qingdu/exports/notes_<时间戳>.png` 并在 SnackBar 提示路径。
 不引入图片处理依赖，也不需要分享插件。
 
 ## 三、测试
@@ -99,7 +99,7 @@ flutter test             # 1954 passed / 10 skipped
 
 - `test/reader_annotation_test.dart`（5 项）：批注块插入位置、不污染正文坐标、
   分页整块不切断、渲染与折叠、坏数据拒绝
-- `test/qingqie_reader_features_test.dart`（10 项）：分级判定、书架分组、
+- `test/qingdu_reader_features_test.dart`（10 项）：分级判定、书架分组、
   笔记页空态、分级标签渲染、批注字段回读
 
 因删除短剧而同步更新的上游测试（改的是测试数据与结构假设，不是放宽断言）：
@@ -160,9 +160,9 @@ flutter test             # 1954 passed / 10 skipped
 
 ## 6.1 视觉系统
 
-| 项 | 旧（番茄橙） | 新（青茄绿） |
+| 项 | 旧（番茄橙） | 新（轻读绿） |
 |---|---|---|
-| 主色 | `#EF5038` 番茄红 | `#2FA98C` 青茄绿（strong `#1F8A72`/dark `#4FC3A4`） |
+| 主色 | `#EF5038` 番茄红 | `#2FA98C` 轻读绿（strong `#1F8A72`/dark `#4FC3A4`） |
 | 点缀 | 无 | `#E2603F` 珊瑚橙（15+ 标记、重点） |
 | 浅色底 | `#FCFAF7` 暖白 | `#FAFBF6` 带绿调的奶油白 |
 | 深色底 | `#151517` | `#0F1413` 墨绿黑 |
@@ -1081,7 +1081,7 @@ flutter test             # 1954 passed / 10 skipped
 
 - 笔记时间线卡片不再展示：①分类（文件夹 + 分类名，如 QA_C）chip——分类仍保留在数据与编辑器中，仅卡片内不渲染，`_MetaChip` 组件随之移除；②卡片内时间戳（如 2026-10-21 13:04）——章节名保留；时间线左侧的日期分组标签（10/21）不变。
 - 用户想法（thought）增加与原文引用块同款的背景图层：同一 badge 色 8% 透明底、8px 圆角、同内边距，视觉与原文块成对。
-- 测试适配（行为变更随产品要求）：`qingqie_reader_features_test` 时间戳断言改为 findsNothing（用例更名 hides timestamps）；`notes_page_test` 多选用例末尾的第三张卡片断言改为先拖动列表滚动到可见再断言（测试视口 600dp 下第三张卡片位于惰性列表缓存外，属用例脆弱性而非功能回归）。
+- 测试适配（行为变更随产品要求）：`qingdu_reader_features_test` 时间戳断言改为 findsNothing（用例更名 hides timestamps）；`notes_page_test` 多选用例末尾的第三张卡片断言改为先拖动列表滚动到可见再断言（测试视口 600dp 下第三张卡片位于惰性列表缓存外，属用例脆弱性而非功能回归）。
 - 验证：`flutter analyze` 0 问题；全量 `flutter test` 1522 通过 / 10 跳过 / 0 失败；真机复核笔记卡片（西游记/三体）：分类 chip 与时间戳消失、想法背景图层与原文块同款。
 
 ---
@@ -1429,7 +1429,7 @@ flutter test             # 1954 passed / 10 skipped
 
 # 七十七、可解决问题清零轮（用户指令：按推荐处理）
 
-- **长图导出直存系统下载**（70 批记录的 UX 短板）：DownloadsPlugin 泛化 bytes+mime 新增 saveImage；NoteCardExporter 优先走下载通道、宿主无插件/写入失败诚实降级私有目录并回报 public=false，SnackBar 文案区分「系统下载/应用目录」。**真机发现并修复 MIUI 深坑**：MediaStore 图片条目缺 WIDTH/HEIGHT 时被 ROM 在转正后静默清理（insert/write 全部返回成功但文件消失、MediaStore 无记录）——图片元数据必带宽高 + 转正后落盘实存校验（不存在即删行抛错走降级，绝不虚报成功）。真机复验：qingqie_notes_*.png 出现在 /storage/emulated/0/Download/ 且 MediaStore 可查。
+- **长图导出直存系统下载**（70 批记录的 UX 短板）：DownloadsPlugin 泛化 bytes+mime 新增 saveImage；NoteCardExporter 优先走下载通道、宿主无插件/写入失败诚实降级私有目录并回报 public=false，SnackBar 文案区分「系统下载/应用目录」。**真机发现并修复 MIUI 深坑**：MediaStore 图片条目缺 WIDTH/HEIGHT 时被 ROM 在转正后静默清理（insert/write 全部返回成功但文件消失、MediaStore 无记录）——图片元数据必带宽高 + 转正后落盘实存校验（不存在即删行抛错走降级，绝不虚报成功）。真机复验：qingdu_notes_*.png 出现在 /storage/emulated/0/Download/ 且 MediaStore 可查。
 - **评论模型去重**（71 批审查唯一真实重复）：book_comment/playlet_comment 的上游信封解包前置（common→content→text/配图→user_info→base_info，约 20 行 ×2）提取为 book_comment.dart 的公开 `CommentEnvelope`/`parseCommentEnvelope`，stat/expand 等个性化块留在各自管线；playlet 移除冗余 import。
 - **交接文档补账**（71→76 五批未记）：AGENT-HANDOVER-NEXT 新增 0.35 节（Active Canvas 全量交付/高刷/屏幕适配/反屎山/新建标签五批速览）、速览表更新到 1593 基线与第 76 批。
 - **残留扫描**：lib/ 无 print/debugPrint 残留（仅 kept_alive_pages_test 一处既有诊断输出，保留）。

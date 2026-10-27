@@ -10,7 +10,7 @@
 
 ## 1. 项目与技术基线
 
-- 青茄阅读是面向 12–18 岁的 Android 阅读客户端，只提供小说阅读与听书。短剧、漫剧、漫画已从全部用户入口和客户端页面删除；底层 CENC/Media3 与 `libshortplay_crypto.so` 仅保留给加密听书和正文解密。Flutter UI 通过 flutter_rust_bridge 调用进程内 Rust 核心 `fqapi_core`；`127.0.0.1:8080` loopback 服务承载内置 Web 阅读页。无需 root，不部署独立后端进程。
+- 轻读是面向 12–18 岁的 Android 阅读客户端，只提供小说阅读与听书。短剧、漫剧、漫画已从全部用户入口和客户端页面删除；底层 CENC/Media3 与 `libshortplay_crypto.so` 仅保留给加密听书和正文解密。Flutter UI 通过 flutter_rust_bridge 调用进程内 Rust 核心 `fqapi_core`；`127.0.0.1:8080` loopback 服务承载内置 Web 阅读页。无需 root，不部署独立后端进程。
 - 提供只读的番茄账号导入（网页登录后读取书架/历史/进度，不回写账号）；除此之外不提供登录或上游账号写操作。已裁撤的追剧、点赞、分享等入口不作为待办恢复。已有本机书架与详情页收藏按现有产品范围保留；没有真实能力时不放占位控件。
 - 基线：Flutter **3.47.7 stable**（Dart 3.13.5）、pubspec SDK **^3.12.2**、Rust stable；FRB 的 Rust crate、Dart 包和 codegen **统一固定 2.13.0**。
 - Android：SDK 36、NDK **28.2.13676358**、JDK 17、Gradle **9.1.0**；仅构建 `arm64-v8a`。原生 C CENC 库由 CMake 生成 `libshortplay_crypto.so`（名称沿用上游，实际服务加密听书），原生库须满足 **16 KiB** 对齐。

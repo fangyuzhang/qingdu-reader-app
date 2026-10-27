@@ -67,7 +67,7 @@ class AboutPage extends StatelessWidget {
           Column(
             children: [
               Text(
-                '青茄阅读',
+                '轻读',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,

@@ -9,7 +9,7 @@ import 'api_client.dart';
 
 /// 书单条目解析出来的「上游可读书籍」。
 ///
-/// 【青茄修复·新增】首页点书要能直接进阅读器，就必须先把《小王子》这类
+/// 【轻读修复·新增】首页点书要能直接进阅读器，就必须先把《小王子》这类
 /// 书单条目对到书城里真实存在的 [MediaItem]。这里把结果落成一个小对象，
 /// 既方便 JSON 持久化，也避免每次进首页都重新搜索。
 @immutable
@@ -87,7 +87,7 @@ class CuratedResolver {
 
   bool _loaded = false;
 
-  /// 【青茄修复·新增】解析出新条目后自增，首页据此重绘真实封面。
+  /// 【轻读修复·新增】解析出新条目后自增，首页据此重绘真实封面。
   final ValueNotifier<int> changes = ValueNotifier<int>(0);
 
   /// 可注入的搜索实现：默认把各 tab 的结果拍平成一个列表。
@@ -185,7 +185,7 @@ class CuratedResolver {
   }) async {
     // 必须先读盘，否则首帧 prefetch 会把已缓存的书重新搜一遍。
     await load();
-    // 【青茄修复】队列按 book.id 去重：调用方会把「今日荐读」插到最前，
+    // 【轻读修复】队列按 book.id 去重：调用方会把「今日荐读」插到最前，
     // 它同时也在 books 里，不去重会让同一本书被两个 worker 同时解析。
     final seen = <String>{};
     final queue = books
@@ -244,7 +244,7 @@ class CuratedResolver {
     String author, {
     bool preferAudio = false,
   }) {
-    // 【青茄修复·听书分类】有声书优先在音频源里按书名匹配；匹配不到
+    // 【轻读修复·听书分类】有声书优先在音频源里按书名匹配；匹配不到
     // 再退回文字书（能读总比打不开强），匹配逻辑完全一致。
     // 注意这层要放在「无文字书源」的兜底之前：搜索可能只返回音频源，
     // 不能因为文字书列表为空就把音频结果一起丢掉。
@@ -265,7 +265,7 @@ class CuratedResolver {
     if (books.isEmpty) return null;
 
     final target = _normalize(title);
-    // 【青茄修复】书名匹配不上时返回 null（调用方回退搜索页），
+    // 【轻读修复】书名匹配不上时返回 null（调用方回退搜索页），
     // 不再赌「第一条结果」——宁可让用户挑，也不能打开一本不相干的书。
     if (target.isEmpty) return null;
 

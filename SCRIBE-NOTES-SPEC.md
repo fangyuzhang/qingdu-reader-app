@@ -1,4 +1,4 @@
-# 青茄 × Kindle Scribe Active Canvas 复刻 · 交互规格（v1）
+# 轻读 × Kindle Scribe Active Canvas 复刻 · 交互规格（v1）
 
 > 本文是唯一有效规格。v1.1（2026-10-26）：经双 agent 交叉核验修订——EPUB 单独定义、备注/划线关系澄清、边距联动 v1 口径、阅读界面分享入口、去技术化措辞。只描述用户感知/操作路径/系统反馈/验收标准；实现细节见代码与 QINGQIE-CHANGES.md 第 74 批。
 > 「默认决策/假设」均已就地标注，并在 B 节汇总。

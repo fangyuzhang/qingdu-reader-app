@@ -76,7 +76,7 @@ class ReadingReportExporter {
 
     final dateText =
         '${now.year}.${now.month.toString().padLeft(2, '0')}.${now.day.toString().padLeft(2, '0')}';
-    final footer = _paragraph('— 青茄阅读 · $dateText —', size: 22, color: _muted);
+    final footer = _paragraph('— 轻读 · $dateText —', size: 22, color: _muted);
     final bookLines = [
       for (final book in topBooks.take(2))
         _paragraph(
@@ -237,7 +237,7 @@ class ReadingReportExporter {
     if (bytes == null) throw StateError('图片编码失败');
 
     final dir = await getApplicationDocumentsDirectory();
-    final outDir = Directory('${dir.path}/qingqie/exports');
+    final outDir = Directory('${dir.path}/qingdu/exports');
     if (!await outDir.exists()) {
       await outDir.create(recursive: true);
     }

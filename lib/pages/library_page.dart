@@ -90,7 +90,7 @@ class LibraryPage extends StatefulWidget {
 class _LibraryPageState extends State<LibraryPage> {
   int _tab = 0;
 
-  /// 【青茄重构·新增】书架分组筛选：all / reading / want / done。
+  /// 【轻读重构·新增】书架分组筛选：all / reading / want / done。
   String _group = 'all';
   BookshelfLayout _layout = BookshelfLayout.grid;
   int _layoutGeneration = 0;
@@ -138,7 +138,7 @@ class _LibraryPageState extends State<LibraryPage> {
     if (!mounted) return;
     final history = LibraryStore.instance.historySnapshot();
     setState(() {
-      // 【青茄重构·删除】产品已删除 短剧/漫剧/漫画 三类内容入口，
+      // 【轻读重构·删除】产品已删除 短剧/漫剧/漫画 三类内容入口，
       // 书架（收藏）与浏览历史不再展示这三类条目；数据保留在本地，
       // 二期恢复分类时移除本过滤即可。
       const supportedKinds = {'book', 'audio'};
@@ -770,7 +770,7 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 2026-10-13 按用户要求删掉排序 / 筛选 / 编辑三个入口：排序退回固定「最近
   /// 阅读优先」，类型筛选整个移除，编辑改由卡片长按进入（见 `_longPress`）。
   /// 页头因此少一行；只剩两个控件，[Row] 即可放下，无需再折行。
-  /// 【青茄重构·新增】书架分组切换：在读 / 想读 / 读完。
+  /// 【轻读重构·新增】书架分组切换：在读 / 想读 / 读完。
   ///
   /// 分组是筛选而非分类容器——一本书只属于一个分组，默认「在读」，
   /// 老记录没有分组字段时按在读兜底（见 [ShelfStatus.normalize]）。
@@ -1169,7 +1169,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         ? _removeFromShelf
                         : _deleteHistory,
                   ),
-                  // 【青茄重构·新增】批量改分组（仅在书架 tab 出现）。
+                  // 【轻读重构·新增】批量改分组（仅在书架 tab 出现）。
                   if (removing)
                     _BottomAction(
                       key: const Key('shelf-group-action'),
@@ -1264,7 +1264,7 @@ class _ShelfEntry {
   final int? episode;
   final bool importedResume;
 
-  /// 【青茄重构·新增】书架分组（在读/想读/读完）；浏览历史恒为在读占位。
+  /// 【轻读重构·新增】书架分组（在读/想读/读完）；浏览历史恒为在读占位。
   final String status;
 
   const _ShelfEntry({

@@ -87,8 +87,8 @@ void main() {
     await tester.pumpWidget(app(HomePage(catalog: catalog)));
     await tester.pumpAndSettle();
 
-    // 【青茄】问候语已删，顶栏固定：分类条 + 搜索按钮全程可见。
-    expect(find.text('青茄 · 青少年书房'), findsNothing);
+    // 【轻读】问候语已删，顶栏固定：分类条 + 搜索按钮全程可见。
+    expect(find.text('轻读 · 青少年书房'), findsNothing);
     expect(find.byKey(const Key('home-category-bar')), findsOneWidget);
     expect(find.byKey(const Key('home-today-pick')), findsOneWidget);
     expect(find.byKey(const Key('home-cat-button-classic')), findsOneWidget);
@@ -242,7 +242,7 @@ void main() {
 
     final pick = catalog.pickOfDay()!;
     CuratedResolver.instance.search = (query) async {
-      // 【青茄】只有今日荐读慢（让点击出现 spinner）；其余书立即返回空，
+      // 【轻读】只有今日荐读慢（让点击出现 spinner）；其余书立即返回空，
       // prefetch 的整条队列不会在测试结束时留下未到期的定时器。
       if (query != pick.keyword) return const <MediaItem>[];
       await Future<void>.delayed(const Duration(seconds: 2));

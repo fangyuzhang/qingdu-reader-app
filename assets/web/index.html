@@ -620,7 +620,7 @@
                         const bookID = params.get("book_id");
                         const shareType = params.get("share_type") || "0";
                         if (!["0", "1", "3"].includes(shareType)) {
-                            throw new Error("青茄阅读仅支持小说与听书");
+                            throw new Error("轻读仅支持小说与听书");
                         }
                         const tab = shareType === "1" ? "听书" : "小说";
                         if (bookID) location.href = `/detail.html?source=${encodeURIComponent("番茄")}&book_id=${encodeURIComponent(bookID)}&tab=${encodeURIComponent(tab)}`;

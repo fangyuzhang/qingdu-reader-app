@@ -143,14 +143,14 @@ class LibraryStore implements ReaderStore {
     // Hive has a directory now, so optional boxes may be opened too.
     ReaderUnderlineStore.hiveReady = true;
     ReaderMarkerTypeStore.hiveReady = true;
-    // 【青茄重构·修复】批注盒与划线盒同一时机就绪：此前漏了这一行，
+    // 【轻读重构·修复】批注盒与划线盒同一时机就绪：此前漏了这一行，
     // 导致 ReaderAnnotationStore._box() 恒为 null，写批注时抛
     // StateError('批注存储不可用')，阅读器只能提示「保存失败，请重试」。
     ReaderAnnotationStore.hiveReady = true;
     // 【第 3 组】墨迹盒同一时机就绪（同上一行的先例：漏接则读写全部空转，
     // 批注「看似成功」实则没有落盘）。
     InkAnnotationStore.hiveReady = true;
-    // 【青茄·Active Canvas】内嵌手写块盒同一时机就绪（同一先例）。
+    // 【轻读·Active Canvas】内嵌手写块盒同一时机就绪（同一先例）。
     ReaderInkBlockStore.hiveReady = true;
     await _migrateFromSp();
     // Copy typed legacy media before a novel can reuse its original key.

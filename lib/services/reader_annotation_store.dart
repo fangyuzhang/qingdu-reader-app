@@ -63,7 +63,7 @@ class AnnotationDraft {
 
 /// 一条本地批注/书摘（蜗牛读书式：选中文字 + 想法 + 位置）。
 ///
-/// 【青茄重构·新增】划线与本存储的分工：
+/// 【轻读重构·新增】划线与本存储的分工：
 /// * `reader_underline_store.dart` 保存「划线」——只有位置与原文，没有想法；
 /// * 本存储保存「批注」（带想法，行内批注块展示）与「书摘」（收藏的句子）。
 /// 两个 Box 的键空间不同（划线是 4 元组 / `r` 前缀，这里是 `a` 前缀），
@@ -94,7 +94,7 @@ class ReaderAnnotation {
   static const String kTypeAnnot = 'annot';
   static const String kTypeExcerpt = 'excerpt';
 
-  /// 【青茄·Active Canvas】打字备注：正文里只显示图标行（不占正文空间），
+  /// 【轻读·Active Canvas】打字备注：正文里只显示图标行（不占正文空间），
   /// thought = 备注文字。
   static const String kTypeNote = 'note';
 

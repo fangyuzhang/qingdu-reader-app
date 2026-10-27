@@ -102,7 +102,7 @@ class SettingsPage extends StatelessWidget {
       ),
     ];
 
-    // 分类底色跟着品牌走：默认青茄绿，听书用珊瑚橙点一下（品牌另一半），
+    // 分类底色跟着品牌走：默认轻读绿，听书用珊瑚橙点一下（品牌另一半），
     // 服务/关于这类系统项退到 muted，形成层级而不是六种颜色互相抢。
     Color tintOf(SettingsCategory category) => switch (category.title) {
       '听书' => HomePalette.highlight,

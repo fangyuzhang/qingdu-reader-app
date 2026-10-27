@@ -39,7 +39,7 @@ void main() {
     );
 
     expect(saved.public, isFalse, reason: '无插件宿主必须诚实降级');
-    expect(saved.path, contains('qingqie/exports'));
+    expect(saved.path, contains('qingdu/exports'));
     expect(await File(saved.path).exists(), isTrue);
     expect(await File(saved.path).length(), greaterThan(100));
     await dir.delete(recursive: true);

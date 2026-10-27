@@ -155,7 +155,7 @@ void main() {
     'fixed categories request their own source and filter copied hits',
     (tester) async {
       final requests = <(String, int, int)>[];
-      // 【青茄重构】删除 短剧/漫剧/漫画 后仅保留 综合/小说/听书；
+      // 【轻读重构】删除 短剧/漫剧/漫画 后仅保留 综合/小说/听书；
       // mixed 仍含全部种类，用于验证三类被过滤、其余保留。
       final mixed = [
         for (final kind in ['book', 'video', 'manju', 'manga', 'audio'])
@@ -257,7 +257,7 @@ void main() {
       await tester.pumpWidget(
         _app((query, {required int tabType, required int offset}) async {
           requests.add((tabType, offset));
-          // 【青茄重构】漫画分类已删除，改用听书（tabType 2）验证同类行为。
+          // 【轻读重构】漫画分类已删除，改用听书（tabType 2）验证同类行为。
           if (tabType == 1) {
             return [
               SearchTab(
@@ -342,7 +342,7 @@ void main() {
   );
 
   testWidgets(
-    // 【青茄重构】漫剧/短剧分类已删除，改用 小说/听书 验证同一行为：
+    // 【轻读重构】漫剧/短剧分类已删除，改用 小说/听书 验证同一行为：
     // 分类内按 kind 过滤、翻页游标独立推进、跨分类结果互不串扰。
     'filtered-empty pages continue independently of other categories',
     (tester) async {
@@ -465,7 +465,7 @@ void main() {
       final requests = <(int, int)>[];
       var attempts = 0;
       await tester.pumpWidget(
-        // 【青茄重构】漫画分类已删除，改用听书（tabType 2）验证：
+        // 【轻读重构】漫画分类已删除，改用听书（tabType 2）验证：
         // 某分类的首屏错误不影响其他分类，重试只重试失败的那个分类。
         _app((query, {required int tabType, required int offset}) async {
           requests.add((tabType, offset));
@@ -536,7 +536,7 @@ void main() {
   testWidgets(
     'out of order category responses keep results and loading isolated',
     (tester) async {
-      // 【青茄重构】漫画分类已删除，改用小说（tabType 3）验证同一行为：
+      // 【轻读重构】漫画分类已删除，改用小说（tabType 3）验证同一行为：
       // 两个分类的乱序响应互不污染，各自的加载态与结果保持隔离。
       final novel = Completer<List<SearchTab>>();
       final audio = Completer<List<SearchTab>>();
@@ -647,7 +647,7 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(find.text('搜索历史'), findsOneWidget);
-    // 【青茄重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书 三个。
+    // 【轻读重构】搜索分类删除 短剧/漫剧/漫画 后为 综合/小说/听书 三个。
     expect(find.byType(ChoiceChip), findsNWidgets(3));
     await tester.tap(find.text('测试'));
     await tester.pump();

@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fqapp/services/reading_stats_store.dart';
 
-/// 【青茄重构·新增】阅读字数 / 连续打卡统计的单元测试。
+/// 【轻读重构·新增】阅读字数 / 连续打卡统计的单元测试。
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 

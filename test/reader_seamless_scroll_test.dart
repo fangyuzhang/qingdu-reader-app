@@ -7,7 +7,7 @@ import 'package:fqapp/pages/reader_page.dart';
 
 import 'support/fakes.dart';
 
-/// 【青茄】上下滚动模式跨章无缝：不点任何按钮，往下滚就能直接滚进下一章，
+/// 【轻读】上下滚动模式跨章无缝：不点任何按钮，往下滚就能直接滚进下一章，
 /// 视口越过章节边界后进度记录静默切到下一章；章末不再有
 /// 「上一章 / 下一章 / 本章评论」按钮。
 Finder get _list => find.byKey(const ValueKey('reader-paragraph-list'));

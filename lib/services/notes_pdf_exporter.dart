@@ -71,7 +71,7 @@ class NotesPdfExporter {
     final pxPerPage =
         (contentH * pixelWidth / contentW).floor().clamp(1, pixelHeight);
 
-    final pdf = pw.Document(title: documentTitle, author: '青茄阅读');
+    final pdf = pw.Document(title: documentTitle, author: '轻读');
     final pages = (pixelHeight / pxPerPage).ceil().clamp(1, 200);
     for (var i = 0; i < pages; i++) {
       final top = i * pxPerPage;
@@ -100,7 +100,7 @@ class NotesPdfExporter {
     final pdfBytes = await pdf.save();
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/qingqie_notes_$stamp.pdf');
+    final file = File('${dir.path}/qingdu_notes_$stamp.pdf');
     await file.writeAsBytes(pdfBytes, flush: true);
     return file.path;
   }

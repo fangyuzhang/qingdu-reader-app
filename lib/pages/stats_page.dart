@@ -36,9 +36,9 @@ class _StatsPageState extends State<StatsPage> {
   Map<String, Map<String, double>> _readTimeMap = {};
   bool _loading = true;
 
-  /// 【青茄重构·新增】全书架批注数（笔记页入口的计数）。
+  /// 【轻读重构·新增】全书架批注数（笔记页入口的计数）。
 
-  /// 【青茄重构·新增】累计阅读字数与连续打卡天数。
+  /// 【轻读重构·新增】累计阅读字数与连续打卡天数。
   int _totalChars = 0;
   int _streakDays = 0;
   // Derived aggregates, computed once per load so build() (which may be
@@ -79,7 +79,7 @@ class _StatsPageState extends State<StatsPage> {
       ..addListener(_scheduleStoreReload);
     _readTimeChanges = LibraryStore.instance.readTimeListenable
       ..addListener(_scheduleStoreReload);
-    // 【青茄重构·新增】字数/打卡来自独立存储，单独监听。
+    // 【轻读重构·新增】字数/打卡来自独立存储，单独监听。
     ReadingStatsStore.instance.changes.addListener(_reloadReadingTotals);
     unawaited(
       ReadingStatsStore.instance.init().then((_) {
@@ -537,7 +537,7 @@ class _Card extends StatelessWidget {
   final String? subtitle;
   final Widget child;
 
-  /// 【青茄重构·新增】整卡可点（目前用于「阅读热力图 → 我的阅读」）。
+  /// 【轻读重构·新增】整卡可点（目前用于「阅读热力图 → 我的阅读」）。
   final VoidCallback? onTap;
 
   const _Card({
@@ -627,7 +627,7 @@ class _OverviewCard extends StatelessWidget {
   final double total;
   final int activeDays;
 
-  /// 【青茄重构·新增】累计阅读字数与连续打卡天数。
+  /// 【轻读重构·新增】累计阅读字数与连续打卡天数。
   final int totalChars;
   final int streakDays;
 
@@ -646,7 +646,7 @@ class _OverviewCard extends StatelessWidget {
       ('今日', today > 0 ? _formatDuring(today) : '--'),
       ('本月', month > 0 ? _formatDuring(month) : '--'),
       ('总计', _formatDuring(total)),
-      // 【青茄重构·新增】字数折算按阅读时长估算，见 ReadingStatsStore。
+      // 【轻读重构·新增】字数折算按阅读时长估算，见 ReadingStatsStore。
       ('累计字数', totalChars > 0 ? formatCharacterCount(totalChars) : '--'),
     ];
     final palette = HomePalette.of(context);

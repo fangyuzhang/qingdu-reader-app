@@ -1,4 +1,4 @@
-# Qingqie Reading - verified release APK build (Windows PowerShell).
+# Qingdu Reading - verified release APK build (Windows PowerShell).
 #
 # This script intentionally refuses to produce an unsigned or debug-signed APK.
 # It rebuilds the Android Rust core, builds an arm64-only release package,

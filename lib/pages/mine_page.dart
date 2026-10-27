@@ -31,7 +31,7 @@ class MinePage extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
         actions: [
-          // 【青茄·日夜切换】放在设置左侧：一键在深色 / 亮色之间切换，
+          // 【轻读·日夜切换】放在设置左侧：一键在深色 / 亮色之间切换，
           // 与设置页「外观」、阅读页夜间按钮写的是同一个全局偏好。
           ValueListenableBuilder<ThemeMode>(
             valueListenable: themeModeNotifier,
@@ -69,7 +69,7 @@ class MinePage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 【青茄重构·新增】快捷入口：章节缓存 + 关于
+        // 【轻读重构·新增】快捷入口：章节缓存 + 关于
         Row(
           children: [
             _buildShortcutTile(

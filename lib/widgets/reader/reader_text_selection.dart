@@ -297,7 +297,7 @@ class ReaderBlockMarkLayer extends StatefulWidget {
   final ReaderTextSelection? selection;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
-  /// 【青茄重构·新增】批注/书摘的章节空间范围，以红色 2px 下划线绘制
+  /// 【轻读重构·新增】批注/书摘的章节空间范围，以红色 2px 下划线绘制
   /// （蜗牛读书式批注标识）。与划线的 [rangeUnderlines] 同一坐标空间。
   final List<ReaderRangeUnderline> annotationRanges;
 
@@ -521,7 +521,7 @@ class ReaderBlockMarkPainter extends CustomPainter {
   final (int, int)? selectionRange;
   final List<ReaderRangeUnderline> rangeUnderlines;
 
-  /// 【青茄重构·新增】批注/书摘范围（红色下划线）。
+  /// 【轻读重构·新增】批注/书摘范围（红色下划线）。
   final List<ReaderRangeUnderline> annotationRanges;
   final Color washColor;
   final Color underlineColor;
